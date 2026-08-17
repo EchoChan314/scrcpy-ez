@@ -1,0 +1,16 @@
+# 备份文件（迭代过程中的 .bak 快照）
+*.bak
+*.bak.*
+
+# 构建产物
+prebuilt/
+build/
+dist/
+
+# 临时文件
+*.log
+*.tmp
+.gradle/
+
+# local build config
+local.properties
