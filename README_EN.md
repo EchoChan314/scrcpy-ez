@@ -72,10 +72,33 @@ In apps that support clipboard images, you can **paste and send** (long-press th
 | **Ctrl+F** | Toggle the mirror status overlay (drag it with **Alt** held) |
 | **Ctrl+G** | Save a copied image from PC to the device gallery |
 | **Ctrl+H** | Turn off the device screen during mirroring to save power (the device may enter power-saving mode and limit refresh rate) |
+| **Ctrl+T** | Toggle the mirror window always-on-top (or hold **Alt** and click the status lamp on the left of the overlay — same effect) |
 | **Alt+F** | Toggle fullscreen |
+
+> 💡 **Pin indicator**: the status lamp on the left of the overlay — orange when pinned, gray otherwise. Hold **Alt** and click the lamp to toggle window pinning (same as **Ctrl+T**); click again to unpin.
+
+<p align="center"><img src="images/overlay-indicator-1.png" alt="Pin indicator 1" width="380"></p>
+
+<p align="center"><img src="images/overlay-indicator-2.png" alt="Pin indicator 2" width="380"></p>
 
 ---
 
+## 📜 Version History
+
+| Version | Highlights |
+|---|---|
+| **v1.8** | Ctrl+T window always-on-top toggle, glowing status lamp in the overlay (Alt+click the lamp toggles it too) |
+| **v1.7** | ABR interaction/idle dual thresholds (video no longer stuck at 1M — relaxed thresholds when idle, sensitive again on interaction), low-bitrate protection |
+| **v1.6** | ABR delay baseline re-zero (negative pollution fix), single-animation burst detection (tablet stutter fixed), faster bitrate recovery, bat overhaul (mojibake/wizard/shortcuts) |
+| **v1.5** | TSF empty-document block (IME never steals keys, apps stay Chinese), legacy device compatibility (Android 9- auto conservative profile) |
+| v1.4 | GL full-rate fix (true 120fps), full fps ladder, overlay S-shape + Ctrl+F toggle |
+| v1.3.1 | Status overlay (actual/target fps + live bitrate + USB/WIFI) |
+| v1.3 | ABR dual-dimension (bitrate+fps), 90fps buffer partner tier |
+| v1.2 | uhid keyboard (direct Chinese input), image clipboard sync (PR #6676), Ctrl+G gallery save |
+| v1.1 | Mirror loop + USB/WiFi auto switching |
+| v1.0 | First enhanced build |
+
+---
 
 ## 🛠️ Build (from source)
 
