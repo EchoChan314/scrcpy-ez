@@ -87,16 +87,8 @@ In apps that support clipboard images, you can **paste and send** (long-press th
 
 | Version | Highlights |
 |---|---|
-| **v1.8** | Ctrl+T window always-on-top toggle, glowing status lamp in the overlay (Alt+click the lamp toggles it too) |
-| **v1.7** | ABR interaction/idle dual thresholds (video no longer stuck at 1M — relaxed thresholds when idle, sensitive again on interaction), low-bitrate protection |
-| **v1.6** | ABR delay baseline re-zero (negative pollution fix), single-animation burst detection (tablet stutter fixed), faster bitrate recovery, bat overhaul (mojibake/wizard/shortcuts) |
-| **v1.5** | TSF empty-document block (IME never steals keys, apps stay Chinese), legacy device compatibility (Android 9- auto conservative profile) |
-| v1.4 | GL full-rate fix (true 120fps), full fps ladder, overlay S-shape + Ctrl+F toggle |
-| v1.3.1 | Status overlay (actual/target fps + live bitrate + USB/WIFI) |
-| v1.3 | ABR dual-dimension (bitrate+fps), 90fps buffer partner tier |
-| v1.2 | uhid keyboard (direct Chinese input), image clipboard sync (PR #6676), Ctrl+G gallery save |
-| v1.1 | Mirror loop + USB/WiFi auto switching |
-| v1.0 | First enhanced build |
+| **v1.0.1** | Ctrl+T window always-on-top toggle, glowing status lamp in the overlay (orange when pinned, gray otherwise; Alt+click the lamp toggles it too) |
+| **v1.0** | Initial release: direct typing (UHID keyboard), image clipboard (PR #6676 + Ctrl+G gallery save), responsive mirroring (ABR interaction/idle dual thresholds), TSF IME handling, legacy device support, mirror loop + USB/WiFi auto switching |
 
 ---
 
