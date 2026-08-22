@@ -51,7 +51,9 @@ else
         --extra-cflags="-O2 -fPIC"
         --disable-programs
         --disable-doc
-        --disable-swscale
+        # scrcpy-ez: libswscale + BMP decoder + MJPEG encoder are required
+        # by image_convert.c (clipboard image conversion)
+        --enable-swscale
         --disable-avfilter
         --disable-network
         --disable-everything
@@ -71,6 +73,8 @@ else
         --enable-decoder=aac
         --enable-decoder=flac
         --enable-decoder=png
+        --enable-decoder=bmp
+        --enable-encoder=mjpeg
         --enable-protocol=file
         --enable-demuxer=image2
         --enable-parser=png

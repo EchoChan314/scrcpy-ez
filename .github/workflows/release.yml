@@ -26,7 +26,9 @@ jobs:
           java-version: '17'
 
       - name: Test scrcpy-server
-        run: release/test_server.sh
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/test_server.sh
 
   build-scrcpy-server:
     runs-on: ubuntu-latest
@@ -43,7 +45,9 @@ jobs:
           java-version: '17'
 
       - name: Build
-        run: release/build_server.sh
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_server.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -64,7 +68,9 @@ jobs:
           java-version: '17'
 
       - name: Build without gradle
-        run: server/build_without_gradle.sh
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          server/build_without_gradle.sh
 
   test-client:
     runs-on: ubuntu-latest
@@ -78,7 +84,7 @@ jobs:
           sudo apt update
           sudo apt install -y meson ninja-build nasm ffmpeg libavcodec-dev \
              libavdevice-dev libavformat-dev libavutil-dev libswresample-dev \
-             libusb-1.0-0 libusb-1.0-0-dev libv4l-dev \
+             libswscale-dev libusb-1.0-0 libusb-1.0-0-dev libv4l-dev \
              libasound2-dev libpulse-dev \
              libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
              libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
@@ -89,10 +95,12 @@ jobs:
         # SDL3 is not available in Ubuntu yet
       - name: Install SDL3
         run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
           app/deps/sdl.sh linux native shared
 
       - name: Test
         run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
           export PKG_CONFIG_PATH="$PWD"/app/deps/work/install/linux-native-shared/lib/pkgconfig
           export LD_LIBRARY_PATH="$PWD"/app/deps/work/install/linux-native-shared/lib
           release/test_client.sh
@@ -118,7 +126,7 @@ jobs:
           sudo apt update
           sudo apt install -y meson ninja-build nasm ffmpeg libavcodec-dev \
              libavdevice-dev libavformat-dev libavutil-dev libswresample-dev \
-             libusb-1.0-0 libusb-1.0-0-dev libv4l-dev \
+             libswscale-dev libusb-1.0-0 libusb-1.0-0-dev libv4l-dev \
              libasound2-dev libpulse-dev \
              libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
              libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
@@ -127,7 +135,9 @@ jobs:
              libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev
 
       - name: Build
-        run: release/build_linux.sh x86_64
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_linux.sh x86_64
 
       # upload-artifact does not preserve permissions
       - name: Tar
@@ -156,7 +166,9 @@ jobs:
              mingw-w64 mingw-w64-tools libz-mingw-w64-dev
 
       - name: Build
-        run: release/build_windows.sh 32
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_windows.sh 32
 
       # upload-artifact does not preserve permissions
       - name: Tar
@@ -185,7 +197,9 @@ jobs:
              mingw-w64 mingw-w64-tools libz-mingw-w64-dev
 
       - name: Build
-        run: release/build_windows.sh 64
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_windows.sh 64
 
       # upload-artifact does not preserve permissions
       - name: Tar
@@ -228,7 +242,9 @@ jobs:
           # then the minimal supported deployment target of that macOS SDK can be found at
           # <https://developer.apple.com/support/xcode/#minimum-requirements>
           MACOSX_DEPLOYMENT_TARGET: 10.13
-        run: release/build_macos.sh aarch64
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_macos.sh aarch64
 
       # upload-artifact does not preserve permissions
       - name: Tar
@@ -271,7 +287,9 @@ jobs:
           # then the minimal supported deployment target of that macOS SDK can be found at
           # <https://developer.apple.com/support/xcode/#minimum-requirements>
           MACOSX_DEPLOYMENT_TARGET: 10.13
-        run: release/build_macos.sh x86_64
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_macos.sh x86_64
 
       # upload-artifact does not preserve permissions
       - name: Tar
@@ -315,7 +333,9 @@ jobs:
             tar xf dist-tar/dist.tar.gz
 
       - name: Package
-        run: release/package_client.sh linux-x86_64 tar.gz
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_client.sh linux-x86_64 tar.gz
 
       - name: Upload release
         uses: actions/upload-artifact@v7
@@ -351,7 +371,9 @@ jobs:
             tar xf dist-tar/dist.tar.gz
 
       - name: Package
-        run: release/package_client.sh win32 zip
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_client.sh win32 zip
 
       - name: Upload release
         uses: actions/upload-artifact@v7
@@ -387,7 +409,9 @@ jobs:
             tar xf dist-tar/dist.tar.gz
 
       - name: Package
-        run: release/package_client.sh win64 zip
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_client.sh win64 zip
 
       - name: Upload release
         uses: actions/upload-artifact@v7
@@ -423,7 +447,9 @@ jobs:
             tar xf dist-tar/dist.tar.gz
 
       - name: Package
-        run: release/package_client.sh macos-aarch64 tar.gz
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_client.sh macos-aarch64 tar.gz
 
       - name: Upload release
         uses: actions/upload-artifact@v7
@@ -459,7 +485,9 @@ jobs:
             tar xf dist-tar/dist.tar.gz
 
       - name: Package
-        run: release/package_client.sh macos-x86_64 tar.gz
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_client.sh macos-x86_64 tar.gz
 
       - name: Upload release
         uses: actions/upload-artifact@v7
@@ -517,10 +545,14 @@ jobs:
           path: release/output/
 
       - name: Package server
-        run: release/package_server.sh
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_server.sh
 
       - name: Generate checksums
-        run: release/generate_checksums.sh
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/generate_checksums.sh
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
