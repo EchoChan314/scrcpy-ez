@@ -422,6 +422,7 @@ scrcpy(struct scrcpy_options *options) {
         .max_size = options->max_size,
         .video_bit_rate = options->video_bit_rate,
         .audio_bit_rate = options->audio_bit_rate,
+        .no_abr = options->no_abr,
         .max_fps = options->max_fps,
         .angle = options->angle,
         .screen_off_timeout = options->screen_off_timeout,

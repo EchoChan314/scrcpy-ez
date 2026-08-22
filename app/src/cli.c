@@ -51,6 +51,7 @@ enum {
     OPT_NO_CLIPBOARD_AUTOSYNC,
     OPT_NO_CLIPBOARD_SYNC,
     OPT_NO_CLIPBOARD_PUSH_ON_START,
+    OPT_NO_ABR,
     OPT_TCPIP,
     OPT_RAW_KEY_EVENTS,
     OPT_NO_DOWNSIZE_ON_ERROR,
@@ -657,6 +658,16 @@ static const struct sc_option options[] = {
                 "This option disables this startup push (useful when scrcpy "
                 "is restarted automatically for a mode switch, e.g. USB to "
                 "wireless, to avoid pushing the same content again)."
+    },
+    {
+        .longopt_id = OPT_NO_ABR,
+        .longopt = "no-abr",
+        .text = "By default, scrcpy-ez dynamically reduces the video "
+                "bitrate and frame rate (ABR) when the encoder is "
+                "overloaded, trading sharpness for smoothness.\n"
+                "This option disables ABR: the configured bitrate and "
+                "frame rate stay fixed, keeping the image sharp (the "
+                "encoder may drop frames on overload instead)."
     },
     {
         .longopt_id = OPT_NO_DOWNSIZE_ON_ERROR,
@@ -2763,6 +2774,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 break;
             case OPT_NO_CLIPBOARD_PUSH_ON_START:
                 opts->clipboard_push_on_start = false;
+                break;
+            case OPT_NO_ABR:
+                opts->no_abr = true;
                 break;
 
             case OPT_TCPIP:
