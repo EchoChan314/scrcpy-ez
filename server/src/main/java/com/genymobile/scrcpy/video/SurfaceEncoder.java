@@ -269,6 +269,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     // and the configured bitrate, freezing the picture. Keep the configured
     // bitrate/fps untouched on these devices.
     private final boolean legacyDevice;
+    private final boolean noAbr;
 
     private boolean firstFrameSent;
     private int consecutiveErrors;
@@ -300,6 +301,10 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.legacyDevice = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q;
         if (legacyDevice) {
             Ln.i("Video ABR disabled for legacy device (SDK=" + Build.VERSION.SDK_INT + ")");
+        }
+        this.noAbr = options.isNoAbr();
+        if (noAbr) {
+            Ln.i("Video ABR disabled by --no-abr (fixed bitrate/fps)");
         }
     }
 
@@ -570,7 +575,7 @@ public class SurfaceEncoder implements AsyncProcessor {
                         // fires. Budget uses the current frame rate estimated
                         // from the frame gap (normal 8-17ms; a gap >500ms is a
                         // dropped frame, not a normal frame interval).
-                        if (!legacyDevice) {
+                        if (!legacyDevice && !noAbr) {
                             long gapUs = ptsUs - pulseLastPtsUs;
                             if (gapUs > 0 && gapUs < 500_000) {
                                 long fps = 1_000_000 / gapUs;
@@ -663,8 +668,8 @@ public class SurfaceEncoder implements AsyncProcessor {
      * the bitrate is raised back step by step.
      */
     private void maybeAdaptBitrate(MediaCodec codec, long ptsUs, long nowNs, boolean isKeyFrame) {
-        if (legacyDevice) {
-            // Legacy compatibility: no dynamic bitrate/fps adjustment.
+        if (legacyDevice || noAbr) {
+            // Legacy compatibility or --no-abr: no dynamic bitrate/fps adjustment.
             return;
         }
         // Delay calibration: the first frames measure the baseline encoder
