@@ -275,6 +275,9 @@ execute_server(struct sc_server *server,
     if (params->video_bit_rate) {
         ADD_PARAM("video_bit_rate=%" PRIu32, params->video_bit_rate);
     }
+    if (params->no_abr) {
+        ADD_PARAM("no_abr=true");
+    }
     if (!params->audio) {
         ADD_PARAM("audio=false");
     }

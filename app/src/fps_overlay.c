@@ -187,7 +187,7 @@ sc_fps_overlay_init(struct sc_fps_overlay *overlay, SDL_Renderer *renderer) {
     overlay->bitrate = 0;
     overlay->abr_fps = 0;
     overlay->abr_dirty = false;
-    overlay->visible = true;
+    overlay->visible = false; // hidden by default; Ctrl+F shows it
     overlay->always_on_top = false;
     overlay->lamp_hovered = false;
     overlay->lamp_hover_suppressed = false;
