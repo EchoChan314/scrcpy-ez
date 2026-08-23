@@ -135,4 +135,10 @@ jobs:
             gh release create "$TAG" --title "scrcpy-ez latest build" --notes "$NOTES"
           fi
           gh release upload "$TAG" scrcpy-ez-win64.zip --clobber
+          # Keep the tag (and thus the auto-generated "Source code" archives)
+          # pointing at the exact commit this binary was built from. Without
+          # this, the tag stays at the release's creation commit and the
+          # source archives silently lag behind the binary.
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
+            -f sha="$GITHUB_SHA" -F force=true
           echo "Published: https://github.com/$GH_REPO/releases/tag/$TAG"
