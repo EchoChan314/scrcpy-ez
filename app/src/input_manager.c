@@ -1440,7 +1440,7 @@ sc_input_manager_process_key(struct sc_input_manager *im,
                     }
                     return;
                 case SDLK_S:
-                    if (im->kp && !shift && !repeat && down && !paused) {
+                    if (im->kp && !shift && !repeat && !paused) {
                         action_app_switch(im, action);
                     }
                     return;
