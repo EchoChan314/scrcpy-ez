@@ -31,7 +31,6 @@ rem
 rem   快捷键：
 rem     Ctrl+F  投屏参数控件开关（控件可按住 Alt 拖动位置）
 rem     Ctrl+G  将电脑复制的图片保存至手机（平板）相册
-rem     Ctrl+H  投屏期间黑屏省电（再次按下恢复亮屏）
 rem     Ctrl+T  投屏窗口置顶开关（或按住 Alt 点击参数控件左侧指示灯）
 rem     - 电脑复制文本/图片自动同步到手机剪贴板，长按粘贴即可
 rem     - 关窗断开；拔线/异常自动重连（USB 优先，无线兜底）
@@ -89,7 +88,7 @@ if exist "%TEMP%\scrcpy_closed_!WATCH_TAG!.flag" exit /b 0
 rem ----- 1. 重置 adb 服务，清理僵死状态 -----
 echo.
 echo [键位] Ctrl+F 参数控件开关（按住 Alt 可拖动控件位置）^| Ctrl+G 复制图片存相册
-echo          Ctrl+H 黑屏省电 ^| Ctrl+T 窗口置顶 ^| Alt+F 切换全屏
+echo          Ctrl+T 窗口置顶 ^| Alt+F 切换全屏
 echo.
 if defined SCEZ_NO_ADB_RESET (
     echo [提示] GUI 已接管 adb：跳过重置
