@@ -99,7 +99,6 @@ Open the **Specs panel** to adjust the mirroring parameters for the current devi
 |---|---|
 | **Ctrl+F** | Toggle the overlay controls (drag them while holding **Alt**) |
 | **Ctrl+G** | Save the image copied on the PC to the device gallery |
-| **Ctrl+H** | Black out the device screen to save power (the device may enter power-saving mode limiting the refresh rate) |
 | **Ctrl+T** | Toggle always-on-top for the mirroring window (or hold **Alt** and click the indicator on the left of the controls, same effect) |
 | **Alt+F** | Fullscreen |
 
