@@ -116,7 +116,7 @@ sdl_configure_ctrl_c_windows(void) {
 static void
 restore_device_screen(struct scrcpy *s, bool has_screen) {
     if (has_screen) {
-        // No-op unless the screen was turned off by Ctrl+H.
+        // No-op unless the screen was turned off by the MOD+O shortcut.
         sc_input_manager_turn_screen_on(&s->screen.im);
     }
 }
@@ -424,6 +424,7 @@ scrcpy(struct scrcpy_options *options) {
         .max_size = options->max_size,
         .video_bit_rate = options->video_bit_rate,
         .audio_bit_rate = options->audio_bit_rate,
+        .no_abr = options->no_abr,
         .max_fps = options->max_fps,
         .angle = options->angle,
         .screen_off_timeout = options->screen_off_timeout,
@@ -986,8 +987,9 @@ end:
         sc_usb_stop(&s->usb);
     }
 #endif
-    // Restore the device screen if it was turned off by Ctrl+H. The
-    // device-side cleanup process is a second safety net for abnormal exits.
+    // Restore the device screen if it was turned off by the MOD+O shortcut.
+    // The device-side cleanup process is a second safety net for abnormal
+    // exits.
     if (screen_initialized && controller_started) {
         sc_input_manager_turn_screen_on(&s->screen.im);
     }
