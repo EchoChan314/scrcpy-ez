@@ -62,7 +62,9 @@ public final class BgNotification {
 
     private static final String CHANNEL_ID = "scrcpy_ez_mirroring";
     private static final String CHANNEL_NAME = "投屏提示";
-    private static final int NOTIFICATION_ID = 0x53435A; // "SCZ"
+    // 包内可见：CleanUp 进程（独立于 server，见 CleanUp.java）在 server 被杀死后
+    // 需要引用同一个 id 来撤掉残留的「正在投屏」通知。
+    static final int NOTIFICATION_ID = 0x53435A; // "SCZ"
 
     private static final String ACTION_STOP = "com.genymobile.scrcpy.action.STOP_MIRRORING";
     private static final int REQ_STOP = 1;
@@ -252,6 +254,8 @@ public final class BgNotification {
         return PendingIntent.getBroadcast(context, REQ_STOP, intent, flags);
     }
 
+    // API 21-25 分支刻意使用已弃用的旧通知 API（无 NotificationChannel），故抑制编译警告
+    @SuppressWarnings("deprecation")
     private Notification build() {
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { // API 26+
@@ -303,8 +307,22 @@ public final class BgNotification {
         if (thread != null) {
             thread.interrupt();
         }
+        cancelNotification();
+    }
+
+    /**
+     * 尽力撤下「正在投屏」通知（失败只记日志，绝不影响投屏主流程）。
+     * 供 CleanUp 进程在 server 死亡后调用：主 server 进程被系统杀死（如拔掉
+     * USB 传输断开）时会跳过自身的 finally 清理，导致通知残留成孤儿；而
+     * CleanUp 是独立进程（setsid 新会话），可以在 server 死后仍执行到这里。
+     */
+    public static void cancelNotification() {
         try {
-            nm.cancel(NOTIFICATION_ID);
+            Context context = FakeContext.get();
+            NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                nm.cancel(NOTIFICATION_ID);
+            }
         } catch (Throwable t) {
             Ln.w("Cancel notification failed: " + t);
         }

@@ -44,6 +44,7 @@ struct sc_server_params {
     uint8_t min_size_alignment;
     uint32_t video_bit_rate;
     uint32_t audio_bit_rate;
+    bool no_abr;
     const char *max_fps; // float to be parsed by the server
     const char *angle; // float to be parsed by the server
     sc_tick screen_off_timeout;

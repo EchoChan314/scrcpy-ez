@@ -55,6 +55,7 @@ _scrcpy() {
         -N --no-playback
         --new-display
         --new-display=
+        --no-abr
         --no-audio
         --no-audio-playback
         --no-cleanup
