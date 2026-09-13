@@ -252,6 +252,8 @@ public final class BgNotification {
         return PendingIntent.getBroadcast(context, REQ_STOP, intent, flags);
     }
 
+    // API 21-25 分支刻意使用已弃用的旧通知 API（无 NotificationChannel），故抑制编译警告
+    @SuppressWarnings("deprecation")
     private Notification build() {
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { // API 26+

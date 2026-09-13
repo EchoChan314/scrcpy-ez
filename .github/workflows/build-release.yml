@@ -1,0 +1,198 @@
+name: build ez win64 full release
+
+# 合并流水线（取代原 auto-win64.yml）：
+# 源码一有更新就自动构建「完整发行包」——投屏引擎（scrcpy.exe 等 win64
+# 客户端 + Android server）+ v2.0 GUI 壳（scrcpy-ez.exe）+ 投屏支持.bat
+# （GUI 启动投屏所需的 bat，取自 packaging/投屏启动.bat），打成一个 zip
+# 发布到 GitHub Release，本地用 update-scrcpy-ez.ps1 一键拉取。
+#
+# 说明：上游自带的 gui-win-build.yml 只构建 GUI 壳且只传 artifact、不发布
+# Release，无法单独形成可用包；本流水线将其产物合并进引擎包一并发布。
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-scrcpy-server:
+    runs-on: ubuntu-latest
+    env:
+      GRADLE: gradle
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Build server
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_server.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/scrcpy-server
+
+  build-win64-client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build nasm \
+             mingw-w64 mingw-w64-tools libz-mingw-w64-dev
+
+      - name: Build win64 client
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/build_windows.sh 64
+
+      - name: Tar
+        run: |
+          cd release/work/build-win64
+          mkdir dist-tar
+          cd dist-tar
+          tar -C .. -cvf dist.tar dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-win64-intermediate
+          path: release/work/build-win64/dist-tar/
+
+  build-gui:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: gui/go.sum
+
+      - name: Test GUI (regression)
+        working-directory: gui
+        shell: pwsh
+        run: |
+          $env:GOPROXY = 'https://goproxy.cn,direct'
+          go mod tidy
+          go test ./...
+
+      - name: Build GUI shell
+        working-directory: gui
+        shell: pwsh
+        run: |
+          $env:GOPROXY = 'https://goproxy.cn,direct'
+          go build -trimpath -ldflags="-s -w -H windowsgui" -o dist/scrcpy-ez.exe .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-exe
+          path: gui/dist/scrcpy-ez.exe
+          if-no-files-found: error
+
+  package:
+    needs:
+      - build-scrcpy-server
+      - build-win64-client
+      - build-gui
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v8
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-win64
+        uses: actions/download-artifact@v8
+        with:
+          name: build-win64-intermediate
+          path: release/work/build-win64/dist-tar/
+
+      - name: Download GUI exe
+        uses: actions/download-artifact@v8
+        with:
+          name: gui-exe
+          path: gui-dist/
+
+      - name: Detar
+        run: |
+          cd release/work/build-win64
+          tar xf dist-tar/dist.tar
+
+      - name: Package client + server (base zip)
+        run: |
+          git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x
+          release/package_client.sh win64 zip
+
+      - name: Inject GUI shell and launcher bat
+        run: |
+          cd release/output
+          BASE=$(ls scrcpy-win64-*.zip | head -1)
+          unzip -q "$BASE" -d stage
+          TARGET_DIR=$(ls -d stage/*/ | head -1)
+          cp "$GITHUB_WORKSPACE/gui-dist/scrcpy-ez.exe" "$TARGET_DIR"
+          # GUI 默认找 exe 同目录的「投屏支持.bat」；仓库内其源文件为
+          # packaging/投屏启动.bat，发行时复制改名，保证开箱即用。
+          cp "$GITHUB_WORKSPACE/packaging/投屏启动.bat" "$TARGET_DIR/投屏支持.bat"
+          (cd stage && zip -qr "../scrcpy-ez-win64.zip" .)
+          rm -rf stage "$BASE"
+          ls -la scrcpy-ez-win64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-full-win64
+          path: release/output/scrcpy-ez-win64.zip
+
+  publish-release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download full win64 package
+        uses: actions/download-artifact@v8
+        with:
+          name: release-full-win64
+          path: out
+
+      - name: Publish build release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd out
+          ls -la
+          # One release per build, tagged with the exact commit: the
+          # auto-generated "Source code" archives then always match the
+          # binary. A rolling tag cannot be moved from Actions (the git
+          # refs API is 403 for the GITHUB_TOKEN on this fork), which is
+          # why the previous latest-build release drifted.
+          TAG="build-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA:0:7}"
+          gh release create "$TAG" \
+            --title "scrcpy-ez build ${GITHUB_SHA:0:7}" \
+            --notes "commit $GITHUB_SHA | built $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            scrcpy-ez-win64.zip
+          # Prune old build releases, keeping only the newest
+          gh release list --limit 50 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("build-"))] | sort_by(.createdAt) | reverse | .[1:][] | .tagName' \
+            | xargs -r -n1 sh -c 'gh release delete "$0" --yes'
+          echo "Published: https://github.com/$GH_REPO/releases/tag/$TAG"
