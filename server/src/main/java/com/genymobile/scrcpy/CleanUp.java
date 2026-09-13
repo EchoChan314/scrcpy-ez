@@ -222,6 +222,14 @@ public final class CleanUp {
 
         Ln.i("Cleaning up");
 
+        // The server may die abruptly (e.g. USB unplugged), in which case its
+        // graceful stop() - which cancels the "scrcpy-ez 正在投屏" notification -
+        // never runs (the finally block is skipped on a hard kill). This process
+        // is a detached session (setsid) that outlives the server specifically to
+        // restore device state on disconnection, so cancel the notification here
+        // to avoid leaving an orphan in the shade.
+        BgNotification.cancelNotification();
+
         if (disableShowTouches) {
             Ln.i("Disabling \"show touches\"");
             try {

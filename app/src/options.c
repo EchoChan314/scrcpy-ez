@@ -98,6 +98,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .clipboard_autosync = true,
     .clipboard_sync = true,
     .clipboard_push_on_start = true,
+    .no_abr = false,
     .downsize_on_error = true,
     .tcpip = false,
     .tcpip_dst = NULL,

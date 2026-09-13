@@ -1,0 +1,8 @@
+# Keep Windows batch/script files CRLF on checkout on every platform.
+# The win64 release workflow (build-release.yml) packages the offline bundle on
+# ubuntu-latest: with no eol rule git materializes *.bat as LF there, and cmd.exe
+# cannot parse an LF-only batch file (it aborts immediately with exit code 255).
+# The GUI starts the bat hidden, so the failure is silent.
+# Do not edit the .bat/.vbs files with an LF-only editor.
+*.bat text eol=crlf
+*.vbs text eol=crlf
