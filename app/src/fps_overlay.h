@@ -21,7 +21,7 @@ struct sc_fps_overlay {
     int bitrate;               // current ABR bitrate (server-reported)
     int abr_fps;               // ABR target fps level (server-reported)
     bool abr_dirty;            // bitrate or mode changed, re-render needed
-    bool visible;              // show/hide toggle (Ctrl+F), session-only memory
+    bool visible;              // hidden by default; Ctrl+F toggles (session-only)
     bool always_on_top;        // always-on-top state lamp (Ctrl+T), session-only memory
     bool lamp_hovered;         // cursor Alt-hovers the lamp (clickable hint)
     bool lamp_hover_suppressed; // click consumed: preview off until cursor leaves

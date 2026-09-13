@@ -55,8 +55,8 @@ static uint32_t clipboard_reverse_sync_seq; // 0 = no reverse sync pending
 // callback stays valid even after the input manager is destroyed.
 static uint32_t clipboard_poll_sequence;
 // Windows clipboard sequence number of the last content pushed to the device
-// (by the automatic clipboard sync, a manual MOD+Shift+C, Ctrl+v, or a
-// reverse synchronization). 0 = nothing pushed yet. Used to avoid pushing
+// (by the automatic clipboard sync, Ctrl+v, or a reverse synchronization).
+// 0 = nothing pushed yet. Used to avoid pushing
 // the same content twice: when Ctrl+v is pressed while the computer
 // clipboard still matches the last pushed content, only the PASTE key is
 // injected, without sending a new SET_CLIPBOARD/SET_IMAGE_CLIPBOARD message
@@ -1252,9 +1252,6 @@ sc_input_manager_process_key(struct sc_input_manager *im,
     uint16_t mods = im->sdl_shortcut_mods;
     bool is_shortcut = sc_shortcut_mods_is_shortcut_mod(mods, mod)
                     || sc_shortcut_mods_is_shortcut_key(mods, sdl_keycode);
-    LOGD("KEYDBG: down=%d repeat=%d keycode=%d scancode=%d mod=0x%x mods=0x%x is_shortcut=%d ctrl=%d shift=%d",
-         down, repeat, (int) sdl_keycode, (int) event->scancode, (unsigned) mod,
-         (unsigned) mods, is_shortcut, ctrl, shift);
 
     if (down && !repeat && !disconnected) {
         if (sdl_keycode == im->last_keycode && mod == im->last_mod) {
@@ -1269,10 +1266,9 @@ sc_input_manager_process_key(struct sc_input_manager *im,
     // Ctrl+G: save the current clipboard image to the device gallery.
     // Ctrl is not a MOD key (unlike Alt/Super), so without this check the
     // combination would be forwarded to the device as a regular key event.
-    // Unlike MOD+Shift+G, Ctrl+letter combinations are never intercepted
-    // by the Chinese input method (e.g. Ctrl+V works without switching
-    // the keyboard layout), so this shortcut works with a Chinese IME
-    // active.
+    // Ctrl+letter combinations are never intercepted by the Chinese input
+    // method (e.g. Ctrl+V works without switching the keyboard layout), so
+    // this shortcut works with a Chinese IME active.
     if (down && !repeat && ctrl && !shift
             && !(event->mod & SDL_KMOD_ALT) && !(event->mod & SDL_KMOD_GUI)
             && sdl_keycode == SDLK_G) {
@@ -1292,20 +1288,8 @@ sc_input_manager_process_key(struct sc_input_manager *im,
         return;
     }
 
-    // Ctrl+H: toggle the device screen power (screen off saves battery while
-    // mirroring). Same interception pattern as Ctrl+G/F: never forwarded to
-    // the device, works with a Chinese IME active.
-    if (down && !repeat && ctrl && !shift
-            && !(event->mod & SDL_KMOD_ALT) && !(event->mod & SDL_KMOD_GUI)
-            && sdl_keycode == SDLK_H) {
-        if (control && !im->camera && !disconnected && !paused) {
-            set_display_power(im, im->screen_off);
-        }
-        return;
-    }
-
     // Ctrl+T: toggle the window always-on-top state. Same interception
-    // pattern as Ctrl+G/F/H: never forwarded to the device, works with a
+    // pattern as Ctrl+G/F: never forwarded to the device, works with a
     // Chinese IME active. T matches "top" for easy recall. The bare T key
     // (without Ctrl) is already used in camera mode to toggle the torch, but
     // the Ctrl modifier keeps the two bindings distinct.
@@ -1385,15 +1369,10 @@ sc_input_manager_process_key(struct sc_input_manager *im,
                 }
                 return;
             case SDLK_G:
-                LOGD("KEYDBG: first-switch SDLK_G shift=%d video=%d", shift, video);
-                // MOD+G (no shift): resize to pixel-perfect. With shift held
-                // (MOD+Shift+G), fall through to the save-to-gallery shortcut
-                // handled in the device-control switch below.
                 if (video && !shift && !repeat && down) {
                     sc_screen_resize_to_pixel_perfect(im->screen);
-                    return;
                 }
-                break;
+                return;
             case SDLK_I:
                 if (video && !shift && !repeat && down) {
                     switch_fps_counter_state(im);
@@ -1440,22 +1419,8 @@ sc_input_manager_process_key(struct sc_input_manager *im,
                     }
                     return;
                 case SDLK_S:
-                    if (im->kp && !shift && !repeat && down && !paused) {
+                    if (im->kp && !shift && !repeat && !paused) {
                         action_app_switch(im, action);
-                    }
-                    return;
-                case SDLK_G:
-                    LOGD("KEYDBG: second-switch SDLK_G shift=%d kp=%d paused=%d", shift, !!im->kp, paused);
-                    // MOD+Shift+G: save the current clipboard image (the
-                    // original file already cached in the device clipboard)
-                    // to the device gallery. Not MOD+Shift+S: on Windows the
-                    // default MOD is Alt or Super, and Alt+Shift (input
-                    // language switch) / Super+Shift+S (Windows screenshot)
-                    // collide with system shortcuts, while Ctrl+Shift+S is
-                    // not a MOD combination at all (Ctrl is forwarded to the
-                    // device).
-                    if (im->kp && shift && !repeat && down && !paused) {
-                        save_clipboard_image_to_gallery(im);
                     }
                     return;
                 case SDLK_M:
@@ -1487,14 +1452,8 @@ sc_input_manager_process_key(struct sc_input_manager *im,
                     }
                     return;
                 case SDLK_C:
-                    if (im->kp && !repeat && down && !paused) {
-                        if (shift) {
-                            // MOD+Shift+C: copy the computer clipboard (image
-                            // or text) to the device clipboard without pasting
-                            set_device_clipboard(im, false, SC_SEQUENCE_INVALID);
-                        } else {
-                            get_device_clipboard(im, SC_COPY_KEY_COPY);
-                        }
+                    if (im->kp && !shift && !repeat && down && !paused) {
+                        get_device_clipboard(im, SC_COPY_KEY_COPY);
                     }
                     return;
                 case SDLK_X:

@@ -61,6 +61,7 @@ arguments=(
     {-n,--no-control}'[Disable device control \(mirror the device in read only\)]'
     {-N,--no-playback}'[Disable video and audio playback]'
     '--new-display=[Create a new display]'
+    '--no-abr[Disable adaptive bitrate/fps (ABR), keep fixed video bitrate and frame rate]'
     '--no-audio[Disable audio forwarding]'
     '--no-audio-playback[Disable audio playback]'
     '--no-cleanup[Disable device cleanup actions on exit]'

@@ -60,6 +60,7 @@ public class Options {
     private String audioEncoder;
     private boolean powerOffScreenOnClose;
     private boolean clipboardAutosync = true;
+    private boolean noAbr;
     private boolean downsizeOnError = true;
     private boolean cleanup = true;
     private boolean powerOn = true;
@@ -235,6 +236,10 @@ public class Options {
         return clipboardAutosync;
     }
 
+    public boolean isNoAbr() {
+        return noAbr;
+    }
+
     public boolean getDownsizeOnError() {
         return downsizeOnError;
     }
@@ -401,6 +406,9 @@ public class Options {
                     break;
                 case "video_bit_rate":
                     options.videoBitRate = Integer.parseInt(value);
+                    break;
+                case "no_abr":
+                    options.noAbr = Boolean.parseBoolean(value);
                     break;
                 case "audio_bit_rate":
                     options.audioBitRate = Integer.parseInt(value);
