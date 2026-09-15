@@ -9,14 +9,6 @@
 
 ---
 
-## 💻 运行环境
-
-- **系统**：Windows 10 / 11（64 位）。当前仅在 Windows 11 实测（其他版本未验证）
-- **WebView2 Runtime**：图形界面基于微软 WebView2 运行时——Windows 11 已内置，Windows 10 多数已随系统更新安装；若缺失，可到 [微软官网](https://developer.microsoft.com/microsoft-edge/webview2/) 安装（Evergreen 版）
-- **无需额外运行库**：不需要安装 VC++ 运行库等；其余组件（adb、scrcpy、ffmpeg 等）均已包含在压缩包内
-
----
-
 ## 🚀 快速开始
 
 ### 第一步：开放权限
@@ -150,6 +142,10 @@ cd build && PATH=/f/msys64/mingw64/bin:$PATH ninja
 
 - [scrcpy](https://github.com/Genymobile/scrcpy)（Genymobile）—— 本项目的基石，Apache License 2.0 许可
 - [yume-chan 的 PR #6676（Support image clipboard）](https://github.com/Genymobile/scrcpy/pull/6676) —— 图片剪贴板功能借鉴自该 PR
+
+---
+
+> 💻 **运行环境**：Windows 10 / 11（64 位）。图形界面依赖微软 WebView2 运行时——Win11 已内置、Win10 多数已随系统更新安装（若缺失可到 [微软官网](https://developer.microsoft.com/microsoft-edge/webview2/) 安装 Evergreen 版）；其余组件均已包含在压缩包内，无需额外安装运行库。
 
 ## 📄 License
 

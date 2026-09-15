@@ -9,14 +9,6 @@
 
 ---
 
-## 💻 Requirements
-
-- **OS**: Windows 10 / 11 (64-bit). Currently tested on Windows 11 only (other versions unverified)
-- **WebView2 Runtime**: the GUI is built on Microsoft WebView2 — included in Windows 11; most Windows 10 systems already have it via system updates. If missing, install the Evergreen Runtime from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/)
-- **No extra runtimes**: no VC++ redistributable required; all other components (adb, scrcpy, ffmpeg, ...) ship inside the package
-
----
-
 ## 🚀 Quick Start
 
 ### Step 1: Enable permissions
@@ -150,6 +142,10 @@ cd build && PATH=/f/msys64/mingw64/bin:$PATH ninja
 
 - [scrcpy](https://github.com/Genymobile/scrcpy) (Genymobile) — the foundation of this project, Apache License 2.0
 - [yume-chan's PR #6676 (Support image clipboard)](https://github.com/Genymobile/scrcpy/pull/6676) — the image clipboard feature is inspired by this PR
+
+---
+
+> 💻 **Requirements**: Windows 10 / 11 (64-bit). The GUI relies on the Microsoft WebView2 Runtime — included in Windows 11; most Windows 10 systems already have it via system updates (if missing, install the Evergreen Runtime from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/)). All other components are bundled — no extra runtimes needed.
 
 ## 📄 License
 
