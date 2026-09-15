@@ -9,6 +9,14 @@
 
 ---
 
+## 💻 运行环境
+
+- **系统**：Windows 10 / 11（64 位）。当前仅在 Windows 11 实测（其他版本未验证）
+- **WebView2 Runtime**：图形界面基于微软 WebView2 运行时——Windows 11 已内置，Windows 10 多数已随系统更新安装；若缺失，可到 [微软官网](https://developer.microsoft.com/microsoft-edge/webview2/) 安装（Evergreen 版）
+- **无需额外运行库**：不需要安装 VC++ 运行库等；其余组件（adb、scrcpy、ffmpeg 等）均已包含在压缩包内
+
+---
+
 ## 🚀 快速开始
 
 ### 第一步：开放权限
