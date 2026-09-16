@@ -25,14 +25,14 @@ func TestGui52LegacyMigrationToTwoState(t *testing.T) {
   "devices": {
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "serials": ["a743e1df"],
+      "serials": ["TEST0002"],
       "addrs": [
-        {"addr": "192.168.31.99:33895", "state": "active", "fail": 11, "lastOk": 1750000100, "lastFail": 1750000090, "mode": "tls"},
-        {"addr": "192.168.31.99:41234", "state": "active", "fail": 2, "lastOk": 1750000200, "stale": true, "mode": "tls"},
-        {"addr": "192.168.31.99:45005", "state": "history", "fail": 5, "lastOk": 1750000150, "mode": "tls"},
-        {"addr": "192.168.31.183:5555", "state": "history", "fail": 254, "lastOk": 1750000300, "mode": "tcpip"},
-        {"addr": "192.168.31.162:5555", "state": "history", "fail": 223, "lastOk": 1750000400, "mode": "tcpip"},
-        {"addr": "192.168.31.197:5555", "state": "active", "lastOk": 1750000050, "stale": true, "mode": "tcpip"}
+        {"addr": "192.0.2.99:33895", "state": "active", "fail": 11, "lastOk": 1750000100, "lastFail": 1750000090, "mode": "tls"},
+        {"addr": "192.0.2.99:41234", "state": "active", "fail": 2, "lastOk": 1750000200, "stale": true, "mode": "tls"},
+        {"addr": "192.0.2.99:45005", "state": "history", "fail": 5, "lastOk": 1750000150, "mode": "tls"},
+        {"addr": "192.0.2.183:5555", "state": "history", "fail": 254, "lastOk": 1750000300, "mode": "tcpip"},
+        {"addr": "192.0.2.162:5555", "state": "history", "fail": 223, "lastOk": 1750000400, "mode": "tcpip"},
+        {"addr": "192.0.2.197:5555", "state": "active", "lastOk": 1750000050, "stale": true, "mode": "tcpip"}
       ],
       "profiles": {"usb": {}, "wifi": {}}
     }
@@ -53,11 +53,11 @@ func TestGui52LegacyMigrationToTwoState(t *testing.T) {
 	if len(e.Addrs) != 2 {
 		t.Fatalf("迁移折叠后应只剩 TLS 一条 + tcpip 一条: %+v", e.Addrs)
 	}
-	tls := gui24FindAddr(e, "192.168.31.99:33895")
+	tls := gui24FindAddr(e, "192.0.2.99:33895")
 	if tls == nil || tls.State != AddrStateActive || tls.Mode != ModeTls {
 		t.Fatalf("同形态 active 应保留 lastOk 最新的 33895: %+v", e.Addrs)
 	}
-	tcp := gui24FindAddr(e, "192.168.31.162:5555")
+	tcp := gui24FindAddr(e, "192.0.2.162:5555")
 	if tcp == nil || tcp.State != AddrStateStale || tcp.Mode != ModeTcpip {
 		t.Fatalf("旧 history/stale 应折叠成 lastOk 最新的 162 stale: %+v", e.Addrs)
 	}
@@ -70,9 +70,9 @@ func TestGui52LegacyMigrationToTwoState(t *testing.T) {
 		}
 	}
 
-	got := s.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.99:33895" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.162:5555" || got[1].State != AddrStateStale {
+	got := s.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.99:33895" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("二态候选应为 active TLS → stale tcpip: %+v", got)
 	}
 
@@ -110,13 +110,13 @@ func TestGui52TwoStateMutualExclusion(t *testing.T) {
 	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.99:5555"},
 	})
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 
 	// 初始：两条都 active
-	e, _ := s.Entry("a743e1df")
+	e, _ := s.Entry("TEST0002")
 	for i := range e.Addrs {
 		if e.Addrs[i].State != AddrStateActive || e.Addrs[i].Stale {
 			t.Fatalf("成功入档必须 state=active 且无 stale 标: %+v", e.Addrs[i])
@@ -124,19 +124,19 @@ func TestGui52TwoStateMutualExclusion(t *testing.T) {
 	}
 
 	// 失败只打对应端口：TLS 翻 stale，5555 仍 active（形态独立）
-	s.AddrFail("Xiaomi Pad 8 Pro", "192.168.31.99:33895")
-	e, _ = s.Entry("a743e1df")
-	tls := gui24FindAddr(e, "192.168.31.99:33895")
-	tcp := gui24FindAddr(e, "192.168.31.99:5555")
+	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.99:33895")
+	e, _ = s.Entry("TEST0002")
+	tls := gui24FindAddr(e, "192.0.2.99:33895")
+	tcp := gui24FindAddr(e, "192.0.2.99:5555")
 	if tls == nil || tls.State != AddrStateStale || tcp == nil || tcp.State != AddrStateActive {
 		t.Fatalf("二态必须按端口独立: tls=%+v tcpip=%+v", tls, tcp)
 	}
 
 	// 成功覆盖对应端口：TLS 翻回 active，5555 不受影响
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
-	e, _ = s.Entry("a743e1df")
-	tls = gui24FindAddr(e, "192.168.31.99:33895")
-	tcp = gui24FindAddr(e, "192.168.31.99:5555")
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
+	e, _ = s.Entry("TEST0002")
+	tls = gui24FindAddr(e, "192.0.2.99:33895")
+	tcp = gui24FindAddr(e, "192.0.2.99:5555")
 	if tls == nil || tls.State != AddrStateActive || tls.Stale || tcp == nil || tcp.State != AddrStateActive {
 		t.Fatalf("成功必须覆盖对应端口为 active: tls=%+v tcpip=%+v", tls, tcp)
 	}
@@ -182,7 +182,7 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 	}
 	a.pairOps.mdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
 		return []discovery.MdnsService{
-			{Type: "_adb-tls-connect._tcp", Name: "adb-601c9f08-KWqpio", Addr: "192.168.1.2:33895", Mode: discovery.MdnsModeTls},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0001-KWqpio", Addr: "192.168.1.2:33895", Mode: discovery.MdnsModeTls},
 		}, nil
 	}
 
@@ -193,7 +193,7 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 
 	waitFor(t, 3*time.Second, func() bool {
 		e, ok := a.profiles.Entry("REDMI K80")
-		return ok && contains(e.Serials, "601c9f08") &&
+		return ok && contains(e.Serials, "TEST0001") &&
 			gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls)
 	}, "短号/ TLS 入档未完成")
 
@@ -201,8 +201,8 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 	if !ok {
 		t.Fatal("配对成功应建档")
 	}
-	if !contains(e.Serials, "601c9f08") {
-		t.Fatalf("服务名 adb-601c9f08-KWqpio 应学习短号到 Serials: %+v", e.Serials)
+	if !contains(e.Serials, "TEST0001") {
+		t.Fatalf("服务名 adb-TEST0001-KWqpio 应学习短号到 Serials: %+v", e.Serials)
 	}
 	// gui52-fix7：无线接入学习（TLS/5555 connect 探测）已移除——5555(5555 地址)
 	// 由 mDNS _adb._tcp 广播匹配入档（MatchMdnsModes），不在此处断言 connect 探测。
@@ -214,12 +214,12 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 func TestGui52DisplayNameWinsForOnlineCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	})
 	a.profiles.SetDisplayName("REDMI K80", "红米k80")
 
 	devs := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "24117RK2CC", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "24117RK2CC", Identity: "REDMI K80"},
 	}
 	applyProfileNames(devs, a.profiles)
 	if devs[0].Name != "红米k80" {
@@ -229,7 +229,7 @@ func TestGui52DisplayNameWinsForOnlineCard(t *testing.T) {
 	// DisplayNameSet=false → 在线卡保留 adb 富化名（marketname 链）
 	a.profiles.SetDisplayName("REDMI K80", "")
 	devs = []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
 	}
 	applyProfileNames(devs, a.profiles)
 	if devs[0].Name != "REDMI K80" {
@@ -243,9 +243,9 @@ func TestGui52DisplayNameWinsForOnlineCard(t *testing.T) {
 func TestGui52CandidateDegradeRecoverLoop(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro", Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro", Wireless: "192.0.2.99:5555"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 
 	// active → 在线证据
 	if got := a.profiles.OfflineCandidateAddrs(nil); len(got) != 0 {
@@ -256,13 +256,13 @@ func TestGui52CandidateDegradeRecoverLoop(t *testing.T) {
 		t.Fatal("MarkAllAddrsStale 应有改动")
 	}
 	got := a.profiles.OfflineCandidateAddrs(nil)["Xiaomi Pad 8 Pro"]
-	if len(got) != 2 || got[0].Addr != "192.168.31.99:33895" || got[1].Addr != "192.168.31.99:5555" {
+	if len(got) != 2 || got[0].Addr != "192.0.2.99:33895" || got[1].Addr != "192.0.2.99:5555" {
 		t.Fatalf("全 stale 后应产出 TLS 优先离线候选: %+v", got)
 	}
 	// 探测成功 → 翻回 active
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	tls := gui24FindAddr(e, "192.168.31.99:33895")
+	tls := gui24FindAddr(e, "192.0.2.99:33895")
 	if tls == nil || tls.State != AddrStateActive {
 		t.Fatalf("恢复应翻回 active: %+v", e.Addrs)
 	}

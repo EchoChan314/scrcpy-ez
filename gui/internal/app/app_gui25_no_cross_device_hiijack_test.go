@@ -26,8 +26,8 @@ func seedGui25TabletArchive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.183:5555", ModeTcpip)
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
 }
 
 // seedGui25K80Archive 播种 K80 档案：TLS 42449（在线设备的常驻广播地址）。
@@ -35,15 +35,15 @@ func seedGui25K80Archive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "K80SERXXX", State: "device", ConnType: "usb", Marketname: "Redmi K80"},
 	})
-	a.profiles.AddrSuccessWithMode("Redmi K80", "192.168.31.197:42449", ModeTls)
+	a.profiles.AddrSuccessWithMode("Redmi K80", "192.0.2.197:42449", ModeTls)
 }
 
 // gui25TabletCands 手工构建探测候选：仅平板（K80 在线，不在候选内）。
 func gui25TabletCands() map[string][]AddrEntry {
 	return map[string][]AddrEntry{
 		"Xiaomi Pad 8 Pro": {
-			{Addr: "192.168.31.183:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 100},
-			{Addr: "192.168.31.162:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 200},
+			{Addr: "192.0.2.183:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 100},
+			{Addr: "192.0.2.162:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 200},
 		},
 	}
 }
@@ -51,8 +51,8 @@ func gui25TabletCands() map[string][]AddrEntry {
 // gui25HiijackMdns 现场快照：K80 TLS 42449 常驻广播 + 平板 tcpip 183 广播。
 func gui25HiijackMdns() []discovery.MdnsService {
 	return []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-K80SERXXX-Ab12Cd", Addr: "192.168.31.197:42449", Mode: discovery.MdnsModeTls},
-		{Type: "_adb._tcp", Name: "adb-T7000PAD", Addr: "192.168.31.183:5555", Mode: discovery.MdnsModeTcpip},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-K80SERXXX-Ab12Cd", Addr: "192.0.2.197:42449", Mode: discovery.MdnsModeTls},
+		{Type: "_adb._tcp", Name: "adb-T7000PAD", Addr: "192.0.2.183:5555", Mode: discovery.MdnsModeTcpip},
 	}
 }
 
@@ -72,13 +72,13 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 	gate := make(chan struct{})
 	var once sync.Once
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error {
-		if addr == "192.168.31.162:5555" {
+		if addr == "192.0.2.162:5555" {
 			<-gate
 		}
 		mu.Lock()
 		calls = append(calls, addr)
 		mu.Unlock()
-		if addr == "192.168.31.183:5555" {
+		if addr == "192.0.2.183:5555" {
 			once.Do(func() { close(gate) })
 			return context.DeadlineExceeded
 		}
@@ -91,23 +91,23 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 	a.runDiscovery(context.Background(), gui25TabletCands())
 
 	st := waitDiscStatus(t, a, "found")
-	if st.Found != "192.168.31.162:5555" {
+	if st.Found != "192.0.2.162:5555" {
 		t.Fatalf("应找回候选平板 162（修复前会误判 found(42449)）: %+v", st)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	// 调用序列：平板广播 183 先试，档案 162 兜底——42449 从未被 connect
-	if len(calls) != 2 || calls[0] != "192.168.31.183:5555" || calls[1] != "192.168.31.162:5555" {
+	if len(calls) != 2 || calls[0] != "192.0.2.183:5555" || calls[1] != "192.0.2.162:5555" {
 		t.Fatalf("调用序列应为 [183 162]（42449 不参与）: %v", calls)
 	}
-	if addrIn(calls, "192.168.31.197:42449") {
+	if addrIn(calls, "192.0.2.197:42449") {
 		t.Fatalf("在线设备 K80 的广播 42449 不应被 connect（截胡）: %v", calls)
 	}
 	// Tried 不含 42449（非候选广播不进层）
-	if len(st.Tried) != 2 || st.Tried[0] != "192.168.31.183:5555" || st.Tried[1] != "192.168.31.162:5555" {
+	if len(st.Tried) != 2 || st.Tried[0] != "192.0.2.183:5555" || st.Tried[1] != "192.0.2.162:5555" {
 		t.Fatalf("Tried 应为 [183 162] 且不含 42449: %+v", st)
 	}
-	if addrIn(st.Tried, "192.168.31.197:42449") {
+	if addrIn(st.Tried, "192.0.2.197:42449") {
 		t.Fatalf("Tried 不应含在线设备广播 42449: %+v", st)
 	}
 	// K80 档案不被污染（42449 未参与本轮：fail 不增、状态不动）
@@ -115,13 +115,13 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 	if !ok {
 		t.Fatal("K80 档案应存在")
 	}
-	a42449 := gui24FindAddr(k80, "192.168.31.197:42449")
+	a42449 := gui24FindAddr(k80, "192.0.2.197:42449")
 	if a42449 == nil || a42449.Fail != 0 || a42449.State != AddrStateActive {
 		t.Fatalf("K80 42449 档案不应被动（未参与探测）: %+v", k80.Addrs)
 	}
 	// 平板：162 兜底成功 → active+fail=0（成功路径不回填失败）
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	a162 := gui24FindAddr(e, "192.168.31.162:5555")
+	a162 := gui24FindAddr(e, "192.0.2.162:5555")
 	if a162 == nil || a162.Fail != 0 || a162.State != AddrStateActive {
 		t.Fatalf("162 兜底成功应保持 active+fail=0: %+v", e.Addrs)
 	}
@@ -133,9 +133,9 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 func TestGui25CandidateOwnBroadcastStillFirst(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
 	seedGui25K80Archive(a)
 
 	var mu sync.Mutex
@@ -144,43 +144,43 @@ func TestGui25CandidateOwnBroadcastStillFirst(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, addr)
 		mu.Unlock()
-		if addr == "192.168.31.183:37201" {
+		if addr == "192.0.2.183:37201" {
 			return nil
 		}
 		return context.DeadlineExceeded
 	}
 	a.disc.MdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
 		return []discovery.MdnsService{
-			{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-On9v2R", Addr: "192.168.31.183:37201", Mode: discovery.MdnsModeTls},
-			{Type: "_adb-tls-connect._tcp", Name: "adb-K80SERXXX-Ab12Cd", Addr: "192.168.31.197:42449", Mode: discovery.MdnsModeTls},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-On9v2R", Addr: "192.0.2.183:37201", Mode: discovery.MdnsModeTls},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-K80SERXXX-Ab12Cd", Addr: "192.0.2.197:42449", Mode: discovery.MdnsModeTls},
 		}, nil
 	}
 
 	a.runDiscovery(context.Background(), map[string][]AddrEntry{
 		"Xiaomi Pad 8 Pro": {
-			{Addr: "192.168.31.183:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 100},
+			{Addr: "192.0.2.183:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 100},
 		},
 	})
 
 	st := waitDiscStatus(t, a, "found")
-	if st.Found != "192.168.31.183:37201" {
+	if st.Found != "192.0.2.183:37201" {
 		t.Fatalf("候选设备的 TLS 广播应照常优先并成功: %+v", st)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	// tls 层成功即收工：只 connect 平板自己的 TLS 广播 37201
-	if len(calls) != 1 || calls[0] != "192.168.31.183:37201" {
+	if len(calls) != 1 || calls[0] != "192.0.2.183:37201" {
 		t.Fatalf("应只尝试候选设备自己的 TLS 广播: %v", calls)
 	}
-	if addrIn(calls, "192.168.31.197:42449") {
+	if addrIn(calls, "192.0.2.197:42449") {
 		t.Fatalf("在线设备 K80 的 42449 不应被 connect: %v", calls)
 	}
-	if addrIn(st.Tried, "192.168.31.197:42449") {
+	if addrIn(st.Tried, "192.0.2.197:42449") {
 		t.Fatalf("Tried 不应含 K80 广播 42449: %+v", st)
 	}
 	// MatchMdnsModes 入档副作用保持：37201 mode=tls 已归并进平板档案
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	a37201 := gui24FindAddr(e, "192.168.31.183:37201")
+	a37201 := gui24FindAddr(e, "192.0.2.183:37201")
 	if a37201 == nil || a37201.Mode != ModeTls {
 		t.Fatalf("候选设备 TLS 新端口应保持同步入档（mode=tls）: %+v", e.Addrs)
 	}

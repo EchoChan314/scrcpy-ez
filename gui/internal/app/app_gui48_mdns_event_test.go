@@ -15,7 +15,7 @@ func mdnsTlsSvc(name, ip, port string) discovery.MdnsService {
 }
 
 func mdnsTcpipSvc(ip string) discovery.MdnsService {
-	return discovery.MdnsService{Type: "_adb._tcp", Name: "adb-a743e1df", Addr: ip + ":5555", Mode: discovery.MdnsModeTcpip}
+	return discovery.MdnsService{Type: "_adb._tcp", Name: "adb-TEST0002", Addr: ip + ":5555", Mode: discovery.MdnsModeTcpip}
 }
 
 func mdnsTlsAddrStale(a *App, key, addr string) bool {
@@ -39,31 +39,31 @@ func TestGui48MdnsAddedBuildsPendingAndTlsMark(t *testing.T) {
 
 	// 未知 identity：待配对卡
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{
-		Snapshot: []discovery.MdnsService{mdnsTlsSvc("adb-abc123-Xy9zQ2", "192.168.31.77", "36329")},
+		Snapshot: []discovery.MdnsService{mdnsTlsSvc("adb-abc123-Xy9zQ2", "192.0.2.77", "36329")},
 		First:    true,
 	})
 	a.mu.RLock()
 	pending := append([]PendingDevice(nil), a.pending...)
 	a.mu.RUnlock()
-	if len(pending) != 1 || pending[0].Addr != "192.168.31.77:36329" {
+	if len(pending) != 1 || pending[0].Addr != "192.0.2.77:36329" {
 		t.Fatalf("未知 TLS 广播应进入待配对卡: %+v", pending)
 	}
 
 	// 已知 identity：档案入档 active + TLS 标
 	gui31K80Profiles(a)
-	wifi := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	wifi := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{wifi})
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{
-		Snapshot: []discovery.MdnsService{mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")},
+		Snapshot: []discovery.MdnsService{mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")},
 		First:    false,
 	})
-	if mdnsTlsAddrStale(a, "REDMI K80", "192.168.31.197:45005") {
+	if mdnsTlsAddrStale(a, "REDMI K80", "192.0.2.197:45005") {
 		t.Fatal("广播 added 后地址不应 stale")
 	}
 	devs := a.Snapshot().Devices
 	found := false
 	for _, d := range devs {
-		if d.Identity == "REDMI K80" || d.Serial == "601c9f08" || d.Wireless == "192.168.31.197:45005" {
+		if d.Identity == "REDMI K80" || d.Serial == "TEST0001" || d.Wireless == "192.0.2.197:45005" {
 			if !d.Tls {
 				t.Fatalf("TLS 广播在播应点亮 TLS 标: %+v", d)
 			}
@@ -82,7 +82,7 @@ func TestGui48MdnsGoneProbeFailStaleAndReappearActive(t *testing.T) {
 	gui31K80Profiles(a)
 	a.disc.TcpProbeFn = func(ctx context.Context, addr string) bool { return false }
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: []discovery.MdnsService{svc}, First: true})
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: false}) // gone
 
@@ -101,14 +101,14 @@ func TestGui48MdnsGoneProbeFailStaleAndReappearActive(t *testing.T) {
 func TestGui48OfflineJointRequiresMdnsGone(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 	a.applyTrackUpdate(nil)
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: true})
 
-	wifi := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	wifi := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{wifi})
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: []discovery.MdnsService{svc}, First: false})
 
 	// 设备流 removed，但 mdns 仍在 → 不打 stale
@@ -131,14 +131,14 @@ func TestGui48OfflineJointRequiresMdnsGone(t *testing.T) {
 func TestGui48OfflineJointUsbExempt(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 
-	usb := adb.Device{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
+	usb := adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{usb}) // 设备流首块即含 USB（在线事实）
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: true})
 	a.onDropped("REDMI K80")
-	if mdnsTlsAddrStale(a, "REDMI K80", "192.168.31.197:45005") {
+	if mdnsTlsAddrStale(a, "REDMI K80", "192.0.2.197:45005") {
 		t.Fatal("USB 在线豁免：mdns 无广播也不应打 stale")
 	}
 }
@@ -148,11 +148,11 @@ func TestGui48OfflineJointUsbExempt(t *testing.T) {
 func TestGui48StartupBaselineMarksAbsentStale(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 	a.applyTrackUpdate(nil)                                                                    // 设备流首块（空）
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: true}) // mdns 首块（空）
-	if !mdnsTlsAddrStale(a, "REDMI K80", "192.168.31.197:45005") {
+	if !mdnsTlsAddrStale(a, "REDMI K80", "192.0.2.197:45005") {
 		t.Fatal("启动基线对账应把既不在设备流也不在 mdns 流的档案条目标 stale（K80 假在线修复）")
 	}
 }
@@ -162,7 +162,7 @@ func TestGui48MdnsReconnectFirstSnapshotNoRemoved(t *testing.T) {
 	a, _ := newTestApp()
 	gui31K80Profiles(a)
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: []discovery.MdnsService{svc}, First: true})
 
 	added, removed := a.applyMdnsSnapshot(nil, true, nil, nil) // 重连首块（空快照）

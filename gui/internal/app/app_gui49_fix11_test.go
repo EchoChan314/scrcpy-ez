@@ -14,11 +14,11 @@ func TestGui49Fix11CommitDisplaySummaryLog(t *testing.T) {
 	logPath := mdns8StartLogCapture(t)
 
 	a.commitDisplay([]adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
 	}, "单元测试提交")
 	mdns8LogContains(t, logPath, "[app] 显示提交：单元测试提交")
 	mdns8LogContains(t, logPath, "[app] 显示提交摘要：n=1")
-	mdns8LogContains(t, logPath, "601c9f08|device|usb|connecting=false|name=REDMI K80")
+	mdns8LogContains(t, logPath, "TEST0001|device|usb|connecting=false|name=REDMI K80")
 }
 
 func TestGui49Fix11ProfileCardNameManufacturerModel(t *testing.T) {

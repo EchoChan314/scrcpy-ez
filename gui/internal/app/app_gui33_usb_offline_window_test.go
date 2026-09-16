@@ -24,8 +24,8 @@ func TestGui33FoldGhostUsbMergesUsbOfflineWindow(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "601c9f08"}, // USB 握手窗口
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"}, // USB 握手窗口
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Model: "24117RK2CC", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Battery: 94, Res: "2560x1600", FPS: 120, WirelessRes: "1920x1200",
 			Tls: true, WirelessForm: ModeTcpip},
@@ -34,13 +34,13 @@ func TestGui33FoldGhostUsbMergesUsbOfflineWindow(t *testing.T) {
 		t.Fatalf("USB offline 应与同身份无线卡归并为单卡（无无线闪现）: %+v", devs)
 	}
 	d := devs[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" {
 		t.Fatalf("归并卡应 USB 主 transport: %+v", d)
 	}
 	if d.State != "device" {
 		t.Fatalf("状态应取优为 device（无线侧在线，设备确实在线，不闪离线）: %+v", d)
 	}
-	if d.Wireless != "192.168.31.197:5555" {
+	if d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("无线地址应并入 Wireless 副行: %+v", d)
 	}
 	if d.Name != "REDMI K80" || d.Model != "24117RK2CC" || d.Marketname != "REDMI K80" || d.Identity != "REDMI K80" {
@@ -58,15 +58,15 @@ func TestGui33FoldGhostUsbOfflineBackfillsProfileName(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "601c9f08"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
-			Name: "192.168.31.197:5555"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
+			Name: "192.0.2.197:5555"},
 	})
 	if len(devs) != 1 {
 		t.Fatalf("应归并为单卡: %+v", devs)
 	}
 	d := devs[0]
-	if d.State != "device" || d.ConnType != "usb" || d.Wireless != "192.168.31.197:5555" {
+	if d.State != "device" || d.ConnType != "usb" || d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("归并卡应 device+usb+无线副行: %+v", d)
 	}
 	if d.Name != "REDMI K80" {
@@ -80,16 +80,16 @@ func TestGui33FoldGhostUsbUnauthorizedStaysSeparate(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "601c9f08", State: "unauthorized", ConnType: "usb", Name: "601c9f08"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
+		{Serial: "TEST0001", State: "unauthorized", ConnType: "usb", Name: "TEST0001"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
 	})
 	if len(devs) != 2 {
 		t.Fatalf("未授权 USB 不应与无线卡归并: %+v", devs)
 	}
-	if devs[0].Serial != "601c9f08" || devs[0].State != "unauthorized" || devs[0].ConnType != "usb" {
+	if devs[0].Serial != "TEST0001" || devs[0].State != "unauthorized" || devs[0].ConnType != "usb" {
 		t.Fatalf("未授权卡应独立保留: %+v", devs[0])
 	}
-	if devs[1].ConnType != "wifi" || devs[1].Serial != "192.168.31.197:5555" {
+	if devs[1].ConnType != "wifi" || devs[1].Serial != "192.0.2.197:5555" {
 		t.Fatalf("无线卡应原样保留: %+v", devs[1])
 	}
 }
@@ -100,16 +100,16 @@ func TestGui33FoldGhostUsbDevicePathRegression(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "601c9f08"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "TEST0001"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if len(devs) != 1 {
 		t.Fatalf("正常 device 路径应归并为单卡: %+v", devs)
 	}
 	d := devs[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" || d.State != "device" ||
-		d.Wireless != "192.168.31.197:5555" || d.Name != "REDMI K80" {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" || d.State != "device" ||
+		d.Wireless != "192.0.2.197:5555" || d.Name != "REDMI K80" {
 		t.Fatalf("device 路径归并结果应与 gui31 一致: %+v", d)
 	}
 }
@@ -121,13 +121,13 @@ func TestGui33FoldGhostUsbOfflineUsbNoOnlineWifi(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "601c9f08"},
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"},
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi"},
 	})
 	if len(devs) != 2 {
 		t.Fatalf("无线离线卡不参与 USB 主归并: %+v", devs)
 	}
-	if devs[0].Serial != "601c9f08" || devs[0].State != "offline" || devs[0].ConnType != "usb" ||
+	if devs[0].Serial != "TEST0001" || devs[0].State != "offline" || devs[0].ConnType != "usb" ||
 		devs[0].Name != "REDMI K80" {
 		t.Fatalf("USB 离线卡应保留（名称档案回补）: %+v", devs[0])
 	}
@@ -141,9 +141,9 @@ func TestGui33FoldGhostUsbPureWifiUnchanged(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
 	})
-	if len(devs) != 1 || devs[0].ConnType != "wifi" || devs[0].Serial != "192.168.31.197:5555" ||
+	if len(devs) != 1 || devs[0].ConnType != "wifi" || devs[0].Serial != "192.0.2.197:5555" ||
 		devs[0].Wireless != "" {
 		t.Fatalf("纯 WiFi 卡应原样保留: %+v", devs)
 	}
@@ -155,17 +155,17 @@ func TestGui33FoldGhostUsbPureWifiUnchanged(t *testing.T) {
 func TestGui33FoldGhostUsbOfflineNoCrossDeviceMerge(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80":        mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+		"REDMI K80":        mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "601c9f08"},
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"},
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"},
 	})
 	if len(devs) != 2 {
 		t.Fatalf("异身份卡不得归并: %+v", devs)
 	}
-	if devs[0].Serial != "601c9f08" || devs[0].ConnType != "usb" || devs[0].Wireless != "" {
+	if devs[0].Serial != "TEST0001" || devs[0].ConnType != "usb" || devs[0].Wireless != "" {
 		t.Fatalf("K80 USB 离线幽灵卡应原样保留: %+v", devs[0])
 	}
 	if devs[1].ConnType != "wifi" {
@@ -179,12 +179,12 @@ func TestGui33FoldGhostUsbOfflineWifiListedFirst(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
-		{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "601c9f08"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"},
 	})
-	if len(devs) != 1 || devs[0].Serial != "601c9f08" || devs[0].ConnType != "usb" ||
-		devs[0].State != "device" || devs[0].Wireless != "192.168.31.197:5555" {
+	if len(devs) != 1 || devs[0].Serial != "TEST0001" || devs[0].ConnType != "usb" ||
+		devs[0].State != "device" || devs[0].Wireless != "192.0.2.197:5555" {
 		t.Fatalf("无线卡在前也应归并为单 USB 卡且状态取优: %+v", devs)
 	}
 }
@@ -207,7 +207,7 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 		"if [ \"$1\" = \"mdns\" ]; then printf 'List of discovered mdns services\\n'; exit 0; fi\n" +
 		"if [ \"$1\" = \"connect\" ]; then exit 1; fi\n" +
 		"if [ \"$3\" = \"shell\" ]; then\n" +
-		"  if [ \"$2\" = \"601c9f08\" ]; then exit 1; fi\n" +
+		"  if [ \"$2\" = \"TEST0001\" ]; then exit 1; fi\n" +
 		"  case \"$4\" in\n" +
 		"    getprop)\n" +
 		"      case \"$5\" in\n" +
@@ -252,7 +252,7 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 
 	// ① 握手窗口：USB offline + 5555 无线 device 同轮出现 → 第一轮即单 USB 卡
 	// （State 取优=device，无线地址并入副行）——不闪「离线/无线」。
-	t.Setenv("G33_DEV", "601c9f08\toffline\n192.168.31.197:5555\tdevice model:24117RK2CC")
+	t.Setenv("G33_DEV", "TEST0001\toffline\n192.0.2.197:5555\tdevice model:24117RK2CC")
 	a.pollOnce(context.Background())
 	devs := a.Snapshot().Devices
 	noWifiOnly("握手窗口", devs)
@@ -260,10 +260,10 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 		t.Fatalf("握手窗口轮应单卡（无线卡被归并）: %+v", devs)
 	}
 	d := devs[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" || d.State != "device" {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" || d.State != "device" {
 		t.Fatalf("握手窗口轮应为在线 USB 主卡（状态取优，不闪离线）: %+v", d)
 	}
-	if d.Wireless != "192.168.31.197:5555" {
+	if d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("无线地址应并入 Wireless 副行: %+v", d)
 	}
 	if d.Name != "REDMI K80" {
@@ -274,25 +274,25 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 	// ② 未授权：USB unauthorized + 无线 device（gui49-fix4 形态锁定适配）——
 	// USB 条目在列即钉有线主卡；State=unauthorized 如实呈现，无线地址并入副行；
 	// 不合成连接中卡。
-	t.Setenv("G33_DEV", "601c9f08\tunauthorized\n192.168.31.197:5555\tdevice model:24117RK2CC")
+	t.Setenv("G33_DEV", "TEST0001\tunauthorized\n192.0.2.197:5555\tdevice model:24117RK2CC")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
 	if len(devs) != 1 {
 		t.Fatalf("未授权轮应单张有线主卡（无线并入副行）: %+v", devs)
 	}
 	d = devs[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" || d.State != "unauthorized" ||
-		d.Wireless != "192.168.31.197:5555" || d.Connecting {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" || d.State != "unauthorized" ||
+		d.Wireless != "192.0.2.197:5555" || d.Connecting {
 		t.Fatalf("未授权轮应钉有线形态并如实显示未授权: %+v", d)
 	}
 
 	// ③ USB device（正常路径）→ gui31 回归：单 USB 卡。
-	t.Setenv("G33_DEV", "601c9f08\tdevice\n192.168.31.197:5555\tdevice model:24117RK2CC")
+	t.Setenv("G33_DEV", "TEST0001\tdevice\n192.0.2.197:5555\tdevice model:24117RK2CC")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
 	noWifiOnly("正常", devs)
-	if len(devs) != 1 || devs[0].Serial != "601c9f08" || devs[0].ConnType != "usb" ||
-		devs[0].State != "device" || devs[0].Wireless != "192.168.31.197:5555" {
+	if len(devs) != 1 || devs[0].Serial != "TEST0001" || devs[0].ConnType != "usb" ||
+		devs[0].State != "device" || devs[0].Wireless != "192.0.2.197:5555" {
 		t.Fatalf("device 路径应单 USB 卡（gui31 回归）: %+v", devs)
 	}
 
@@ -321,9 +321,9 @@ func TestGui33MergeUsbPrimaryStatePreference(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			a := adb.Device{Serial: "601c9f08", State: c.usbState, ConnType: "usb"}
-			mergeUsbPrimary(&a, adb.Device{Serial: "192.168.31.197:5555", State: c.wifi, ConnType: "wifi"})
-			if a.State != c.want || a.Serial != "601c9f08" || a.ConnType != "usb" {
+			a := adb.Device{Serial: "TEST0001", State: c.usbState, ConnType: "usb"}
+			mergeUsbPrimary(&a, adb.Device{Serial: "192.0.2.197:5555", State: c.wifi, ConnType: "wifi"})
+			if a.State != c.want || a.Serial != "TEST0001" || a.ConnType != "usb" {
 				t.Fatalf("状态取优应为 %q（Serial/ConnType 保持 USB 侧）: %+v", c.want, a)
 			}
 		})

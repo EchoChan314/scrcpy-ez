@@ -41,23 +41,23 @@ func mkEntry(marketname, model string, serials, addrs []string) *DeviceEntry {
 func TestNewDevicePopupSameIdentityDualTransportNoPopup(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80":        mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+		"REDMI K80":        mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	// K80 USB 会话已存在
 	setDevices(a, []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
 	})
-	if err := a.StartCast("601c9f08"); err != nil {
+	if err := a.StartCast("TEST0001"); err != nil {
 		t.Fatal(err)
 	}
-	if got := sessionBySerial(t, a, "601c9f08").Identity; got != "REDMI K80" {
+	if got := sessionBySerial(t, a, "TEST0001").Identity; got != "REDMI K80" {
 		t.Fatalf("会话 identity 应为市场名: %q", got)
 	}
 
 	// 基线轮询：仅 K80 USB（已开会话）→ 无弹窗（平板尚未插线）
 	a.applyTrackUpdate([]adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if a.Snapshot().NewDevice != nil {
 		t.Fatalf("基线轮询不应弹窗: %+v", a.Snapshot().NewDevice)
@@ -66,21 +66,21 @@ func TestNewDevicePopupSameIdentityDualTransportNoPopup(t *testing.T) {
 	// 下一轮轮询：K80 无线 transport 上线（marketname 读不到 → 回退 identity/名）
 	// + 平板 USB 插线。K80 无线绝不能弹，平板才是候选（插线事件）。
 	devs := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"}, // 本轮 marketname 读不到（回退值）
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "a743e1df" {
+	if np == nil || np.Serial != "TEST0002" {
 		t.Fatalf("K80 无线（同身份）不应弹窗，应弹平板: %+v", np)
 	}
 
 	// 弹掉平板后（暂不）：K80 无线同身份仍绝不弹
-	a.DismissNewDevice("a743e1df")
+	a.DismissNewDevice("TEST0002")
 	a.applyTrackUpdate(devs)
 	if np = a.Snapshot().NewDevice; np != nil {
 		t.Fatalf("同身份设备在会话中绝不弹（含暂不后）: %+v", np)
@@ -93,17 +93,17 @@ func TestNewDevicePopupSameIdentityDualTransportNoPopup(t *testing.T) {
 func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	// 平板会话在投
 	setDevices(a, []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	})
-	_ = a.StartCast("a743e1df")
+	_ = a.StartCast("TEST0002")
 	// 基线：平板（会话中）+ K80 无线（已建档仅无线 → 不弹）
 	baseline := []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	}
@@ -114,8 +114,8 @@ func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 	}
 	// K80 USB 插线（本轮 marketname 读不到 → Name/Identity 回退 man+model）→ 弹
 	devs := []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	}
@@ -131,7 +131,7 @@ func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 	if np.Identity != "REDMI K80" {
 		t.Fatalf("弹窗 identity 应为档案市场名: %q", np.Identity)
 	}
-	if np.Serial != "601c9f08" || np.ConnType != "usb" {
+	if np.Serial != "TEST0001" || np.ConnType != "usb" {
 		t.Fatalf("弹窗目标卡错误: %+v", np)
 	}
 }
@@ -142,15 +142,15 @@ func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 func TestNewDevicePopupDismissStableAcrossIdentityFlip(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devsFallback := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	}
 	devsMarket := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "REDMI K80", Identity: "REDMI K80", Marketname: "REDMI K80",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	}
@@ -161,7 +161,7 @@ func TestNewDevicePopupDismissStableAcrossIdentityFlip(t *testing.T) {
 	if a.Snapshot().NewDevice == nil {
 		t.Fatal("首次应弹")
 	}
-	a.DismissNewDevice("601c9f08")
+	a.DismissNewDevice("TEST0001")
 	if a.Snapshot().NewDevice != nil {
 		t.Fatal("暂不后应关闭")
 	}
@@ -180,35 +180,35 @@ func TestNewDevicePopupDismissStableAcrossIdentityFlip(t *testing.T) {
 func TestStartCastInjectsMarketModelForLockedSession(t *testing.T) {
 	a, rec := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	setDevices(a, []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
 	})
-	if err := a.StartCast("601c9f08"); err != nil {
+	if err := a.StartCast("TEST0001"); err != nil {
 		t.Fatal(err)
 	}
-	p := rec.serial("601c9f08")[0].waitParams(t, 1)
-	if p.Serial != "601c9f08" || p.Market != "REDMI K80" || p.Model != "24117RK2CC" {
+	p := rec.serial("TEST0001")[0].waitParams(t, 1)
+	if p.Serial != "TEST0001" || p.Market != "REDMI K80" || p.Model != "24117RK2CC" {
 		t.Fatalf("锁定会话应注入 SCEZ_SERIAL+SCEZ_MARKET+SCEZ_MODEL: %+v", p)
 	}
 	// 档案 addrs 归并后：SCEZ_ADDR 同步注入（无线分支直连本尊，不读共享 config.txt）
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("锁定会话应注入 SCEZ_ADDR=档案最近成功 addr: %+v", p)
 	}
 	// 档案无 marketname（新设备只读到 model）：Market 不注、Model 注
 	a2, rec2 := multiTestApp()
 	seedProfiles(a2, map[string]*DeviceEntry{
-		"Xiaomi 24117RK2CC": mkEntry("", "24117RK2CC", []string{"601c9f08"}, nil),
+		"Xiaomi 24117RK2CC": mkEntry("", "24117RK2CC", []string{"TEST0001"}, nil),
 	})
 	setDevices(a2, []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "Xiaomi 24117RK2CC",
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "Xiaomi 24117RK2CC",
 			Identity: "Xiaomi 24117RK2CC", Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	})
-	if err := a2.StartCast("601c9f08"); err != nil {
+	if err := a2.StartCast("TEST0001"); err != nil {
 		t.Fatal(err)
 	}
-	p2 := rec2.serial("601c9f08")[0].waitParams(t, 1)
+	p2 := rec2.serial("TEST0001")[0].waitParams(t, 1)
 	if p2.Market != "" || p2.Model != "24117RK2CC" {
 		t.Fatalf("无市场名档案：只注 MODEL: %+v", p2)
 	}
@@ -261,23 +261,23 @@ func TestStopCastServerKillGateMultiSession(t *testing.T) {
 func TestStartCastIdentityViaProfileMarketname(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	// K80 无线卡（本轮 marketname 读不到 → 卡片 Identity 是 man+model 回退值）
 	setDevices(a, []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	})
 	startVerifyAlwaysOK(a) // gui32 验证链：档案候选 5555 验证通过才选用
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
-	if got := sessionBySerial(t, a, "192.168.31.197:5555").Identity; got != "REDMI K80" {
+	if got := sessionBySerial(t, a, "192.0.2.197:5555").Identity; got != "REDMI K80" {
 		t.Fatalf("会话 identity 应从档案市场名解析: %q", got)
 	}
 	// 同一设备旧 USB serial 再开会话 → 按档案 identity 拒绝
-	if err := a.StartCast("601c9f08"); err == nil || !strings.Contains(err.Error(), "投屏已在运行") {
+	if err := a.StartCast("TEST0001"); err == nil || !strings.Contains(err.Error(), "投屏已在运行") {
 		t.Fatalf("同档案 identity 重复开会话应拒绝: %v", err)
 	}
 }
@@ -290,14 +290,14 @@ func TestProfileSyncHealsMarketnameSplit(t *testing.T) {
 	s := NewProfileStore("")
 	// 直接构造分裂态（与实况 profiles.json 一致）
 	s.mu.Lock()
-	s.data.Devices["REDMI K80"] = mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, nil)
-	s.data.Devices["Xiaomi 24117RK2CC"] = mkEntry("", "24117RK2CC", nil, []string{"192.168.31.197:5555"})
+	s.data.Devices["REDMI K80"] = mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, nil)
+	s.data.Devices["Xiaomi 24117RK2CC"] = mkEntry("", "24117RK2CC", nil, []string{"192.0.2.197:5555"})
 	s.mu.Unlock()
 
 	// ① marketname 仍读不到：档案市场名优先 → 197 卡身份保持 REDMI K80，
 	// 不新建/不重键回 man+model（identity 稳定）；卡片 Marketname/Identity 被补正
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	}
@@ -307,13 +307,13 @@ func TestProfileSyncHealsMarketnameSplit(t *testing.T) {
 	if devs[0].Identity != "REDMI K80" || devs[0].Marketname != "REDMI K80" {
 		t.Fatalf("卡片身份应补正为档案市场名: id=%q mkt=%q", devs[0].Identity, devs[0].Marketname)
 	}
-	if e, ok := s.Entry("192.168.31.197:5555"); !ok || e.Marketname != "REDMI K80" {
+	if e, ok := s.Entry("192.0.2.197:5555"); !ok || e.Marketname != "REDMI K80" {
 		t.Fatalf("197 应归到 REDMI K80 档案: %+v/%v", e, ok)
 	}
 
 	// ② marketname 恢复读取：归并完成，旧 man+model 键消失
 	devs2 := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Identity: "REDMI K80", Marketname: "REDMI K80",
 			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
 	}
@@ -324,10 +324,10 @@ func TestProfileSyncHealsMarketnameSplit(t *testing.T) {
 	if split {
 		t.Fatal("归并后 man+model 分裂键应消失")
 	}
-	if got := s.BestAddr("601c9f08"); got != "192.168.31.197:5555" {
-		t.Fatalf("BestAddr(601c9f08) 应回到本尊无线地址: %q", got)
+	if got := s.BestAddr("TEST0001"); got != "192.0.2.197:5555" {
+		t.Fatalf("BestAddr(TEST0001) 应回到本尊无线地址: %q", got)
 	}
-	if got := s.BestAddr("192.168.31.197:5555"); got != "192.168.31.197:5555" {
+	if got := s.BestAddr("192.0.2.197:5555"); got != "192.0.2.197:5555" {
 		t.Fatalf("BestAddr(197) 应可用: %q", got)
 	}
 }

@@ -22,7 +22,7 @@ func TestGui49Fix3HalfDeadHealAfterConsecutiveFailures(t *testing.T) {
 	fake := filepath.Join(dir, "adb")
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"devices\" ]; then\n" +
-		"  if [ -f \"$G49_HEAL\" ]; then printf 'List of devices attached\\n601c9f08\\tdevice\\n'; exit 0; else exit 1; fi\n" +
+		"  if [ -f \"$G49_HEAL\" ]; then printf 'List of devices attached\\nTEST0001\\tdevice\\n'; exit 0; else exit 1; fi\n" +
 		"fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {

@@ -32,21 +32,21 @@ func TestGui27CandidatesOnePerClass(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.183:33895", State: AddrStateHistory, Fail: 12, LastOk: 1750000001, Mode: ModeTls},
-			{Addr: "192.168.31.183:45005", State: AddrStateHistory, Fail: 8, LastOk: 1750000004, Mode: ModeTls},
-			{Addr: "192.168.31.183:42449", State: AddrStateActive, Fail: 0, LastOk: 1750000003, Mode: ModeTls},
-			{Addr: "192.168.31.183:5555", State: AddrStateHistory, Fail: 254, LastOk: 1750000002, Mode: ModeTcpip},
-			{Addr: "192.168.31.162:5555", State: AddrStateHistory, Fail: 223, LastOk: 1750000006, Mode: ModeTcpip},
+			{Addr: "192.0.2.183:33895", State: AddrStateHistory, Fail: 12, LastOk: 1750000001, Mode: ModeTls},
+			{Addr: "192.0.2.183:45005", State: AddrStateHistory, Fail: 8, LastOk: 1750000004, Mode: ModeTls},
+			{Addr: "192.0.2.183:42449", State: AddrStateActive, Fail: 0, LastOk: 1750000003, Mode: ModeTls},
+			{Addr: "192.0.2.183:5555", State: AddrStateHistory, Fail: 254, LastOk: 1750000002, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:5555", State: AddrStateHistory, Fail: 223, LastOk: 1750000006, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("a743e1df")
+	got := s.OrderedAddrs("TEST0002")
 	// gui52 二态：active 严格优先（tls 42449）；旧 history 归一为 stale 后
 	// 作为离线候选参与（同状态按档案顺序取第一条 → tcpip 183:5555 在前）。
-	if len(got) != 2 || got[0].Addr != "192.168.31.183:42449" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.183:5555" || got[1].State != AddrStateStale {
+	if len(got) != 2 || got[0].Addr != "192.0.2.183:42449" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.183:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("二态候选应为 active TLS 42449 + stale tcpip 183:5555: %+v", got)
 	}
 	if got[0].Mode != ModeTls {
@@ -66,19 +66,19 @@ func TestGui27BigFailStillParticipates(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Fail: 223, LastOk: 1787744278, LastFail: time.Now().Add(-3600 * time.Second).Unix(), Mode: ModeTcpip},
-			{Addr: "192.168.31.183:5555", State: AddrStateActive, Fail: 254, LastOk: 1787744200, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Fail: 223, LastOk: 1787744278, LastFail: time.Now().Add(-3600 * time.Second).Unix(), Mode: ModeTcpip},
+			{Addr: "192.0.2.183:5555", State: AddrStateActive, Fail: 254, LastOk: 1787744200, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("a743e1df")
-	if len(got) != 1 || got[0].Addr != "192.168.31.162:5555" {
+	got := s.OrderedAddrs("TEST0002")
+	if len(got) != 1 || got[0].Addr != "192.0.2.162:5555" {
 		t.Fatalf("fail=223 但 lastFail 旧的 162 应参与（fail 不拉黑）: %+v", got)
 	}
-	if s.BestAddr("a743e1df") != "192.168.31.162:5555" {
-		t.Fatalf("BestAddr 应恢复 162: %q", s.BestAddr("a743e1df"))
+	if s.BestAddr("TEST0002") != "192.0.2.162:5555" {
+		t.Fatalf("BestAddr 应恢复 162: %q", s.BestAddr("TEST0002"))
 	}
 }
 
@@ -89,9 +89,9 @@ func TestGui27ThrottleWindow(t *testing.T) {
 		s := NewProfileStore("")
 		gui15Seed(s, "Xiaomi Pad 8 Pro", &DeviceEntry{
 			Marketname: "Xiaomi Pad 8 Pro",
-			Serials:    []string{"a743e1df"},
+			Serials:    []string{"TEST0002"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.162:5555", State: AddrStateActive, Fail: 1, LastOk: 1787744278, LastFail: lastFail, Mode: ModeTcpip},
+				{Addr: "192.0.2.162:5555", State: AddrStateActive, Fail: 1, LastOk: 1787744278, LastFail: lastFail, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		})
@@ -111,8 +111,8 @@ func TestGui27ThrottleWindow(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := seed(c.lastFail).OrderedAddrs("a743e1df")
-			if c.want && (len(got) != 1 || got[0].Addr != "192.168.31.162:5555") {
+			got := seed(c.lastFail).OrderedAddrs("TEST0002")
+			if c.want && (len(got) != 1 || got[0].Addr != "192.0.2.162:5555") {
 				t.Fatalf("应参与（永不拉黑）: %+v", got)
 			}
 			if !c.want && len(got) != 0 {
@@ -128,16 +128,16 @@ func TestGui27ThrottledNewestSkipsWholeClass(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.183:45005", State: AddrStateHistory, Fail: 2, LastOk: 1750000009, LastFail: time.Now().Unix(), Mode: ModeTls},
-			{Addr: "192.168.31.183:33895", State: AddrStateHistory, Fail: 0, LastOk: 1750000001, Mode: ModeTls},
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000005, Mode: ModeTcpip},
+			{Addr: "192.0.2.183:45005", State: AddrStateHistory, Fail: 2, LastOk: 1750000009, LastFail: time.Now().Unix(), Mode: ModeTls},
+			{Addr: "192.0.2.183:33895", State: AddrStateHistory, Fail: 0, LastOk: 1750000001, Mode: ModeTls},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000005, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("a743e1df")
-	if len(got) != 1 || got[0].Addr != "192.168.31.162:5555" {
+	got := s.OrderedAddrs("TEST0002")
+	if len(got) != 1 || got[0].Addr != "192.0.2.162:5555" {
 		t.Fatalf("最新 tls 被节流 → tls 层无候选，不回退旧 33895: %+v", got)
 	}
 }
@@ -147,31 +147,31 @@ func TestGui27ThrottledNewestSkipsWholeClass(t *testing.T) {
 func TestGui27NewTlsPortReplacesOld(t *testing.T) {
 	s := NewProfileStore("")
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
 	// 旧 TLS 端口入档（上次无线调试的端口）
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.183:42357", ModeTls)
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:42357", ModeTls)
 	// 重开无线调试 → 新端口 37201 广播（同 serial 新 guid 名）
 	matched := s.MatchMdnsModes([]MdnsMatch{
-		{Name: "adb-a743e1df-On9v2R", Addr: "192.168.31.183:37201", Mode: discovery.MdnsModeTls},
+		{Name: "adb-TEST0002-On9v2R", Addr: "192.0.2.183:37201", Mode: discovery.MdnsModeTls},
 	})
-	if len(matched) != 1 || matched[0].Addr != "192.168.31.183:37201" {
+	if len(matched) != 1 || matched[0].Addr != "192.0.2.183:37201" {
 		t.Fatalf("新 TLS 端口应为候选: %+v", matched)
 	}
 	e, _ := s.Entry("Xiaomi Pad 8 Pro")
-	if gui24FindAddr(e, "192.168.31.183:42357") != nil {
+	if gui24FindAddr(e, "192.0.2.183:42357") != nil {
 		t.Fatalf("旧 TLS 端口应按单记忆删除（不再转 history）: %+v", e.Addrs)
 	}
-	fresh := gui24FindAddr(e, "192.168.31.183:37201")
+	fresh := gui24FindAddr(e, "192.0.2.183:37201")
 	if fresh == nil || fresh.State != AddrStateActive || fresh.Mode != ModeTls {
 		t.Fatalf("新 TLS 端口应 active: %+v", e.Addrs)
 	}
-	if e.TlsGuid != "adb-a743e1df-On9v2R" {
+	if e.TlsGuid != "adb-TEST0002-On9v2R" {
 		t.Fatalf("tlsGuid 应更新为新端口服务实例名: %q", e.TlsGuid)
 	}
 	// 候选：TLS 类只取新端口（旧端口出局）
-	got := s.OrderedAddrs("a743e1df")
-	if len(got) != 1 || got[0].Addr != "192.168.31.183:37201" {
+	got := s.OrderedAddrs("TEST0002")
+	if len(got) != 1 || got[0].Addr != "192.0.2.183:37201" {
 		t.Fatalf("候选应为新 TLS 端口: %+v", got)
 	}
 }
@@ -181,31 +181,31 @@ func TestGui27NewTlsPortReplacesOld(t *testing.T) {
 func TestGui27New5555ReplacesOld(t *testing.T) {
 	s := NewProfileStore("")
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.183:5555", ModeTcpip)
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
 	e, _ := s.Entry("Xiaomi Pad 8 Pro")
-	if a := gui24FindAddr(e, "192.168.31.183:5555"); a == nil || a.State != AddrStateActive {
+	if a := gui24FindAddr(e, "192.0.2.183:5555"); a == nil || a.State != AddrStateActive {
 		t.Fatalf("首个 5555 应 active: %+v", e.Addrs)
 	}
 
 	// 跨 IP：162 成功（换路由器场景）
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
 	e, _ = s.Entry("Xiaomi Pad 8 Pro")
-	if gui24FindAddr(e, "192.168.31.183:5555") != nil {
+	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("跨 IP 替换：旧 5555 应按单记忆删除: %+v", e.Addrs)
 	}
-	if a := gui24FindAddr(e, "192.168.31.162:5555"); a == nil || a.State != AddrStateActive {
+	if a := gui24FindAddr(e, "192.0.2.162:5555"); a == nil || a.State != AddrStateActive {
 		t.Fatalf("新 5555 应 active: %+v", e.Addrs)
 	}
-	if got := s.BestAddr("a743e1df"); got != "192.168.31.162:5555" {
+	if got := s.BestAddr("TEST0002"); got != "192.0.2.162:5555" {
 		t.Fatalf("BestAddr 应为新 5555: %q", got)
 	}
 
 	// 同一 IP 再成功：更新时间戳、状态保持（不来回翻转）
-	s.AddrSuccess("Xiaomi Pad 8 Pro", "192.168.31.162:5555")
+	s.AddrSuccess("Xiaomi Pad 8 Pro", "192.0.2.162:5555")
 	e, _ = s.Entry("Xiaomi Pad 8 Pro")
-	a162 := gui24FindAddr(e, "192.168.31.162:5555")
+	a162 := gui24FindAddr(e, "192.0.2.162:5555")
 	if a162 == nil || a162.State != AddrStateActive || a162.Fail != 0 || a162.LastFail != 0 {
 		t.Fatalf("同一 IP 再成功应保持 active 且清 fail/lastFail: %+v", a162)
 	}
@@ -216,24 +216,24 @@ func TestGui27New5555ReplacesOld(t *testing.T) {
 func TestGui27SuccessClearsThrottle(t *testing.T) {
 	s := NewProfileStore("")
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
-	s.AddrFail("Xiaomi Pad 8 Pro", "192.168.31.162:5555")
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.162:5555")
 	e, _ := s.Entry("Xiaomi Pad 8 Pro")
-	if a := gui24FindAddr(e, "192.168.31.162:5555"); a == nil || a.Fail != 1 || a.LastFail == 0 {
+	if a := gui24FindAddr(e, "192.0.2.162:5555"); a == nil || a.Fail != 1 || a.LastFail == 0 {
 		t.Fatalf("失败后应 fail=1 + lastFail=now: %+v", e.Addrs)
 	}
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 0 {
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 0 {
 		t.Fatalf("刚失败应被 60s 节流: %+v", got)
 	}
 	time.Sleep(1100 * time.Millisecond) // lastOk 秒级区分
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
 	e, _ = s.Entry("Xiaomi Pad 8 Pro")
-	if a := gui24FindAddr(e, "192.168.31.162:5555"); a == nil || a.Fail != 0 || a.LastFail != 0 || a.State != AddrStateActive {
+	if a := gui24FindAddr(e, "192.0.2.162:5555"); a == nil || a.Fail != 0 || a.LastFail != 0 || a.State != AddrStateActive {
 		t.Fatalf("成功后应清 fail/lastFail 并回 active: %+v", e.Addrs)
 	}
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 1 || got[0].Addr != "192.168.31.162:5555" {
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 1 || got[0].Addr != "192.0.2.162:5555" {
 		t.Fatalf("成功后应恢复参与: %+v", got)
 	}
 }
@@ -243,21 +243,21 @@ func TestGui27SuccessClearsThrottle(t *testing.T) {
 func TestGui27BroadcastClearsThrottle(t *testing.T) {
 	s := NewProfileStore("")
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
-	s.AddrFail("Xiaomi Pad 8 Pro", "192.168.31.162:5555")
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 0 {
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.162:5555")
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 0 {
 		t.Fatalf("失败后应先被节流: %+v", got)
 	}
 	s.MatchMdnsModes([]MdnsMatch{
-		{Name: "adb-a743e1df", Addr: "192.168.31.162:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-TEST0002", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	})
 	e, _ := s.Entry("Xiaomi Pad 8 Pro")
-	if a := gui24FindAddr(e, "192.168.31.162:5555"); a == nil || a.LastFail != 0 {
+	if a := gui24FindAddr(e, "192.0.2.162:5555"); a == nil || a.LastFail != 0 {
 		t.Fatalf("广播在场应解除节流（lastFail=0）: %+v", e.Addrs)
 	}
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 1 || got[0].Addr != "192.168.31.162:5555" {
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 1 || got[0].Addr != "192.0.2.162:5555" {
 		t.Fatalf("广播解除节流后应恢复参与: %+v", got)
 	}
 }
@@ -271,14 +271,14 @@ func TestGui27LegacyJsonMigration(t *testing.T) {
   "devices": {
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "serials": ["a743e1df"],
+      "serials": ["TEST0002"],
       "wireless": "tls",
-      "tlsGuid": "adb-a743e1df-KWqpio",
+      "tlsGuid": "adb-TEST0002-KWqpio",
       "addrs": [
-        {"addr": "192.168.31.183:42357", "state": "active", "fail": 2, "lastOk": 1787744000, "mode": "tls"},
-        {"addr": "192.168.31.183:5555", "state": "history", "fail": 254, "lastOk": 1787744100, "mode": "tcpip"},
-        {"addr": "192.168.31.162:5555", "state": "history", "fail": 223, "lastOk": 1787744278, "mode": "tcpip"},
-        {"addr": "192.168.31.183:45005", "state": "history", "fail": 5, "lastOk": 0, "mode": "tls"}
+        {"addr": "192.0.2.183:42357", "state": "active", "fail": 2, "lastOk": 1787744000, "mode": "tls"},
+        {"addr": "192.0.2.183:5555", "state": "history", "fail": 254, "lastOk": 1787744100, "mode": "tcpip"},
+        {"addr": "192.0.2.162:5555", "state": "history", "fail": 223, "lastOk": 1787744278, "mode": "tcpip"},
+        {"addr": "192.0.2.183:45005", "state": "history", "fail": 5, "lastOk": 0, "mode": "tls"}
       ],
       "profiles": {"usb": {}, "wifi": {}}
     }
@@ -294,16 +294,16 @@ func TestGui27LegacyJsonMigration(t *testing.T) {
 	// gui52 迁移：tls 类 active 42357 保留（fail=2 不入判据）；tcpip 类旧
 	// history 按 lastOk 最新者 162:5555 迁移为 stale（183 丢弃）；45005
 	// 与 42357 同形态且更旧 → 丢弃。
-	got := s.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.183:42357" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.162:5555" || got[1].State != AddrStateStale {
+	got := s.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.183:42357" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("旧档案迁移应为 active TLS 42357 + stale tcpip 162:5555: %+v", got)
 	}
-	if s.BestAddr("a743e1df") != "192.168.31.183:42357" {
-		t.Fatalf("BestAddr 应为 active 42357: %q", s.BestAddr("a743e1df"))
+	if s.BestAddr("TEST0002") != "192.0.2.183:42357" {
+		t.Fatalf("BestAddr 应为 active 42357: %q", s.BestAddr("TEST0002"))
 	}
-	e, _ := s.Entry("a743e1df")
-	for _, legacy := range []string{"192.168.31.183:5555", "192.168.31.183:45005"} {
+	e, _ := s.Entry("TEST0002")
+	for _, legacy := range []string{"192.0.2.183:5555", "192.0.2.183:45005"} {
 		if gui24FindAddr(e, legacy) != nil {
 			t.Fatalf("旧字段折叠后不应残留 %s: %+v", legacy, e.Addrs)
 		}
@@ -313,13 +313,13 @@ func TestGui27LegacyJsonMigration(t *testing.T) {
 	s2 := NewProfileStore("")
 	gui15Seed(s2, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.183:45005", State: AddrStateActive, Fail: 0, LastOk: 0, Mode: ModeTls},
+			{Addr: "192.0.2.183:45005", State: AddrStateActive, Fail: 0, LastOk: 0, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
-	if got := s2.OrderedAddrs("a743e1df"); len(got) != 1 || got[0].Addr != "192.168.31.183:45005" {
+	if got := s2.OrderedAddrs("TEST0002"); len(got) != 1 || got[0].Addr != "192.0.2.183:45005" {
 		t.Fatalf("lastOk=0 且 lastFail=0 的旧档案条目应视为可用: %+v", got)
 	}
 }
@@ -329,27 +329,27 @@ func TestGui27LegacyJsonMigration(t *testing.T) {
 func TestGui27ResetFailThrottle(t *testing.T) {
 	s := NewProfileStore("")
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
-	s.AddrFail("Xiaomi Pad 8 Pro", "192.168.31.162:5555")
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 0 {
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.162:5555")
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 0 {
 		t.Fatalf("失败后应先被节流: %+v", got)
 	}
 	s.ResetFailThrottle()
 	// gui52：ResetFailThrottle 只清内存态节流；state 仍是 stale——
 	// stale=离线候选，节流解除后立即恢复参与（不靠成功/广播才能翻回）。
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 1 || got[0].Addr != "192.168.31.162:5555" || got[0].State != AddrStateStale {
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 1 || got[0].Addr != "192.0.2.162:5555" || got[0].State != AddrStateStale {
 		t.Fatalf("节流解除后 stale 应恢复为离线候选: %+v", got)
 	}
 	e, _ := s.Entry("Xiaomi Pad 8 Pro")
-	a := gui24FindAddr(e, "192.168.31.162:5555")
+	a := gui24FindAddr(e, "192.0.2.162:5555")
 	if a == nil || a.LastFail != 0 || a.State != AddrStateStale {
 		t.Fatalf("ResetFailThrottle 后 lastFail 应归零但 state 保持 stale: %+v", e.Addrs)
 	}
 	// 成功路径 → state=active
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
-	if got := s.OrderedAddrs("a743e1df"); len(got) != 1 || got[0].Addr != "192.168.31.162:5555" || got[0].State != AddrStateActive {
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	if got := s.OrderedAddrs("TEST0002"); len(got) != 1 || got[0].Addr != "192.0.2.162:5555" || got[0].State != AddrStateActive {
 		t.Fatalf("成功后应翻回 active: %+v", got)
 	}
 }

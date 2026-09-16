@@ -315,6 +315,13 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
             }
             break;
         }
+        case DEVICE_MSG_TYPE_STOP_MIRRORING:
+            // scrcpy-ez: user pressed "stop mirroring" on the device
+            // notification → wake up the main loop to stop mirroring
+            // gracefully (no allocation to free in the msg)
+            LOGI("Stop mirroring requested from device");
+            sc_push_event(SC_EVENT_STOP_MIRRORING);
+            break;
     }
 }
 
@@ -346,9 +353,13 @@ static int
 run_receiver(void *data) {
     struct sc_receiver *receiver = data;
 
-    // Allocate dynamically: DEVICE_MSG_MAX_SIZE may be large (64M) to support
-    // large image clipboard messages sent back from the server.
-    uint8_t *buf = malloc(DEVICE_MSG_MAX_SIZE);
+    // Start small and grow on demand: DEVICE_MSG_MAX_SIZE (256M) is the
+    // protocol cap for lossless large image clipboard support, but
+    // allocating it upfront (static .bss or malloc) would keep ~256M of
+    // memory resident per mirroring session even though large messages
+    // are rare. Doubling avoids parsing the per-type header here.
+    size_t cap = 64 * 1024;
+    uint8_t *buf = malloc(cap);
     if (!buf) {
         LOGE("Could not allocate receiver buffer");
         receiver->cbs->on_ended(receiver, true, receiver->cbs_userdata);
@@ -359,9 +370,31 @@ run_receiver(void *data) {
     bool error = false;
 
     for (;;) {
-        assert(head < DEVICE_MSG_MAX_SIZE);
+        assert(head <= cap);
+        if (head == cap) {
+            // A message larger than the current buffer is arriving: grow.
+            size_t need = cap * 2;
+            if (need > DEVICE_MSG_MAX_SIZE) {
+                need = DEVICE_MSG_MAX_SIZE;
+            }
+            if (need == cap) {
+                // Already at the protocol limit: the peer is misbehaving.
+                LOGE("Device message too large, aborting");
+                error = true;
+                break;
+            }
+            uint8_t *nbuf = realloc(buf, need);
+            if (!nbuf) {
+                LOGE("Could not grow receiver buffer");
+                error = true;
+                break;
+            }
+            buf = nbuf;
+            cap = need;
+        }
+
         ssize_t r = net_recv(receiver->control_socket, buf + head,
-                             DEVICE_MSG_MAX_SIZE - head);
+                             cap - head);
         if (r <= 0) {
             LOGD("Receiver stopped");
             // device disconnected: keep error=false
@@ -380,6 +413,15 @@ run_receiver(void *data) {
             head -= consumed;
             // shift the remaining data in the buffer
             memmove(buf, &buf[consumed], head);
+        }
+
+        // Shrink back while idle (after a burst of large messages is over).
+        if (head == 0 && cap > 1024 * 1024) {
+            uint8_t *sbuf = realloc(buf, 64 * 1024);
+            if (sbuf) {
+                buf = sbuf;
+                cap = 64 * 1024;
+            }
         }
     }
 

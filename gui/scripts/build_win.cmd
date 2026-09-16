@@ -22,7 +22,7 @@ if not exist dist mkdir dist
 "%GOEXE%" mod tidy
 if errorlevel 1 exit /b 1
 
-"%GOEXE%" build -ldflags="-s -w -H windowsgui" -o "%ROOT%\dist\scrcpy-ez-gui.exe" .
+"%GOEXE%" build -trimpath -ldflags="-s -w -H windowsgui" -o "%ROOT%\dist\scrcpy-ez-gui.exe" .
 if errorlevel 1 exit /b 1
 
 copy /y "%ROOT%\vendor_tmp\WebView2Loader.dll" "%ROOT%\dist\WebView2Loader.dll" >nul

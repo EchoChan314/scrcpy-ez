@@ -75,13 +75,13 @@ func (o *teachfix2Ops) probes() []string {
 
 func teachfix2SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 }
 
 func teachfix2Usb(state string) adb.Device {
-	return adb.Device{Serial: "601c9f08", State: state, ConnType: "usb",
+	return adb.Device{Serial: "TEST0001", State: state, ConnType: "usb",
 		Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"}
 }
 
@@ -102,17 +102,17 @@ func TestTeachfix2IPCandidatesExcludeNonPhysical(t *testing.T) {
 		"3: tun0: <POINTOPOINT> mtu 1500\n" +
 		"    inet 10.8.0.2/32 scope global tun0\n" +
 		"4: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n" +
-		"    inet 192.168.31.100/24 scope global eth0\n" +
+		"    inet 192.0.2.100/24 scope global eth0\n" +
 		"5: usb0: <UP,LOWER_UP> mtu 1500\n" +
 		"    inet 192.168.42.129/24 scope global usb0\n" +
 		"6: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n" +
-		"    inet 192.168.31.197/24 scope global wlan0\n" +
+		"    inet 192.0.2.197/24 scope global wlan0\n" +
 		"7: ppp0: <POINTOPOINT> mtu 1500\n" +
 		"    inet 10.64.64.64/32 scope global ppp0\n" +
 		"8: ifb0: <BROADCAST> mtu 1500\n" +
 		"    inet 169.254.3.4/24 scope global ifb0\n"
 	ips := teachCandidateIPs(teachIPCandidatesFromAddr(out))
-	want := []string{"192.168.31.197", "192.168.31.100"} // wlan0 > eth0
+	want := []string{"192.0.2.197", "192.0.2.100"} // wlan0 > eth0
 	if len(ips) != len(want) {
 		t.Fatalf("候选应只含物理接口（wlan/eth）: %v", ips)
 	}
@@ -144,12 +144,12 @@ func TestTeachfix2ProbeCandidatesParallelFirstSuccess(t *testing.T) {
 		mu.Lock()
 		active--
 		mu.Unlock()
-		return addr == "192.168.31.100:5555" // 第二个候选（eth）通
+		return addr == "192.0.2.100:5555" // 第二个候选（eth）通
 	}
-	got := a.probeWirelessCandidates(context.Background(), "601c9f08",
-		[]string{"192.168.31.197", "192.168.31.100"})
+	got := a.probeWirelessCandidates(context.Background(), "TEST0001",
+		[]string{"192.0.2.197", "192.0.2.100"})
 	elapsed := time.Since(start)
-	if got != "192.168.31.100" {
+	if got != "192.0.2.100" {
 		t.Fatalf("第一个探测通的候选应写入: %q", got)
 	}
 	if maxActive != 2 {
@@ -164,8 +164,8 @@ func TestTeachfix2ProbeCandidatesParallelFirstSuccess(t *testing.T) {
 func TestTeachfix2ProbeAllFailReturnsEmpty(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.teachOps.probeFn = func(ctx context.Context, addr string) bool { return false }
-	if got := a.probeWirelessCandidates(context.Background(), "601c9f08",
-		[]string{"192.168.31.197", "192.168.31.100"}); got != "" {
+	if got := a.probeWirelessCandidates(context.Background(), "TEST0001",
+		[]string{"192.0.2.197", "192.0.2.100"}); got != "" {
 		t.Fatalf("全不通应返回空: %q", got)
 	}
 }
@@ -177,12 +177,12 @@ func TestTeachfix2LearnPicksPhysicalReachableCandidate(t *testing.T) {
 	teachfix2SeedK80(a)
 	ops := &teachfix2Ops{
 		port: "5555",
-		addrOut: "2: wlan0: <UP> mtu 1500\n    inet 192.168.31.197/24 scope global wlan0\n" +
+		addrOut: "2: wlan0: <UP> mtu 1500\n    inet 192.0.2.197/24 scope global wlan0\n" +
 			"3: rmnet_data2: <UP> mtu 1500\n    inet 10.2.190.105/30 scope global rmnet_data2\n" +
-			"4: eth0: <UP> mtu 1500\n    inet 192.168.31.100/24 scope global eth0\n",
+			"4: eth0: <UP> mtu 1500\n    inet 192.0.2.100/24 scope global eth0\n",
 		probeOK: map[string]bool{
-			"192.168.31.197:5555": true,
-			"192.168.31.100:5555": false,
+			"192.0.2.197:5555": true,
+			"192.0.2.100:5555": false,
 		},
 	}
 	ops.install(a)
@@ -192,7 +192,7 @@ func TestTeachfix2LearnPicksPhysicalReachableCandidate(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("应对 wlan+eth 两个物理候选并行探测（蜂窝不参与）: %v", calls)
 	}
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if ae == nil || ae.State != AddrStateActive {
 		t.Fatalf("应写入探测通的 wlan IP: %+v", ae)
 	}
@@ -206,7 +206,7 @@ func TestTeachfix2LearnPicksPhysicalReachableCandidate(t *testing.T) {
 func TestTeachfix2RemovedNoLongerClearsMask(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix2SeedK80(a)
-	a.profiles.AddrSuccess("REDMI K80", "192.168.31.197:5555", ModeTcpip)
+	a.profiles.AddrSuccess("REDMI K80", "192.0.2.197:5555", ModeTcpip)
 
 	a.applyTrackUpdate([]adb.Device{teachfix2Usb("offline")})
 	if !teachfix2PlugActive(a, "REDMI K80") {
@@ -259,7 +259,7 @@ func TestTeachfix2MaskLifecycleBindsTcpipReady(t *testing.T) {
 	ops.mu.Lock()
 	ops.port = "5555"
 	ops.mu.Unlock()
-	a.plugCheckTcpipReady(context.Background(), "601c9f08")
+	a.plugCheckTcpipReady(context.Background(), "TEST0001")
 	if !teachfix2PlugActive(a, "REDMI K80") {
 		t.Fatal("getprop==5555 不得清遮罩（清因改为稳定 device）")
 	}
@@ -281,8 +281,8 @@ func TestTeachfix2HuaweiStyleRegression(t *testing.T) {
 	a, _ := newWirelessApp()
 	ops := &teachfix2Ops{
 		port:    "5555",
-		addrOut: "2: wlan0: <UP> mtu 1500\n    inet 192.168.31.77/24 scope global wlan0\n",
-		probeOK: map[string]bool{"192.168.31.77:5555": true},
+		addrOut: "2: wlan0: <UP> mtu 1500\n    inet 192.0.2.77/24 scope global wlan0\n",
+		probeOK: map[string]bool{"192.0.2.77:5555": true},
 	}
 	ops.install(a)
 
@@ -291,7 +291,7 @@ func TestTeachfix2HuaweiStyleRegression(t *testing.T) {
 		Name: "HUAWEI FLA-TL10", Marketname: "HUAWEI FLA-TL10",
 		Identity: "HUAWEI FLA-TL10",
 	}})
-	ae := teachfixAddrState(a, "HUAWEI FLA-TL10", "192.168.31.77:5555")
+	ae := teachfixAddrState(a, "HUAWEI FLA-TL10", "192.0.2.77:5555")
 	if ae == nil || ae.State != AddrStateActive {
 		t.Fatalf("华为型 added device 应学习成功: %+v", ae)
 	}

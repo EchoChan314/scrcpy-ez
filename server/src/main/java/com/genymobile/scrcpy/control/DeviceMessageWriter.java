@@ -63,6 +63,9 @@ public class DeviceMessageWriter {
                 dos.writeInt(msg.getBitrate());
                 dos.writeInt(msg.getAbrFps());
                 break;
+            case DeviceMessage.TYPE_STOP_MIRRORING:
+                // no payload (scrcpy-ez: device-side "stop mirroring" request)
+                break;
             default:
                 throw new ControlProtocolException("Unknown event type: " + type);
         }

@@ -9,6 +9,7 @@ import com.genymobile.scrcpy.audio.AudioRawRecorder;
 import com.genymobile.scrcpy.audio.AudioSource;
 import com.genymobile.scrcpy.control.ControlChannel;
 import com.genymobile.scrcpy.control.Controller;
+import com.genymobile.scrcpy.control.DeviceMessage;
 import com.genymobile.scrcpy.device.DesktopConnection;
 import com.genymobile.scrcpy.device.Device;
 import com.genymobile.scrcpy.device.Streamer;
@@ -102,6 +103,8 @@ public final class Server {
 
         List<AsyncProcessor> asyncProcessors = new ArrayList<>();
 
+        BgNotification bgNotification = null;
+
         DesktopConnection connection = DesktopConnection.open(scid, tunnelForward, video, audio, control, sendDummyByte);
         try {
             if (options.getSendDeviceMeta()) {
@@ -114,6 +117,13 @@ public final class Server {
                 ControlChannel controlChannel = connection.getControlChannel();
                 controller = new Controller(controlChannel, cleanUp, options);
                 asyncProcessors.add(controller);
+
+                // scrcpy-ez: 设备端「正在投屏」提示通知（带「停止投屏」按钮）。
+                // 点击停止 → 走控制通道告诉电脑端优雅停止（而非"意外断开"）。
+                // 通知属于附加能力，任何失败都在 BgNotification 内部静默降级。
+                final Controller activeController = controller;
+                bgNotification = BgNotification.start("scrcpy-ez 正在投屏", Device.getDeviceName() + " · 点按可停止",
+                        () -> activeController.getDeviceMessageSender().send(DeviceMessage.createStopMirroring()));
             }
 
             if (audio) {
@@ -169,6 +179,9 @@ public final class Server {
 
             Looper.loop(); // interrupted by the Completion implementation
         } finally {
+            if (bgNotification != null) {
+                bgNotification.stop();
+            }
             if (cleanUp != null) {
                 cleanUp.interrupt();
             }

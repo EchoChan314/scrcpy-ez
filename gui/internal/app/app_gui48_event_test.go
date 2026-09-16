@@ -26,22 +26,22 @@ func TestGui48PlugOfflineThenDeviceSequence(t *testing.T) {
 
 	a.applyTrackUpdate(nil) // 首块基线：无设备
 	a.applyTrackUpdate([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb"},
 	})
 	if !teachfix3PlugActive(a) {
 		t.Fatal("offline added 应置位 plugging")
 	}
 	out := a.Snapshot().Devices
-	if len(out) != 1 || !out[0].Connecting || out[0].Serial != "601c9f08" {
+	if len(out) != 1 || !out[0].Connecting || out[0].Serial != "TEST0001" {
 		t.Fatalf("offline 阶段应遮罩成 USB 连接中卡: %+v", out)
 	}
 
-	real := adb.Device{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
+	real := adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{real})
 	gui49fix6WaitPlugClear(t, a) // USB 连续 device 满稳定窗口 → 清 plugging
 	waitForMdns(t, "device 阶段真实 USB 卡接管", func() bool {
 		out := a.Snapshot().Devices
-		return len(out) == 1 && out[0].Serial == "601c9f08" && !out[0].Connecting
+		return len(out) == 1 && out[0].Serial == "TEST0001" && !out[0].Connecting
 	})
 }
 
@@ -60,7 +60,7 @@ func TestGui48FirstSeenDeviceTeachSuccessRearmsPlug(t *testing.T) {
 	}
 
 	a.applyTrackUpdate(nil)
-	real := adb.Device{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
+	real := adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{real})
 	if tcpips != 1 {
 		t.Fatalf("USB added 事件应触发一次插线学习 tcpip: %d", tcpips)
@@ -72,7 +72,7 @@ func TestGui48FirstSeenDeviceTeachSuccessRearmsPlug(t *testing.T) {
 	// adbd 重启窗口：设备从列表消失 → 遮罩维持（离线卡让位）
 	a.applyTrackUpdate(nil)
 	out := a.Snapshot().Devices
-	if len(out) != 1 || !out[0].Connecting || out[0].Serial != "601c9f08" {
+	if len(out) != 1 || !out[0].Connecting || out[0].Serial != "TEST0001" {
 		t.Fatalf("adbd 重启窗口应维持 USB 连接中遮罩: %+v", out)
 	}
 }
@@ -82,11 +82,11 @@ func TestGui48FirstSeenDeviceTeachSuccessRearmsPlug(t *testing.T) {
 func TestGui48RemovedDropDebounceThenDetect(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 
 	a.applyTrackUpdate(nil)
-	wifi := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	wifi := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{wifi})
 
 	a.applyTrackUpdate(nil)
@@ -115,7 +115,7 @@ func TestGui48RemovedDebounceCancelledOnReappear(t *testing.T) {
 	gui31K80Profiles(a)
 
 	a.applyTrackUpdate(nil)
-	wifi := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	wifi := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{wifi})
 	a.applyTrackUpdate(nil) // removed → 调度防抖
 
@@ -140,11 +140,11 @@ func TestGui48DeviceEventPopupNoSession(t *testing.T) {
 	a, _ := newTestApp()
 	gui31K80Profiles(a)
 
-	usb := adb.Device{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
+	usb := adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate(nil)               // 首块基线
 	a.applyTrackUpdate([]adb.Device{usb}) // USB device 事件（已建档，首块后）
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0001" || np.ConnType != "usb" {
 		t.Fatalf("device 事件 + 无会话应弹窗（USB）: %+v", np)
 	}
 }

@@ -40,7 +40,7 @@ func (o *teachfixOps) install(a *App) {
 			o.seq = append(o.seq, "ip-route")
 			ip := o.ip
 			o.mu.Unlock()
-			return "default via 192.168.31.1 dev wlan0 src " + ip + "\n", nil
+			return "default via 192.0.2.1 dev wlan0 src " + ip + "\n", nil
 		}
 		o.seq = append(o.seq, "shell-other")
 		o.mu.Unlock()
@@ -78,8 +78,8 @@ func (o *teachfixOps) order() []string {
 
 func teachfixSeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 }
 
@@ -114,49 +114,49 @@ func teachfixTaught(a *App, serial string) bool {
 func TestTeachfixOfflineAddedThenChangedDeviceLearns(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfixSeedK80(a)
-	ops := &teachfixOps{port: "5555", ip: "192.168.31.200", probeOK: true}
+	ops := &teachfixOps{port: "5555", ip: "192.0.2.200", probeOK: true}
 	ops.install(a)
 	logPath := mdns8StartLogCapture(t)
 
-	a.applyTrackUpdate([]adb.Device{teachfixUsb("601c9f08", "offline")})
+	a.applyTrackUpdate([]adb.Device{teachfixUsb("TEST0001", "offline")})
 	g, _, _, _ := ops.counts()
 	if g != 0 {
 		t.Fatalf("offline added 不应执行学习: getprop=%d", g)
 	}
-	if teachfixTaught(a, "601c9f08") {
+	if teachfixTaught(a, "TEST0001") {
 		t.Fatal("offline added 不应占 taughtTcpip 名额（否则翻转后无补学机会）")
 	}
-	mdns8LogContains(t, logPath, "[app] 插线学习待命：601c9f08（offline）")
+	mdns8LogContains(t, logPath, "[app] 插线学习待命：TEST0001（offline）")
 
-	a.applyTrackUpdate([]adb.Device{teachfixUsb("601c9f08", "device")})
+	a.applyTrackUpdate([]adb.Device{teachfixUsb("TEST0001", "device")})
 	g, _, _, p := ops.counts()
 	if g != 1 || p != 1 {
 		t.Fatalf("翻转 device 应补学一次: getprop=%d probe=%d", g, p)
 	}
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.200:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.200:5555")
 	if ae == nil || ae.State != AddrStateActive || ae.Stale {
 		t.Fatalf("学习 IP 应写档案 active: %+v", ae)
 	}
-	if teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555") != nil {
+	if teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555") != nil {
 		t.Fatal("同形态旧 5555 应被淘汰（AddrSuccess 语义）")
 	}
-	mdns8LogContains(t, logPath, "[app] 插线学习开始：601c9f08")
-	mdns8LogContains(t, logPath, "[app] 插线学习 TCP 探测通：601c9f08 -> 192.168.31.200:5555")
+	mdns8LogContains(t, logPath, "[app] 插线学习开始：TEST0001")
+	mdns8LogContains(t, logPath, "[app] 插线学习 TCP 探测通：TEST0001 -> 192.0.2.200:5555")
 }
 
 // 原路径不回归：added 即 device → 立即学习一次。
 func TestTeachfixAddedDeviceLearnsImmediately(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfixSeedK80(a)
-	ops := &teachfixOps{port: "5555", ip: "192.168.31.200", probeOK: true}
+	ops := &teachfixOps{port: "5555", ip: "192.0.2.200", probeOK: true}
 	ops.install(a)
 
-	a.applyTrackUpdate([]adb.Device{teachfixUsb("601c9f08", "device")})
+	a.applyTrackUpdate([]adb.Device{teachfixUsb("TEST0001", "device")})
 	g, _, _, p := ops.counts()
 	if g != 1 || p != 1 {
 		t.Fatalf("added device 应立即学习: getprop=%d probe=%d", g, p)
 	}
-	if !teachfixTaught(a, "601c9f08") {
+	if !teachfixTaught(a, "TEST0001") {
 		t.Fatal("学习后应占 taughtTcpip 名额")
 	}
 }
@@ -165,10 +165,10 @@ func TestTeachfixAddedDeviceLearnsImmediately(t *testing.T) {
 func TestTeachfixOneTeachPerPlugCycle(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfixSeedK80(a)
-	ops := &teachfixOps{port: "5555", ip: "192.168.31.200", probeOK: true}
+	ops := &teachfixOps{port: "5555", ip: "192.0.2.200", probeOK: true}
 	ops.install(a)
 
-	dev := teachfixUsb("601c9f08", "device")
+	dev := teachfixUsb("TEST0001", "device")
 	a.applyTrackUpdate([]adb.Device{dev})
 	g, _, _, p := ops.counts()
 	if g != 1 || p != 1 {
@@ -185,7 +185,7 @@ func TestTeachfixOneTeachPerPlugCycle(t *testing.T) {
 
 	// 拔线：周期结束清除名额；再插线 = 新周期重新学习。
 	a.applyTrackUpdate(nil)
-	if teachfixTaught(a, "601c9f08") {
+	if teachfixTaught(a, "TEST0001") {
 		t.Fatal("拔线后应清除 taughtTcpip 名额")
 	}
 	a.applyTrackUpdate([]adb.Device{dev})
@@ -199,44 +199,44 @@ func TestTeachfixOneTeachPerPlugCycle(t *testing.T) {
 func TestTeachfixLearnAlignsArchive(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfixSeedK80(a)
-	ops := &teachfixOps{port: "5555", ip: "192.168.31.200", probeOK: true}
+	ops := &teachfixOps{port: "5555", ip: "192.0.2.200", probeOK: true}
 	ops.install(a)
 	logPath := mdns8StartLogCapture(t)
 
-	a.applyTrackUpdate([]adb.Device{teachfixUsb("601c9f08", "device")})
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.200:5555")
+	a.applyTrackUpdate([]adb.Device{teachfixUsb("TEST0001", "device")})
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.200:5555")
 	if ae == nil || ae.State != AddrStateActive || ae.Mode != ModeTcpip {
 		t.Fatalf("档案应含学习 IP active tcpip: %+v", ae)
 	}
-	mdns8LogContains(t, logPath, "[app] 插线学习 IP：601c9f08 -> 192.168.31.200:5555（档案已对齐）")
+	mdns8LogContains(t, logPath, "[app] 插线学习 IP：TEST0001 -> 192.0.2.200:5555（档案已对齐）")
 }
 
 // TCP 探测不通 → 不写档案（诚实），本周期名额保留，下次插线再学。
 func TestTeachfixProbeFailNoArchiveWrite(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfixSeedK80(a)
-	ops := &teachfixOps{port: "5555", ip: "192.168.31.200", probeOK: false}
+	ops := &teachfixOps{port: "5555", ip: "192.0.2.200", probeOK: false}
 	ops.install(a)
 	logPath := mdns8StartLogCapture(t)
 
-	a.applyTrackUpdate([]adb.Device{teachfixUsb("601c9f08", "device")})
-	if teachfixAddrState(a, "REDMI K80", "192.168.31.200:5555") != nil {
+	a.applyTrackUpdate([]adb.Device{teachfixUsb("TEST0001", "device")})
+	if teachfixAddrState(a, "REDMI K80", "192.0.2.200:5555") != nil {
 		t.Fatal("探测不通不得写档案")
 	}
-	old := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	old := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if old == nil || !old.Stale && old.State != AddrStateActive {
 		t.Fatalf("旧档案应保持原样: %+v", old)
 	}
-	if !teachfixTaught(a, "601c9f08") {
+	if !teachfixTaught(a, "TEST0001") {
 		t.Fatal("探测失败也应保留本周期名额（防轰炸）")
 	}
-	mdns8LogContains(t, logPath, "[app] 插线学习 TCP 探测不通，不写档案：601c9f08 -> 192.168.31.200:5555")
+	mdns8LogContains(t, logPath, "[app] 插线学习 TCP 探测不通，不写档案：TEST0001 -> 192.0.2.200:5555")
 }
 
 // 华为型：首见即 device 的新设备（档案由 SyncDevices 建立）→ 立即学习。
 func TestTeachfixHuaweiStyleAddedDeviceLearns(t *testing.T) {
 	a, _ := newWirelessApp()
-	ops := &teachfixOps{port: "5555", ip: "192.168.31.77", probeOK: true}
+	ops := &teachfixOps{port: "5555", ip: "192.0.2.77", probeOK: true}
 	ops.install(a)
 
 	dev := adb.Device{
@@ -245,7 +245,7 @@ func TestTeachfixHuaweiStyleAddedDeviceLearns(t *testing.T) {
 		Identity: "HUAWEI FLA-TL10",
 	}
 	a.applyTrackUpdate([]adb.Device{dev})
-	ae := teachfixAddrState(a, "HUAWEI FLA-TL10", "192.168.31.77:5555")
+	ae := teachfixAddrState(a, "HUAWEI FLA-TL10", "192.0.2.77:5555")
 	if ae == nil || ae.State != AddrStateActive {
 		t.Fatalf("华为型 added device 应学习并对齐档案: %+v", ae)
 	}
@@ -259,10 +259,10 @@ func TestTeachfixHuaweiStyleAddedDeviceLearns(t *testing.T) {
 func TestTeachfixPortNot5555RunsTcpipThenProbe(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfixSeedK80(a)
-	ops := &teachfixOps{port: "0", ip: "192.168.31.200", probeOK: true}
+	ops := &teachfixOps{port: "0", ip: "192.0.2.200", probeOK: true}
 	ops.install(a)
 
-	a.applyTrackUpdate([]adb.Device{teachfixUsb("601c9f08", "device")})
+	a.applyTrackUpdate([]adb.Device{teachfixUsb("TEST0001", "device")})
 	_, _, tc, pc := ops.counts()
 	if tc != 1 || pc != 1 {
 		t.Fatalf("非 5555 应 tcpip 一次 + 探测一次: tcpip=%d probe=%d", tc, pc)
@@ -274,7 +274,7 @@ func TestTeachfixPortNot5555RunsTcpipThenProbe(t *testing.T) {
 	if strings.Index(order, "tcpip") > strings.Index(order, "probe") {
 		t.Fatalf("探测必须在 tcpip 之后: %s", order)
 	}
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.200:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.200:5555")
 	if ae == nil || ae.State != AddrStateActive {
 		t.Fatalf("tcpip+探测通后应写档案: %+v", ae)
 	}

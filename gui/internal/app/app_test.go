@@ -339,7 +339,7 @@ func TestPollOnceTriggersWirelessRecover(t *testing.T) {
 	dir := t.TempDir()
 	rec := filepath.Join(dir, "calls.txt")
 	cfg := filepath.Join(dir, "config.txt")
-	if err := os.WriteFile(cfg, []byte("192.168.31.162:5555\r\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte("192.0.2.162:5555\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	fake := filepath.Join(dir, "adb")
@@ -361,7 +361,7 @@ func TestPollOnceTriggersWirelessRecover(t *testing.T) {
 	}
 	got := strings.TrimSpace(string(b))
 	// 第二次 pollOnce 只做 devices 轮询（30s 节流内跳过 connect）
-	want := "devices -l\nconnect 192.168.31.162:5555\ndevices -l"
+	want := "devices -l\nconnect 192.0.2.162:5555\ndevices -l"
 	if got != want {
 		t.Fatalf("自恢复链路错误:\n got %q\nwant %q", got, want)
 	}
@@ -780,7 +780,11 @@ func TestSaveProfileAndRestartInjectsParams(t *testing.T) {
 	a.OnBatExit("X", 1) // 模拟 waitLoop 回调 → restartAfterExit 重跑
 	f.waitStarts(t, 2)
 	f.waitParams(t, 2)
-	want := bridge.CastParams{Usb: bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true}}
+	want := bridge.CastParams{
+		Usb: bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true},
+		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
+		OverlayVisible: true, OverlayVisibleSet: true,
+	}
 	// 两次 Start 的 goroutine 调度顺序不定：重启那一次必须带该模式覆盖参数
 	// （usb 套；wifi 未保存自定义 → 不注入）
 	found := false
@@ -824,6 +828,8 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	want := bridge.CastParams{
 		Usb:  bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true},
 		Wifi: bridge.ModeParams{Res: 1280, FPS: 30, Bitrate: 15, Set: true},
+		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
+		OverlayVisible: true, OverlayVisibleSet: true,
 	}
 	if got != want {
 		t.Fatalf("记忆档未按模式注入: %+v, want %+v", got, want)
@@ -840,7 +846,11 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	}
 	_ = a2.StartCast("W")
 	got2 := f2.waitParams(t, 1)
-	want2 := bridge.CastParams{Wifi: bridge.ModeParams{Res: 720, FPS: 30, Bitrate: 15, Set: true}}
+	want2 := bridge.CastParams{
+		Wifi: bridge.ModeParams{Res: 720, FPS: 30, Bitrate: 15, Set: true},
+		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
+		OverlayVisible: true, OverlayVisibleSet: true,
+	}
 	if got2 != want2 {
 		t.Fatalf("仅无线自定义应只注入 wifi 套: %+v, want %+v", got2, want2)
 	}

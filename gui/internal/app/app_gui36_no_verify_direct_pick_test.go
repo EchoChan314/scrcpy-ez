@@ -33,11 +33,11 @@ func TestGui36NoBroadcastActiveCandidatesDirectPickNoConnect(t *testing.T) {
 		return nil
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:42449" {
+	if p.Addr != "192.0.2.197:42449" {
 		t.Fatalf("无广播应直取 OrderedAddrs[0]=42449: %+v", p)
 	}
 	mu.Lock()
@@ -62,11 +62,11 @@ func TestGui36NoBroadcastNoCandidatesFallbackToSerial(t *testing.T) {
 		return nil
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatalf("无候选不应提示「未找到」，应走 target.Serial 兜底: %v", err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("档案无候选时应注入当前在线 target.Serial: %+v", p)
 	}
 	mu.Lock()
@@ -81,7 +81,7 @@ func TestGui36NoBroadcastNoCandidatesFallbackToSerial(t *testing.T) {
 func TestGui36BroadcastStillDirectSelect(t *testing.T) {
 	a, f := newWirelessApp()
 	k80Gui32Archive(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:42449")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:42449")
 	k80Gui32WifiCard(a)
 	var mu sync.Mutex
 	var calls []string
@@ -92,11 +92,11 @@ func TestGui36BroadcastStillDirectSelect(t *testing.T) {
 		return nil
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("广播命中应直接选 5555: %+v", p)
 	}
 	mu.Lock()
@@ -112,10 +112,10 @@ func TestGui36CandidateOrderTlsBeforeTcpipDirectPick(t *testing.T) {
 	a, f := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:33895", State: AddrStateActive, Fail: 0, LastOk: 1787745799, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:33895", State: AddrStateActive, Fail: 0, LastOk: 1787745799, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -129,11 +129,11 @@ func TestGui36CandidateOrderTlsBeforeTcpipDirectPick(t *testing.T) {
 		return nil
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:33895" {
+	if p.Addr != "192.0.2.197:33895" {
 		t.Fatalf("OrderedAddrs[0] 应为 tls 33895（tls 优先），直选该地址: %+v", p)
 	}
 	if s := a.Snapshot(); !s.Cast.Tls {
@@ -153,10 +153,10 @@ func TestGui36ThrottledEntryExcludedFromCandidates(t *testing.T) {
 	a, f := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:33895", State: AddrStateActive, Fail: 2, LastOk: 1750000001, LastFail: time.Now().Unix(), Mode: ModeTls},
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000002, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:33895", State: AddrStateActive, Fail: 2, LastOk: 1750000001, LastFail: time.Now().Unix(), Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000002, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -170,15 +170,15 @@ func TestGui36ThrottledEntryExcludedFromCandidates(t *testing.T) {
 		return nil
 	}
 
-	got := a.profiles.OrderedAddrs("601c9f08")
-	if len(got) != 1 || got[0].Addr != "192.168.31.197:5555" {
+	got := a.profiles.OrderedAddrs("TEST0001")
+	if len(got) != 1 || got[0].Addr != "192.0.2.197:5555" {
 		t.Fatalf("60s 节流期内的 tls 条目不应出现在候选里: %+v", got)
 	}
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("节流排除后应直选剩余候选 5555: %+v", p)
 	}
 	mu.Lock()

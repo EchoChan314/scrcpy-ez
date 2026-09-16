@@ -16,11 +16,11 @@ import (
 // 6 位随机后缀剥离；原裸名行为回归不变。
 func TestTlsServiceIdentityFqn(t *testing.T) {
 	cases := map[string]string{
-		"adb-601c9f08-KWqpio._adb-tls-connect._tcp": "601c9f08",
-		"adb-a743e1df-Ab12Cd._adb._tcp":             "a743e1df",
-		"adb-a743e1df-Ab12Cd":                       "a743e1df", // 原裸名回归
+		"adb-TEST0001-KWqpio._adb-tls-connect._tcp": "TEST0001",
+		"adb-TEST0002-Ab12Cd._adb._tcp":             "TEST0002",
+		"adb-TEST0002-Ab12Cd":                       "TEST0002", // 原裸名回归
 		"adb-R58T00WA0YM-0x9zQ2":                    "R58T00WA0YM",
-		"a743e1df":                                  "a743e1df",
+		"TEST0002":                                  "TEST0002",
 		"adb-ABCDEF0123456789":                      "ABCDEF0123456789",
 		"adb-abc123._tcp":                           "abc123",
 		"":                                          "",
@@ -39,16 +39,16 @@ func TestIsTlsFormAddr(t *testing.T) {
 		in   string
 		want bool
 	}{
-		{"192.168.31.197:33895", true},
+		{"192.0.2.197:33895", true},
 		{"10.0.0.8:41234", true},
-		{"192.168.31.197:5555", false},
-		{"192.168.31.197:05555", false}, // 端口按数值解析：05555 == 5555
-		{"adb-601c9f08-KWqpio._adb-tls-connect._tcp", false},
-		{"601c9f08", false},
+		{"192.0.2.197:5555", false},
+		{"192.0.2.197:05555", false}, // 端口按数值解析：05555 == 5555
+		{"adb-TEST0001-KWqpio._adb-tls-connect._tcp", false},
+		{"TEST0001", false},
 		{"", false},
-		{"192.168.31.197", false},  // 无端口
-		{"192.168.31.197:", false}, // 空端口
-		{"192.168.31.197:abc", false},
+		{"192.0.2.197", false},  // 无端口
+		{"192.0.2.197:", false}, // 空端口
+		{"192.0.2.197:abc", false},
 	}
 	for _, c := range cases {
 		if got := isTlsFormAddr(c.in); got != c.want {
@@ -62,24 +62,24 @@ func TestIsTlsFormAddr(t *testing.T) {
 func TestFoldGhostMdnsTokenMergesIntoIdentityCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555", "192.168.31.197:33895"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555", "192.0.2.197:33895"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
-		{Serial: "adb-601c9f08-KWqpio._adb-tls-connect._tcp", State: "offline", ConnType: "other"},
-		{Serial: "192.168.31.197:33895", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "adb-TEST0001-KWqpio._adb-tls-connect._tcp", State: "offline", ConnType: "other"},
+		{Serial: "192.0.2.197:33895", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if len(devs) != 1 {
 		t.Fatalf("令牌幽灵卡应折叠为单卡: %+v", devs)
 	}
-	if devs[0].Serial != "192.168.31.197:33895" {
+	if devs[0].Serial != "192.0.2.197:33895" {
 		t.Fatalf("应保留同身份在线卡: %+v", devs[0])
 	}
 	if strings.Contains(devs[0].Wireless, "._adb") {
 		t.Fatalf("副行不得写令牌 FQN: %+v", devs[0])
 	}
-	if devs[0].Wireless != "192.168.31.197:5555" {
+	if devs[0].Wireless != "192.0.2.197:5555" {
 		t.Fatalf("副行应补档案 ip:port 首条（5555）: %+v", devs[0])
 	}
 }
@@ -88,7 +88,7 @@ func TestFoldGhostMdnsTokenMergesIntoIdentityCard(t *testing.T) {
 // ConnType 归 "other"（serial 含 "_adb-tls"）——折叠判据因此与 ConnType 无关。
 func TestFoldGhostMdnsTokenUnknownFiltered(t *testing.T) {
 	a, _ := newWirelessApp()
-	raw := adb.ParseDevicesL("List of devices attached\nadb-601c9f08-KWqpio._adb-tls-connect._tcp\toffline\n")
+	raw := adb.ParseDevicesL("List of devices attached\nadb-TEST0001-KWqpio._adb-tls-connect._tcp\toffline\n")
 	if len(raw) != 1 || raw[0].ConnType != "other" {
 		t.Fatalf("令牌条目解析错误: %+v", raw)
 	}
@@ -105,15 +105,15 @@ func TestFoldGhostMdnsTokenUnknownFiltered(t *testing.T) {
 func TestFoldGhostMdnsTokenDeviceStateFolded(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
-		{Serial: "adb-601c9f08-KWqpio._adb-tls-connect._tcp", State: "device", ConnType: "other"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "adb-TEST0001-KWqpio._adb-tls-connect._tcp", State: "device", ConnType: "other"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	})
-	if len(devs) != 1 || devs[0].Serial != "192.168.31.197:5555" {
+	if len(devs) != 1 || devs[0].Serial != "192.0.2.197:5555" {
 		t.Fatalf("device 态令牌应同样折叠进同身份卡: %+v", devs)
 	}
 	if devs[0].Wireless != "" {
@@ -126,9 +126,9 @@ func TestFoldGhostMdnsTokenDeviceStateFolded(t *testing.T) {
 func TestFoldGhostWirelessRegressionNonToken(t *testing.T) {
 	a, _ := newWirelessApp()
 	devs := a.foldGhostWireless([]adb.Device{
-		{Serial: "a743e1df", State: "offline", ConnType: "usb"},
-		{Serial: "192.168.31.77:41234", State: "device", ConnType: "wifi"},
-		{Serial: "192.168.31.77:41234", State: "unauthorized", ConnType: "wifi"},
+		{Serial: "TEST0002", State: "offline", ConnType: "usb"},
+		{Serial: "192.0.2.77:41234", State: "device", ConnType: "wifi"},
+		{Serial: "192.0.2.77:41234", State: "unauthorized", ConnType: "wifi"},
 		{Serial: "adb-R58T00WA0YM-Xy9zQ2", State: "offline", ConnType: "other"},
 	})
 	if len(devs) != 4 {
@@ -147,11 +147,11 @@ func TestNormalizeArchivedMode(t *testing.T) {
     "REDMI K80": {
       "marketname": "REDMI K80",
       "model": "24117RK2CC",
-      "serials": ["601c9f08"],
+      "serials": ["TEST0001"],
       "addrs": [
-        {"addr": "192.168.31.197:33895", "state": "active", "fail": 0, "lastOk": 1750000001},
-        {"addr": "192.168.31.197:5555", "state": "history", "fail": 3, "lastOk": 1750000000},
-        {"addr": "192.168.31.197:41234", "state": "active", "fail": 0, "lastOk": 1750000002, "mode": "tls"}
+        {"addr": "192.0.2.197:33895", "state": "active", "fail": 0, "lastOk": 1750000001},
+        {"addr": "192.0.2.197:5555", "state": "history", "fail": 3, "lastOk": 1750000000},
+        {"addr": "192.0.2.197:41234", "state": "active", "fail": 0, "lastOk": 1750000002, "mode": "tls"}
       ],
       "profiles": {"usb": {}, "wifi": {}}
     }
@@ -172,8 +172,8 @@ func TestNormalizeArchivedMode(t *testing.T) {
 	// gui52 迁移：同形态双 active 只留 lastOk 最新的 41234（mode=tls）；
 	// 旧 history 5555 迁移为 state=stale（离线候选，不再删除）并补 mode=tcpip。
 	if len(e.Addrs) != 2 ||
-		e.Addrs[0].Addr != "192.168.31.197:41234" || e.Addrs[0].State != AddrStateActive || e.Addrs[0].Mode != ModeTls ||
-		e.Addrs[1].Addr != "192.168.31.197:5555" || e.Addrs[1].State != AddrStateStale || e.Addrs[1].Mode != ModeTcpip {
+		e.Addrs[0].Addr != "192.0.2.197:41234" || e.Addrs[0].State != AddrStateActive || e.Addrs[0].Mode != ModeTls ||
+		e.Addrs[1].Addr != "192.0.2.197:5555" || e.Addrs[1].State != AddrStateStale || e.Addrs[1].Mode != ModeTcpip {
 		t.Fatalf("gui52 二态迁移结果错误（tls 41234 active + 5555 stale）: %+v", e.Addrs)
 	}
 	b1, err := os.ReadFile(path)
@@ -203,8 +203,8 @@ func TestNormalizeArchivedMode(t *testing.T) {
 		t.Fatalf("二次加载不应再改写档案（幂等）:\n--- 第一次 ---\n%s\n--- 第二次 ---\n%s", b1, b2)
 	}
 	e2, ok := s2.Entry("REDMI K80")
-	if !ok || len(e2.Addrs) != 2 || e2.Addrs[0].Addr != "192.168.31.197:41234" ||
-		e2.Addrs[1].Addr != "192.168.31.197:5555" || e2.Addrs[1].State != AddrStateStale {
+	if !ok || len(e2.Addrs) != 2 || e2.Addrs[0].Addr != "192.0.2.197:41234" ||
+		e2.Addrs[1].Addr != "192.0.2.197:5555" || e2.Addrs[1].State != AddrStateStale {
 		t.Fatalf("二次加载档案异常（应保持二态单记忆）: %+v", e2)
 	}
 }

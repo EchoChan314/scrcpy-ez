@@ -158,6 +158,16 @@ event_loop(struct scrcpy *s, bool has_screen) {
                 fflush(stdout);
                 restore_device_screen(s, has_screen);
                 return SCRCPY_EXIT_SUCCESS;
+            case SC_EVENT_STOP_MIRRORING:
+                // scrcpy-ez: user pressed "stop mirroring" on the device
+                // notification. Treated exactly like a user closing the window:
+                // same sentinel line for the GUI, exit code 0 so the launcher
+                // script stops the mirroring loop instead of reconnecting.
+                LOGI("Stop mirroring requested from device notification");
+                fprintf(stdout, "SCRCPY_EZ_USER_CLOSE\n");
+                fflush(stdout);
+                restore_device_screen(s, has_screen);
+                return SCRCPY_EXIT_SUCCESS;
             default:
                 if (has_screen) {
                     sc_screen_handle_event(&s->screen, &event);

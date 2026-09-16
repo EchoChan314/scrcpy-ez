@@ -14,7 +14,7 @@ import (
 func fix2Seed(a *App, addr string) {
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs:      []AddrEntry{{Addr: addr, State: AddrStateActive, LastOk: 100, Mode: ModeTls}},
 		Profiles:   DefaultProfile(),
 	})
@@ -35,7 +35,7 @@ func fix2Addr(a *App, addr string) *AddrEntry {
 
 func TestGui48Mdns5IdleSignalStale(t *testing.T) {
 	a, _ := newWirelessApp()
-	addr := "192.168.31.197:45005"
+	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
 	// gui48-mdns8：90s 无信号改为「静默问询」——TCP 探测不通才打 stale。
 	a.disc.TcpProbeFn = func(ctx context.Context, addr string) bool { return false }
@@ -53,10 +53,10 @@ func TestGui48Mdns5ColdSearchAllAddrs(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:45005", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:45005", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -66,7 +66,7 @@ func TestGui48Mdns5ColdSearchAllAddrs(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, addr)
 		mu.Unlock()
-		if addr == "192.168.31.197:5555" {
+		if addr == "192.0.2.197:5555" {
 			return "connected to " + addr, nil
 		}
 		return "cannot connect to " + addr, nil
@@ -76,15 +76,15 @@ func TestGui48Mdns5ColdSearchAllAddrs(t *testing.T) {
 	mu.Lock()
 	got := append([]string(nil), calls...)
 	mu.Unlock()
-	if len(got) != 2 || !(contains(got, "192.168.31.197:5555") && contains(got, "192.168.31.197:45005")) {
+	if len(got) != 2 || !(contains(got, "192.0.2.197:5555") && contains(got, "192.0.2.197:45005")) {
 		t.Fatalf("冷启动应全量搜索全部地址（含 TLS 随机端口）: %v", got)
 	}
 	e, _ := a.profiles.Entry("REDMI K80")
-	if ae := gui24FindAddr(e, "192.168.31.197:5555"); ae == nil || ae.State != AddrStateActive || ae.Stale {
+	if ae := gui24FindAddr(e, "192.0.2.197:5555"); ae == nil || ae.State != AddrStateActive || ae.Stale {
 		t.Fatalf("冷启动 5555 connect 成功应 active: %+v", ae)
 	}
 	// gui52fix4：TLS 地址也被探测——不通 → stale（不再保持僵尸 active）
-	if ae := gui24FindAddr(e, "192.168.31.197:45005"); ae == nil || ae.State != AddrStateStale {
+	if ae := gui24FindAddr(e, "192.0.2.197:45005"); ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("冷启动 TLS connect 不通应 stale: %+v", ae)
 	}
 }
@@ -93,8 +93,8 @@ func TestGui48Mdns5ColdSearchFailureStale(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
-		Addrs:      []AddrEntry{{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip}},
+		Serials:    []string{"TEST0001"},
+		Addrs:      []AddrEntry{{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip}},
 		Profiles:   DefaultProfile(),
 	})
 	a.disc.ConnectOutFn = func(ctx context.Context, addr string) (string, error) {
@@ -103,7 +103,7 @@ func TestGui48Mdns5ColdSearchFailureStale(t *testing.T) {
 
 	a.coldSearch5555(context.Background())
 	e, _ := a.profiles.Entry("REDMI K80")
-	ae := gui24FindAddr(e, "192.168.31.197:5555")
+	ae := gui24FindAddr(e, "192.0.2.197:5555")
 	if ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("冷启动 connect 失败应 stale（gui52fix4 硬事实降级）: %+v", ae)
 	}
@@ -113,8 +113,8 @@ func TestGui48Mdns5ColdSearchOnlyOnce(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
-		Addrs:      []AddrEntry{{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip}},
+		Serials:    []string{"TEST0001"},
+		Addrs:      []AddrEntry{{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip}},
 		Profiles:   DefaultProfile(),
 	})
 	var mu sync.Mutex
@@ -139,19 +139,19 @@ func TestGui48Mdns5ColdSearchOnlyOnce(t *testing.T) {
 
 func TestGui48Mdns5WirelessIPFilled(t *testing.T) {
 	a, _ := newWirelessApp()
-	fix2Seed(a, "192.168.31.197:45005")
+	fix2Seed(a, "192.0.2.197:45005")
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	}
 	a.decorateTls(devs)
-	if devs[0].WirelessIP != "192.168.31.197:45005" {
+	if devs[0].WirelessIP != "192.0.2.197:45005" {
 		t.Fatalf("WirelessIP 应填档案 active 排序地址: %+v", devs[0])
 	}
 
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:45005")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:45005")
 	devs = []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	}
 	a.decorateTls(devs)

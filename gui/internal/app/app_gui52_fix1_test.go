@@ -24,11 +24,11 @@ func TestGui52Fix1PairMergeByIPWhenSerialUnknown(t *testing.T) {
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
 		Model:      "25091RP04C",
-		Serials:    []string{"a743e1df"},
-		TlsGuid:    "adb-a743e1df-KWqpio",
+		Serials:    []string{"TEST0002"},
+		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.183:5555", State: AddrStateActive, Mode: ModeTcpip},
-			{Addr: "192.168.31.183:40725", State: AddrStateActive, Mode: ModeTls},
+			{Addr: "192.0.2.183:5555", State: AddrStateActive, Mode: ModeTcpip},
+			{Addr: "192.0.2.183:40725", State: AddrStateActive, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -51,7 +51,7 @@ func TestGui52Fix1PairMergeByIPWhenSerialUnknown(t *testing.T) {
 		return nil, nil // 现场重扫也取不到服务名 → hintSerial 保持空
 	}
 
-	if err := a.PairConnect("", "192.168.31.183", "37033", "38167", "123456"); err != nil {
+	if err := a.PairConnect("", "192.0.2.183", "37033", "38167", "123456"); err != nil {
 		t.Fatal(err)
 	}
 	waitPairPhase(t, a, PairPhaseSuccess)
@@ -59,11 +59,11 @@ func TestGui52Fix1PairMergeByIPWhenSerialUnknown(t *testing.T) {
 	// 等待无线接入学习完成：38167 TLS + 5555 探测入档
 	waitFor(t, 3*time.Second, func() bool {
 		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
-		return ok && gui50Fix45EntryHasAddr(e, "192.168.31.183:38167", ModeTls)
+		return ok && gui50Fix45EntryHasAddr(e, "192.0.2.183:38167", ModeTls)
 	}, "配对端口应并入已有档案")
 
 	entries := a.profiles.Entries()
-	if _, ok := entries["192.168.31.183:38167"]; ok {
+	if _, ok := entries["192.0.2.183:38167"]; ok {
 		t.Fatalf("hintSerial 解析失败时不得新建 IP:port 键档案: %v", entries)
 	}
 	if len(entries) != 1 {
@@ -73,14 +73,14 @@ func TestGui52Fix1PairMergeByIPWhenSerialUnknown(t *testing.T) {
 	if !ok {
 		t.Fatalf("主档案应保留: %v", entries)
 	}
-	if !contains(e.Serials, "a743e1df") {
+	if !contains(e.Serials, "TEST0002") {
 		t.Fatalf("serials 不得丢失: %+v", e.Serials)
 	}
-	tls := gui24FindAddr(e, "192.168.31.183:38167")
+	tls := gui24FindAddr(e, "192.0.2.183:38167")
 	if tls == nil || tls.State != AddrStateActive || tls.Mode != ModeTls {
 		t.Fatalf("配对 TLS 地址应合并入主档案 active: %+v", e.Addrs)
 	}
-	if !gui50Fix45EntryHasAddr(e, "192.168.31.183:5555", ModeTcpip) {
+	if !gui50Fix45EntryHasAddr(e, "192.0.2.183:5555", ModeTcpip) {
 		t.Fatalf("5555 应仍归主档案: %+v", e.Addrs)
 	}
 }
@@ -92,17 +92,17 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
 		Model:      "25091RP04C",
-		Serials:    []string{"a743e1df"},
-		TlsGuid:    "adb-a743e1df-KWqpio",
+		Serials:    []string{"TEST0002"},
+		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.183:5555", State: AddrStateActive, Mode: ModeTcpip},
+			{Addr: "192.0.2.183:5555", State: AddrStateActive, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
-	// 快照给出 TLS 服务名 → hintSerial=a743e1df
+	// 快照给出 TLS 服务名 → hintSerial=TEST0002
 	a.mdnsMu.Lock()
 	a.mdns = []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.183:38167", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.183:38167", Mode: discovery.MdnsModeTls},
 	}
 	a.mdnsMu.Unlock()
 
@@ -130,24 +130,24 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 		return nil, nil
 	}
 
-	if err := a.PairConnect("", "192.168.31.183", "37033", "38167", "123456"); err != nil {
+	if err := a.PairConnect("", "192.0.2.183", "37033", "38167", "123456"); err != nil {
 		t.Fatal(err)
 	}
 	waitPairPhase(t, a, PairPhaseSuccess)
 
 	waitFor(t, 3*time.Second, func() bool {
 		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
-		return ok && gui50Fix45EntryHasAddr(e, "192.168.31.183:38167", ModeTls)
+		return ok && gui50Fix45EntryHasAddr(e, "192.0.2.183:38167", ModeTls)
 	}, "TLS 地址应归并完成")
 	entries := a.profiles.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("hintSerial 正常时行为不应变化: %v", entries)
 	}
-	if _, ok := entries["192.168.31.183:38167"]; ok {
+	if _, ok := entries["192.0.2.183:38167"]; ok {
 		t.Fatalf("不应出现 IP:port 键档案: %v", entries)
 	}
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	if e.TlsGuid != "adb-a743e1df-Ab12Cd" {
+	if e.TlsGuid != "adb-TEST0002-Ab12Cd" {
 		t.Fatalf("tlsGuid 应更新: %+v", e)
 	}
 }
@@ -159,23 +159,23 @@ func TestGui52Fix1LoadCleansOrphanIPPortArchive(t *testing.T) {
 	path := filepath.Join(dir, "profiles.json")
 	data := `{
   "devices": {
-    "192.168.31.183:38167": {
-      "addrs": [{"addr": "192.168.31.183:38167", "state": "active", "mode": "tls"}],
+    "192.0.2.183:38167": {
+      "addrs": [{"addr": "192.0.2.183:38167", "state": "active", "mode": "tls"}],
       "profiles": {"usb": {}, "wifi": {}}
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
       "model": "25091RP04C",
-      "serials": ["a743e1df"],
-      "tlsGuid": "adb-a743e1df-KWqpio",
+      "serials": ["TEST0002"],
+      "tlsGuid": "adb-TEST0002-KWqpio",
       "addrs": [
-        {"addr": "192.168.31.183:5555", "state": "active", "mode": "tcpip"},
-        {"addr": "192.168.31.183:40725", "state": "active", "mode": "tls"}
+        {"addr": "192.0.2.183:5555", "state": "active", "mode": "tcpip"},
+        {"addr": "192.0.2.183:40725", "state": "active", "mode": "tls"}
       ],
       "profiles": {"usb": {}, "wifi": {}}
     }
   },
-  "deviceOrder": ["192.168.31.183:38167", "Xiaomi Pad 8 Pro"]
+  "deviceOrder": ["192.0.2.183:38167", "Xiaomi Pad 8 Pro"]
 }`
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestGui52Fix1LoadCleansOrphanIPPortArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := s.Entries()
-	if _, ok := entries["192.168.31.183:38167"]; ok {
+	if _, ok := entries["192.0.2.183:38167"]; ok {
 		t.Fatalf("孤儿 IP:port 键应被删除: %v", entries)
 	}
 	main, ok := entries["Xiaomi Pad 8 Pro"]
@@ -196,8 +196,8 @@ func TestGui52Fix1LoadCleansOrphanIPPortArchive(t *testing.T) {
 	if len(main.Addrs) != 2 {
 		t.Fatalf("同 IP 孤儿应并入主档案（同形态折叠后 TLS+5555 各一条）: %+v", main.Addrs)
 	}
-	if !gui50Fix45EntryHasAddr(main, "192.168.31.183:5555", ModeTcpip) ||
-		!gui50Fix45EntryHasAddr(main, "192.168.31.183:40725", ModeTls) {
+	if !gui50Fix45EntryHasAddr(main, "192.0.2.183:5555", ModeTcpip) ||
+		!gui50Fix45EntryHasAddr(main, "192.0.2.183:40725", ModeTls) {
 		t.Fatalf("主档案真实证据应保留: %+v", main.Addrs)
 	}
 	if got := s.DeviceOrder(); len(got) != 1 || got[0] != "Xiaomi Pad 8 Pro" {
@@ -235,14 +235,14 @@ func TestGui52Fix1LoadKeepsOrphanWithoutSameIPMain(t *testing.T) {
 	path := filepath.Join(dir, "profiles.json")
 	data := `{
   "devices": {
-    "192.168.31.184:38167": {
-      "addrs": [{"addr": "192.168.31.184:38167", "state": "active", "mode": "tls"}],
+    "192.0.2.184:38167": {
+      "addrs": [{"addr": "192.0.2.184:38167", "state": "active", "mode": "tls"}],
       "profiles": {"usb": {}, "wifi": {}}
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "serials": ["a743e1df"],
-      "addrs": [{"addr": "192.168.31.183:5555", "state": "active", "mode": "tcpip"}],
+      "serials": ["TEST0002"],
+      "addrs": [{"addr": "192.0.2.183:5555", "state": "active", "mode": "tcpip"}],
       "profiles": {"usb": {}, "wifi": {}}
     }
   }
@@ -255,7 +255,7 @@ func TestGui52Fix1LoadKeepsOrphanWithoutSameIPMain(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := s.Entries()
-	if _, ok := entries["192.168.31.184:38167"]; !ok {
+	if _, ok := entries["192.0.2.184:38167"]; !ok {
 		t.Fatalf("无同 IP 主档案的孤儿应保留: %v", entries)
 	}
 	if len(entries) != 2 {
@@ -268,16 +268,16 @@ func TestGui52Fix1ResolveKeyByIPActivePriority(t *testing.T) {
 	s := NewProfileStore("")
 	s.mu.Lock()
 	s.data.Devices["StaleDevice"] = &DeviceEntry{
-		Addrs:    []AddrEntry{{Addr: "192.168.31.183:44444", State: AddrStateStale, Mode: ModeTls}},
+		Addrs:    []AddrEntry{{Addr: "192.0.2.183:44444", State: AddrStateStale, Mode: ModeTls}},
 		Profiles: DefaultProfile(),
 	}
 	s.data.Devices["ActiveDevice"] = &DeviceEntry{
-		Addrs:    []AddrEntry{{Addr: "192.168.31.183:5555", State: AddrStateActive, Mode: ModeTcpip}},
+		Addrs:    []AddrEntry{{Addr: "192.0.2.183:5555", State: AddrStateActive, Mode: ModeTcpip}},
 		Profiles: DefaultProfile(),
 	}
 	s.mu.Unlock()
 
-	if got := s.ResolveKeyByIP("192.168.31.183"); got != "ActiveDevice" {
+	if got := s.ResolveKeyByIP("192.0.2.183"); got != "ActiveDevice" {
 		t.Fatalf("同 IP 应按 active 状态优先，got %q", got)
 	}
 	// 全 stale 时仍有确定性命中
@@ -285,7 +285,7 @@ func TestGui52Fix1ResolveKeyByIPActivePriority(t *testing.T) {
 	s.data.Devices["ActiveDevice"].Addrs[0].State = AddrStateStale
 	s.data.Devices["ActiveDevice"].Addrs[0].Stale = true
 	s.mu.Unlock()
-	if got := s.ResolveKeyByIP("192.168.31.183"); got == "" {
+	if got := s.ResolveKeyByIP("192.0.2.183"); got == "" {
 		t.Fatal("无 active 时 stale 档案仍应按 IP 命中")
 	}
 }

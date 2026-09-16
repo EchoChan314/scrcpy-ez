@@ -6,6 +6,8 @@ import (
 	"context"
 	"log"
 	"os/exec"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -36,6 +38,116 @@ func setWindowIcon(hwnd uintptr) {
 	procSendMessage.Call(hwnd, wmSetIcon, iconSmall, hIcon)
 }
 
+// --- 关窗拦截（设置开关 B：关闭窗口时最小化到托盘） ---
+//
+// 主窗口由 webview 库自己创建（webview.h 里的窗口过程：WM_CLOSE → DestroyWindow
+// → WM_DESTROY → 主循环收到 WM_QUIT 退出 → main 收尾退出进程）。要做到"点关闭
+// 只隐藏窗口"，只能在窗口过程上挂钩子：子类化（SetWindowLongPtr GWLP_WNDPROC），
+// WM_CLOSE 时按设置
+//   - 开关 B=开：ShowWindow(SW_HIDE) 隐藏窗口并吞掉消息 —— 进程存活、正在进行的
+//     投屏会话不中断；托盘「显示主窗口」用 SW_RESTORE 恢复；
+//   - 开关 B=关：原样交还原窗口过程（默认销毁）→ 完整退出，与旧行为一致。
+// 托盘「退出」与 JS ExitApp 走 Quit()：置强制退出位后向主窗口投递 WM_CLOSE，
+// 由窗口过程在 UI 线程绕过"最小化到托盘"，交还原窗口过程销毁窗口（完整退出）。
+const (
+	wmClose        = 0x0010
+	swHide         = 0
+	gwlpWndProcIdx = ^uintptr(3) // GWLP_WNDPROC == -4（x/sys 未导出，直接按无符号传）
+)
+
+var (
+	closeHookUser32       = windows.NewLazySystemDLL("user32.dll")
+	procShowWindowW       = closeHookUser32.NewProc("ShowWindow")
+	procCallWindowProcW   = closeHookUser32.NewProc("CallWindowProcW")
+	procDefWindowProcW    = closeHookUser32.NewProc("DefWindowProcW")
+	procSetWindowLongPtrW = closeHookUser32.NewProc("SetWindowLongPtrW")
+	procPostMessageW      = closeHookUser32.NewProc("PostMessageW")
+
+	closeHookMu   sync.Mutex
+	closeHookPrev uintptr  // 原窗口过程（子类化前）
+	closeHookHwnd uintptr  // 主窗口句柄（Quit 投递 WM_CLOSE 用）
+	closeHookApp  *app.App // 读设置用（Settings().CloseToTray 每次 WM_CLOSE 实时取）
+	// forceExit=强制退出（托盘「退出」/JS ExitApp）：置位后 WM_CLOSE 不再被
+	// "最小化到托盘"拦截，走原窗口过程销毁窗口 → 进程完整退出。
+	forceExit atomic.Bool
+	// closeHookProc 必须常驻：syscall.NewCallback 返回的地址要一直有效
+	closeHookProc = syscall.NewCallback(handleWindowMessage)
+)
+
+// handleWindowMessage 是主窗口的替换窗口过程：只关心 WM_CLOSE，其余原样转发。
+// 注意：本回调运行在 UI 线程（WebView 主循环所在线程），Go runtime 支持外部线程
+// 回调；内部只做 ShowWindow(SW_HIDE) + 读一次设置——设置存储自带锁，最坏情况等
+// 一次毫秒级落盘，不做任何长耗时或等待消息的操作。
+func handleWindowMessage(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
+	if msg == wmClose {
+		closeHookMu.Lock()
+		a := closeHookApp
+		prev := closeHookPrev
+		closeHookMu.Unlock()
+		if !forceExit.Load() && a != nil && a.Settings().CloseToTray {
+			// 隐藏而非销毁：进程与全部投屏会话保持运行
+			procShowWindowW.Call(hwnd, swHide)
+			bridge.DebugLog("[ui] 关闭窗口 → 最小化到托盘（开关 B 开；进程与投屏保持）")
+			return 0
+		}
+		// 关闭最小化到托盘=关，或托盘「退出」/ExitApp 的强制退出：交还原窗口过程
+		// （默认销毁窗口 → WM_DESTROY → 主循环退出 → 进程完整退出）
+		if prev != 0 {
+			r, _, _ := procCallWindowProcW.Call(prev, hwnd, uintptr(msg), wparam, lparam)
+			return r
+		}
+	}
+	closeHookMu.Lock()
+	prev := closeHookPrev
+	closeHookMu.Unlock()
+	if prev != 0 {
+		r, _, _ := procCallWindowProcW.Call(prev, hwnd, uintptr(msg), wparam, lparam)
+		return r
+	}
+	r, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wparam, lparam)
+	return r
+}
+
+// installCloseHook 子类化主窗口（幂等；失败只记日志——关窗行为退回默认完整退出，
+// 不影响其余功能）。
+func installCloseHook(hwnd uintptr, a *app.App) {
+	if hwnd == 0 {
+		return
+	}
+	closeHookMu.Lock()
+	defer closeHookMu.Unlock()
+	if closeHookPrev != 0 {
+		return
+	}
+	prev, _, err := procSetWindowLongPtrW.Call(hwnd, gwlpWndProcIdx, closeHookProc)
+	if prev == 0 {
+		log.Printf("[ui] 关窗拦截安装失败（关窗行为保持默认：完整退出）: %v", err)
+		return
+	}
+	closeHookPrev = prev
+	closeHookHwnd = hwnd
+	closeHookApp = a
+	log.Printf("[ui] 关窗拦截已安装 hwnd=%#x closeToTray=%v", hwnd, a.Settings().CloseToTray)
+	bridge.DebugLog("[ui] 关窗拦截已安装 hwnd=%#x closeToTray=%v", hwnd, a.Settings().CloseToTray)
+}
+
+// Quit 请求完整退出（托盘「退出」与 JS ExitApp 用）：置强制位后向主窗口投递
+// WM_CLOSE。消息由本包窗口过程在 UI 线程处理：强制位打开 → 绕过"最小化到托盘"，
+// 交还原窗口过程销毁窗口 → WM_DESTROY → 主循环退出 → ui.Run 返回 → main 统一收尾。
+//
+// 为什么不用 webview 的 Terminate()：它内部是 PostQuitMessage(0)，只对**调用线程**
+// 的消息队列生效——从托盘 goroutine 调用会投到错误的线程，主循环不会退出
+// （实测：Terminate 后进程仍在运行、窗口仍开着）。走 WM_CLOSE 天然在 UI 线程执行。
+func Quit() {
+	forceExit.Store(true)
+	closeHookMu.Lock()
+	hwnd := closeHookHwnd
+	closeHookMu.Unlock()
+	if hwnd != 0 {
+		procPostMessageW.Call(hwnd, wmClose, 0, 0)
+	}
+}
+
 // Run 创建 WebView 主窗口并阻塞运行主循环（必须由主 goroutine 调用）。
 // 窗口关闭后返回；退出前会调用 app.Close 释放资源。
 func Run(a *app.App, html string) error {
@@ -49,6 +161,8 @@ func Run(a *app.App, html string) error {
 	// 任务栏会显示通用蓝窗图标；这里把 exe 资源里嵌入的像素图标（ID=1）发给窗口。
 	if hwnd := uintptr(w.Window()); hwnd != 0 {
 		setWindowIcon(hwnd)
+		// 设置开关 B：子类化主窗口，按设置决定"关闭最小化到托盘"还是完整退出
+		installCloseHook(hwnd, a)
 	}
 
 	bindings := []struct {
@@ -136,7 +250,13 @@ func Run(a *app.App, html string) error {
 				cleaner.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
 				_ = cleaner.Run()
 			}
-			go requestExit(w)
+			Quit()
+		}},
+		// 设置面板：两个开关写入全局设置并落盘（settings.json）。幂等全量写；
+		// 开关 A 下一次启动投屏生效，开关 B 立即生效（关窗时实时读设置）。
+		{"SetSettings", func(showParamOverlay, closeToTray bool) error {
+			bridge.DebugLog("[js] SetSettings showParamOverlay=%v closeToTray=%v", showParamOverlay, closeToTray)
+			return a.SetSettings(showParamOverlay, closeToTray)
 		}},
 		// 设备卡顺序写回（gui45：后端持久化；前端两处触发、后端幂等）
 		{"SetDeviceOrder", func(order []string) error {
@@ -171,29 +291,27 @@ func Run(a *app.App, html string) error {
 	return nil
 }
 
-func requestExit(w webview.WebView) {
-	go w.Terminate()
-}
-
 // --- 主窗口 HWND 注册表（供 systray"显示主窗口"使用） ---
 
 var (
-	hwndOnce unsafe.Pointer
-	hwndChan = make(chan unsafe.Pointer, 1)
+	hwndOnce    unsafe.Pointer
+	hwndReady   = make(chan struct{}) // 页面就绪信号：close 一次，之后永久可读
+	hwndSetOnce sync.Once
 )
 
 // SetHWND 由 UiReady 回调设置（UI 线程上调用）。
 // 同时把宿主窗口句柄注入 bridge（标签点击二段式浮前的④"ez 顶回"用）。
 func SetHWND(p unsafe.Pointer) {
-	select {
-	case hwndChan <- p:
-	default:
-	}
-	hwndOnce = p
+	atomic.StorePointer(&hwndOnce, p)
+	hwndSetOnce.Do(func() { close(hwndReady) })
 	bridge.SetFrontEzHwnd(uintptr(p))
 }
 
 // WaitHWND 阻塞至页面就绪并返回主窗口句柄。
+// 就绪后本函数可重复调用（close 过的信号 channel 立即返回 + 缓存值读取）：
+// 旧实现用容量 1 的 channel 传值，每次调用消费一个值 —— 第二次调用即永久阻塞，
+// 托盘「显示主窗口」自第二次起彻底失效（且该 goroutine 一并卡死）。
 func WaitHWND() unsafe.Pointer {
-	return <-hwndChan
+	<-hwndReady
+	return atomic.LoadPointer(&hwndOnce)
 }

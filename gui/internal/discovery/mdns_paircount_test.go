@@ -5,8 +5,8 @@ import "testing"
 // 复现：adb 37+ 的 mdns services 输出实例名后带计数 "(n)"
 func TestParseMdnsServicesReproCount(t *testing.T) {
 	out := "List of discovered mdns services\r\n" +
-		"adb-a743e1df-On9v2R (2)\t_adb-tls-connect._tcp\t192.168.31.183:43105\r\n" +
-		"adb-a743e1df\t_adb._tcp\t192.168.31.183:5555\r\n"
+		"adb-TEST0002-On9v2R (2)\t_adb-tls-connect._tcp\t192.0.2.183:43105\r\n" +
+		"adb-TEST0002\t_adb._tcp\t192.0.2.183:5555\r\n"
 	got := ParseMdnsServices(out)
 	for _, s := range got {
 		t.Logf("解析到: type=%q name=%q addr=%q mode=%v", s.Type, s.Name, s.Addr, s.Mode)
@@ -16,7 +16,7 @@ func TestParseMdnsServicesReproCount(t *testing.T) {
 	}
 	found := false
 	for _, s := range got {
-		if s.Mode == MdnsModeTls && s.Addr == "192.168.31.183:43105" {
+		if s.Mode == MdnsModeTls && s.Addr == "192.0.2.183:43105" {
 			found = true
 		}
 	}

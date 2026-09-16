@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +22,59 @@ import (
 	"scrcpy-ez/gui/internal/bridge"
 	"scrcpy-ez/gui/internal/ui"
 )
+
+// gui54 退出体验优化：「假关」+ 并行清理 + 15s 全局兜底。
+//
+// 现状问题：托盘「退出」/窗口关闭时窗口一直挂到全部会话串行 Stop 跑完（实测双会话 ~9.4s），
+// 用户盯着等。改为：
+//  1. 触发即「假关」——主窗口与托盘图标立即消失（ui.Quit + systray.Quit），无任何提示；
+//  2. 后台并行清理——App.BeginClose() 对每个会话一个 goroutine（会话内 ⓪~⑤ 不变），
+//     总耗时≈最慢的那个会话；
+//  3. 全部停完后按原语义执行一次 kill adb server，然后真正退出进程；
+//  4. 全局兜底：自触发起 15s 未清理完 → 记日志强制退出（进程任何情况下不悬挂）。
+//     无会话时 BeginClose 立即完成 → 立即退出，不等兜底。
+const exitCleanupWatchdog = 15 * time.Second
+
+var (
+	shutdownOnce      sync.Once
+	shutdownStartedAt time.Time
+	shutdownDone      <-chan struct{}
+)
+
+// beginShutdown 触发一次全局退出（幂等）。调用方立即返回，「假关」先发生。
+func beginShutdown(a *app.App) {
+	shutdownOnce.Do(func() {
+		shutdownStartedAt = time.Now()
+		bridge.DebugLog("[main] 退出触发：假关（主窗口 + 托盘图标立即消失），后台并行清理开始")
+		ui.Quit()      // 主窗口立即消失（forceExit → 窗口过程直接销毁，见 ui_windows.go）
+		systray.Quit() // 托盘图标立即消失
+		shutdownDone = a.BeginClose()
+	})
+}
+
+// waitShutdownAndExit 由 main goroutine 调用：等待并行清理完成（或 15s 兜底），
+// 再按既有语义 kill adb server，最后真正退出进程。
+func waitShutdownAndExit(a *app.App) {
+	beginShutdown(a) // 幂等；同时保证 shutdownDone/shutdownStartedAt 已建立（sync.Once 同步）
+	left := exitCleanupWatchdog - time.Since(shutdownStartedAt)
+	if left < 0 {
+		left = 0
+	}
+	select {
+	case <-shutdownDone:
+		bridge.DebugLog("[main] 全部会话清理完成（自触发 %dms），准备退出进程",
+			time.Since(shutdownStartedAt).Milliseconds())
+	case <-time.After(left):
+		bridge.DebugLog("[main] 退出清理超时 %v（全局兜底），强制退出进程", exitCleanupWatchdog)
+		bridge.FlushDebugLog() // 异步日志：退出前刷盘，保证最后几行证据落盘
+		os.Exit(0)
+	}
+	killAdbServerOnExit(a) // 全部会话停完后执行一次（语义不变）
+	bridge.DebugLog("[main] adb server 清理完成，进程退出（自触发 %dms）",
+		time.Since(shutdownStartedAt).Milliseconds())
+	bridge.FlushDebugLog() // 同上：退出前把"完成"证据刷盘
+	os.Exit(0)
+}
 
 // killAdbServerOnExit gui53：GUI 退出统一清理——投屏会话已由 a.Close() 全停，
 // 这里把共享 adb server 一并杀掉（无残留）。顺序必须 kill 在 Close 之后：
@@ -69,7 +124,7 @@ var pairUIJS string
 var iconICO []byte
 
 const (
-	version = "v2.0"
+	version = "v2.1.0"
 )
 
 // appDir gui53 产品级修复：返回 exe 所在目录（发行包内 bat 与 GUI 同级解压）。
@@ -164,8 +219,22 @@ func main() {
 	// 若软件目录还没有档案而 AppData 有 → 复制过去，之后以软件目录为准。
 	migrateLegacyProfile(profilesPath)
 
+	// 全局设置（设置面板两个开关）：独立 settings.json，不混入设备档案 profiles.json。
+	// 位置与 profiles.json 同目录（软件目录优先、受限位回退 %APPDATA%\scrcpy-ez\），
+	// 整个文件夹搬家即带走设置；SCEZ_SETTINGS_PATH 可显式覆盖。
+	settingsPath := envOr("SCEZ_SETTINGS_PATH", func() string {
+		if profilesPath != "" {
+			return filepath.Join(filepath.Dir(profilesPath), "settings.json")
+		}
+		if base, err := os.UserConfigDir(); err == nil {
+			return filepath.Join(base, "scrcpy-ez", "settings.json")
+		}
+		return ""
+	}())
+
 	cfg := app.Config{BatPath: batPath, AdbPath: adbPath, ConfigPath: configPath,
-		CrashDir: crashDir, ProfilesPath: profilesPath, Version: version}
+		CrashDir: crashDir, ProfilesPath: profilesPath, SettingsPath: settingsPath,
+		Version: version}
 	a := app.New(cfg)
 	// 轮 B 多会话：工厂按 serial 创建独立 bat 实例；onLine/onExit 由 App 侧
 	// 绑定到对应会话（每个会话一个 bridge 读 goroutine 对，N≤5 无压力）。
@@ -179,39 +248,52 @@ func main() {
 		log.Fatalf("界面资源组装失败: %v", err)
 	}
 
-	// systray 在自己的 goroutine（Windows 下纯 syscall 实现）
-	go systray.Run(func() {
-		systray.SetIcon(iconICO)
-		systray.SetTitle("scrcpy-ez")
-		systray.SetTooltip("scrcpy-ez · 轻松易用不折腾")
-		show := systray.AddMenuItem("显示主窗口", "打开 scrcpy-ez 窗口")
-		systray.AddSeparator()
-		quit := systray.AddMenuItem("退出", "退出 scrcpy-ez")
-		go func() {
-			for {
-				select {
-				case <-show.ClickedCh:
-					if hwnd := ui.WaitHWND(); hwnd != nil {
-						procShowWindow.Call(uintptr(hwnd), 9 /* SW_RESTORE */)
-						procSetForegroundWindow.Call(uintptr(hwnd))
+	// systray 在自己的 goroutine（Windows 下纯 syscall 实现）。
+	//
+	// LockOSThread 不可省略：systray 的窗口 + GetMessage 消息循环必须始终位于同一个
+	// OS 线程。Go runtime 会把未锁定线程的 goroutine 在系统调用返回后调度到别的线程，
+	// 而窗口消息队列仍留在原线程 —— 一旦发生迁移，窗口消息再也无人处理，托盘图标
+	// 从此对所有点击（左键/右键/拖到任务栏）无响应，且无法自愈，永久假死
+	// （IsHungAppWindow=True、SendMessageTimeout 超时）。
+	// 实测（tray_test bad/good 对照）：不加锁在负载下约 51s 必假死；加锁后同等压力
+	// 75s+ 稳定，且运行期线程号始终不变。
+	go func() {
+		runtime.LockOSThread()
+		systray.Run(func() {
+			systray.SetIcon(iconICO)
+			systray.SetTitle("scrcpy-ez")
+			systray.SetTooltip("scrcpy-ez · 轻松易用不折腾")
+			show := systray.AddMenuItem("显示主窗口", "打开 scrcpy-ez 窗口")
+			systray.AddSeparator()
+			quit := systray.AddMenuItem("退出", "退出 scrcpy-ez")
+			go func() {
+				for {
+					select {
+					case <-show.ClickedCh:
+						if hwnd := ui.WaitHWND(); hwnd != nil {
+							procShowWindow.Call(uintptr(hwnd), 9 /* SW_RESTORE */)
+							procSetForegroundWindow.Call(uintptr(hwnd))
+						}
+					case <-quit.ClickedCh:
+						// gui54：「假关」——窗口与托盘图标立即消失，清理转后台并行执行，
+						// 等待与真正退出进程由 main goroutine 的 waitShutdownAndExit 收口。
+						// （设置开关 B 打开时窗口关闭只是隐藏、主循环仍在跑：ui.Quit 置
+						//   forceExit 后仍能保证真正终止界面主循环。）
+						beginShutdown(a)
+						return
 					}
-				case <-quit.ClickedCh:
-					a.Close()          // 先停全部投屏会话（杀树）
-					killAdbServerOnExit(a) // gui53：再杀 adb server（无残留）
-					systray.Quit()
-					return
 				}
-			}
-		}()
-	}, func() {
-		// 托盘退出：收尾由 main 完成
-	})
+			}()
+		}, func() {
+			// 托盘退出：收尾由 main 完成
+		})
+	}()
 
 	// 主线程跑 WebView 主循环（阻塞至窗口关闭）
 	if err := ui.Run(a, html); err != nil {
 		log.Printf("[main] 界面退出: %v", err)
 	}
-	a.Close()              // 先停全部投屏会话（杀树）
-	killAdbServerOnExit(a) // gui53：再杀 adb server（无残留）
-	systray.Quit()
+	// 走到这里说明窗口已被销毁（用户关窗=退出，或托盘退出/ExitApp 的 ui.Quit）：
+	// 先「假关」收掉托盘图标，再等后台并行清理完成、kill adb server、真正退出进程。
+	waitShutdownAndExit(a)
 }

@@ -66,7 +66,7 @@ func TestTeachfix4K80FullChainZeroFlicker(t *testing.T) {
 func TestTeachfix4TrueUnplugFallsBackAt10sToArchiveState(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix3SeedK80(a)
-	a.profiles.AddrSuccess("REDMI K80", "192.168.31.197:5555", ModeTcpip)
+	a.profiles.AddrSuccess("REDMI K80", "192.0.2.197:5555", ModeTcpip)
 	ops := &teachfix3Ops{port: "0"}
 	ops.install(a)
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error { return nil } // 兜底 connect 成功
@@ -88,7 +88,7 @@ func TestTeachfix4TrueUnplugFallsBackAt10sToArchiveState(t *testing.T) {
 	a.commitDisplay(nil)
 	out := a.Snapshot().Devices
 	if len(out) != 1 || out[0].Connecting || out[0].ConnType != "wifi" ||
-		out[0].Serial != "192.168.31.197:5555" {
+		out[0].Serial != "192.0.2.197:5555" {
 		t.Fatalf("兜底清后应呈现档案态无线卡: %+v", out)
 	}
 }
@@ -102,7 +102,7 @@ func TestTeachfix4GetpropNoLongerClearsStableDoes(t *testing.T) {
 	gui49fix6FastStable(t)
 
 	a.applyTrackUpdate([]adb.Device{teachfix3OfflineUSB()})
-	a.plugCheckTcpipReady(context.Background(), "601c9f08")
+	a.plugCheckTcpipReady(context.Background(), "TEST0001")
 	if !teachfix3PlugActive(a) {
 		t.Fatal("getprop==5555 不得清遮罩（清因改为稳定 device）")
 	}

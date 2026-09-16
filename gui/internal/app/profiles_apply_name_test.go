@@ -9,7 +9,7 @@ import (
 )
 
 // testStoreWithK80 构造含 REDMI K80 档案的 store：addrs 里有一条历史地址
-// 192.168.31.197:5555（离线残留场景——地址在档但设备当前不在线）。
+// 192.0.2.197:5555（离线残留场景——地址在档但设备当前不在线）。
 func testStoreWithK80(t *testing.T) *ProfileStore {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "profiles.json")
@@ -18,7 +18,7 @@ func testStoreWithK80(t *testing.T) *ProfileStore {
     "REDMI K80": {
       "marketname": "REDMI K80",
       "serials": [],
-      "addrs": [{"addr": "192.168.31.197:5555", "state": "active", "fail": 0, "lastOk": 1}],
+      "addrs": [{"addr": "192.0.2.197:5555", "state": "active", "fail": 0, "lastOk": 1}],
       "profiles": {"usb": {"res": 2560, "fps": 120, "bitrate": 60}, "wifi": {"res": 1920, "fps": 60, "bitrate": 15}}
     }
   }
@@ -37,7 +37,7 @@ func testStoreWithK80(t *testing.T) *ProfileStore {
 func TestApplyProfileNamesOfflineBackfill(t *testing.T) {
 	s := testStoreWithK80(t)
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "offline", Name: "192.168.31.197:5555"},
+		{Serial: "192.0.2.197:5555", State: "offline", Name: "192.0.2.197:5555"},
 	}
 	applyProfileNames(devs, s)
 	if devs[0].Name != "REDMI K80" {
@@ -49,7 +49,7 @@ func TestApplyProfileNamesOfflineBackfill(t *testing.T) {
 func TestApplyProfileNamesOfflineEmptyName(t *testing.T) {
 	s := testStoreWithK80(t)
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "unauthorized", Name: ""},
+		{Serial: "192.0.2.197:5555", State: "unauthorized", Name: ""},
 	}
 	applyProfileNames(devs, s)
 	if devs[0].Name != "REDMI K80" {
@@ -61,7 +61,7 @@ func TestApplyProfileNamesOfflineEmptyName(t *testing.T) {
 func TestApplyProfileNamesSkipsOnline(t *testing.T) {
 	s := testStoreWithK80(t)
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", Name: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "device", Name: "REDMI K80"},
 	}
 	applyProfileNames(devs, s)
 	if devs[0].Name != "REDMI K80" {
@@ -74,7 +74,7 @@ func TestApplyProfileNamesSkipsOnline(t *testing.T) {
 func TestApplyProfileNamesOnlineIpNameBackfill(t *testing.T) {
 	s := testStoreWithK80(t)
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", Name: "192.168.31.197:5555"},
+		{Serial: "192.0.2.197:5555", State: "device", Name: "192.0.2.197:5555"},
 	}
 	applyProfileNames(devs, s)
 	if devs[0].Name != "REDMI K80" {
@@ -86,7 +86,7 @@ func TestApplyProfileNamesOnlineIpNameBackfill(t *testing.T) {
 func TestApplyProfileNamesKeepsExistingName(t *testing.T) {
 	s := testStoreWithK80(t)
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "offline", Name: "我的 K80"},
+		{Serial: "192.0.2.197:5555", State: "offline", Name: "我的 K80"},
 	}
 	applyProfileNames(devs, s)
 	if devs[0].Name != "我的 K80" {
@@ -98,10 +98,10 @@ func TestApplyProfileNamesKeepsExistingName(t *testing.T) {
 func TestApplyProfileNamesUnknownKeepsIP(t *testing.T) {
 	s := testStoreWithK80(t)
 	devs := []adb.Device{
-		{Serial: "192.168.31.200:5555", State: "offline", Name: "192.168.31.200:5555"},
+		{Serial: "192.0.2.200:5555", State: "offline", Name: "192.0.2.200:5555"},
 	}
 	applyProfileNames(devs, s)
-	if devs[0].Name != "192.168.31.200:5555" {
+	if devs[0].Name != "192.0.2.200:5555" {
 		t.Fatalf("无档案设备 Name 被改动: %q", devs[0].Name)
 	}
 }
@@ -111,9 +111,9 @@ func TestApplyProfileNamesNoMarketnameKeepsIP(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	raw := `{
   "devices": {
-    "192.168.31.197:5555": {
+    "192.0.2.197:5555": {
       "serials": [],
-      "addrs": [{"addr": "192.168.31.197:5555", "state": "history", "fail": 3, "lastOk": 0}],
+      "addrs": [{"addr": "192.0.2.197:5555", "state": "history", "fail": 3, "lastOk": 0}],
       "profiles": {}
     }
   }
@@ -126,10 +126,10 @@ func TestApplyProfileNamesNoMarketnameKeepsIP(t *testing.T) {
 		t.Fatal(err)
 	}
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "offline", Name: "192.168.31.197:5555"},
+		{Serial: "192.0.2.197:5555", State: "offline", Name: "192.0.2.197:5555"},
 	}
 	applyProfileNames(devs, s)
-	if devs[0].Name != "192.168.31.197:5555" {
+	if devs[0].Name != "192.0.2.197:5555" {
 		t.Fatalf("档案无市场名时不应回补: %q", devs[0].Name)
 	}
 }

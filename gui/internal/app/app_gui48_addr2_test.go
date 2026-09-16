@@ -9,7 +9,7 @@ import (
 func addr2Seed(a *App, addrs []AddrEntry) {
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs:      addrs,
 		Profiles:   DefaultProfile(),
 	})
@@ -19,8 +19,8 @@ func addr2Seed(a *App, addrs []AddrEntry) {
 func TestGui48Addr2HistoryNotCandidate(t *testing.T) {
 	a, _ := newWirelessApp()
 	addr2Seed(a, []AddrEntry{
-		{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
-		{Addr: "192.168.31.197:5555", State: AddrStateHistory, LastOk: 100, Mode: ModeTcpip},
+		{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+		{Addr: "192.0.2.197:5555", State: AddrStateHistory, LastOk: 100, Mode: ModeTcpip},
 	})
 	if got := a.secondaryWirelessAddr("REDMI K80"); got != "" {
 		t.Fatalf("history 条目不应作备选: %q", got)
@@ -32,11 +32,11 @@ func TestGui48Addr2HistoryNotCandidate(t *testing.T) {
 func TestGui48Addr2PicksLatestLastOk(t *testing.T) {
 	a, _ := newWirelessApp()
 	addr2Seed(a, []AddrEntry{
-		{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
-		{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
-		{Addr: "192.168.31.198:5555", State: AddrStateActive, LastOk: 300, Mode: ModeTcpip},
+		{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+		{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+		{Addr: "192.0.2.198:5555", State: AddrStateActive, LastOk: 300, Mode: ModeTcpip},
 	})
-	if got := a.secondaryWirelessAddr("REDMI K80"); got != "192.168.31.197:5555" {
+	if got := a.secondaryWirelessAddr("REDMI K80"); got != "192.0.2.197:5555" {
 		t.Fatalf("应取档案顺序第一条对侧 active 地址: %q", got)
 	}
 }
@@ -57,16 +57,16 @@ func TestGui48Addr2StaleAndZeroLastOkAllowed(t *testing.T) {
 		name string
 		alt  AddrEntry
 	}{
-		{"Stale", AddrEntry{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip, Stale: true}},
-		{"LastOk=0", AddrEntry{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 0, Mode: ModeTcpip}},
+		{"Stale", AddrEntry{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip, Stale: true}},
+		{"LastOk=0", AddrEntry{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 0, Mode: ModeTcpip}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			a, _ := newWirelessApp()
 			addr2Seed(a, []AddrEntry{
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
 				c.alt,
 			})
-			if got := a.secondaryWirelessAddr("REDMI K80"); got != "192.168.31.197:5555" {
+			if got := a.secondaryWirelessAddr("REDMI K80"); got != "192.0.2.197:5555" {
 				t.Fatalf("对侧 active 应作备选: %q", got)
 			}
 		})

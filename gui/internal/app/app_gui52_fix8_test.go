@@ -15,10 +15,10 @@ import (
 // 只开端口；不做 connect 探测/写档（地址权威=mDNS）。
 
 type fix8Recorder struct {
-	mu         sync.Mutex
-	getprop    []string
-	tcpip      []string
-	tcpipErr   error
+	mu          sync.Mutex
+	getprop     []string
+	tcpip       []string
+	tcpipErr    error
 	defaultPort string
 }
 
@@ -46,7 +46,7 @@ func TestGui52Fix8TcpipAlreadyOpenSkips(t *testing.T) {
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
 	// 前置：配对尾段已完成建档（生产语义：PairArchive 先于 ensure）
-	a.profiles.PairArchive("REDMI K80", "601c9f08", "192.168.1.2:33895", "adb-601c9f08-KWqpio", "REDMI K80", "24117RK2CC")
+	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "24117RK2CC")
 
 	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
 	time.Sleep(50 * time.Millisecond)
@@ -76,7 +76,7 @@ func TestGui52Fix8TcpipNotOpenEnableOnce(t *testing.T) {
 	rec := &fix8Recorder{defaultPort: ""}
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
-	a.profiles.PairArchive("REDMI K80", "601c9f08", "192.168.1.2:33895", "adb-601c9f08-KWqpio", "REDMI K80", "24117RK2CC")
+	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "24117RK2CC")
 
 	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
 	time.Sleep(50 * time.Millisecond)
@@ -143,7 +143,7 @@ func TestGui52Fix8PairFlowTriggersTcpip(t *testing.T) {
 	a.pairOps.tcpipFn = rec.tcpipFn
 
 	svc := seedPending(t, a, pairConnectSvcs())
-	if svc.Addr != "192.168.31.99:33895" {
+	if svc.Addr != "192.0.2.99:33895" {
 		t.Fatalf("待配对卡应为 TLS 连接服务: %+v", svc)
 	}
 	if err := a.PairConnect(svc.Key, "192.168.1.2", "37033", "33895", "123456"); err != nil {

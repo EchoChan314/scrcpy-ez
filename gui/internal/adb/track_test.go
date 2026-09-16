@@ -2,6 +2,7 @@ package adb
 
 import (
 	"bufio"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -11,16 +12,16 @@ import (
 // 实测 adb 37.0.0：块 = 4 位 hex 长度前缀 + 设备列表文本。
 // 注意前缀按 LF 计数，线上是 CRLF（每行多 1 个 CR）。
 func TestReadTrackBlockNormal(t *testing.T) {
-	text := "601c9f08\tdevice\nH9RNW18604002288\tdevice\n192.168.31.162:5555\tdevice\n"
-	// 前缀按 LF 计：上面文本去掉 CR 后长度 68？直接用格式化构造一致块。
+	text := "TEST0001\tdevice\nTEST0003\tdevice\n192.0.2.162:5555\tdevice\n"
+	// 前缀按 LF 计 = text 长度（动态构造，避免数据变更后失配）。
 	payload := strings.ReplaceAll(text, "\n", "\r\n")
-	wire := "0043" + payload // 67 = LF 计长度（15+1+23+1+26+1=67）
+	wire := fmt.Sprintf("%04x", len(text)) + payload // LF 计长度（动态构造）
 	br := bufio.NewReader(strings.NewReader(wire))
 	got, err := readTrackBlock(br)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "601c9f08\tdevice\nH9RNW18604002288\tdevice\n192.168.31.162:5555\tdevice\n"
+	want := "TEST0001\tdevice\nTEST0003\tdevice\n192.0.2.162:5555\tdevice\n"
 	if got != want {
 		t.Fatalf("块解析错误:\n got %q\nwant %q", got, want)
 	}
@@ -40,9 +41,9 @@ func TestReadTrackBlockEmpty(t *testing.T) {
 func TestReadTrackBlockMultiplePacketsInOneRead(t *testing.T) {
 	// 粘包：两个块一次到达
 	first := "aaa\tdevice\n"
-	second := "bbb\toffline\n192.168.31.162:5555\tdevice\n"
-	wire := "000b" + strings.ReplaceAll(first, "\n", "\r\n") +
-		"0027" + strings.ReplaceAll(second, "\n", "\r\n")
+	second := "bbb\toffline\n192.0.2.162:5555\tdevice\n"
+	wire := fmt.Sprintf("%04x", len(first)) + strings.ReplaceAll(first, "\n", "\r\n") +
+		fmt.Sprintf("%04x", len(second)) + strings.ReplaceAll(second, "\n", "\r\n")
 	br := bufio.NewReader(strings.NewReader(wire))
 	got1, err := readTrackBlock(br)
 	if err != nil {
@@ -83,15 +84,15 @@ func TestReadTrackBlockInvalidPrefix(t *testing.T) {
 }
 
 func TestParseTrackDevicesNormal(t *testing.T) {
-	block := "601c9f08\tdevice\n192.168.31.162:5555\tdevice model:24117RK2CC\n"
+	block := "TEST0001\tdevice\n192.0.2.162:5555\tdevice model:24117RK2CC\n"
 	devs := ParseTrackDevices(block)
 	if len(devs) != 2 {
 		t.Fatalf("应解析 2 台设备: %+v", devs)
 	}
-	if devs[0].Serial != "601c9f08" || devs[0].ConnType != "usb" || devs[0].State != "device" {
+	if devs[0].Serial != "TEST0001" || devs[0].ConnType != "usb" || devs[0].State != "device" {
 		t.Fatalf("USB 条目错误: %+v", devs[0])
 	}
-	if devs[1].Serial != "192.168.31.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "24117RK2CC" {
+	if devs[1].Serial != "192.0.2.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "24117RK2CC" {
 		t.Fatalf("无线条目错误: %+v", devs[1])
 	}
 }
@@ -103,20 +104,20 @@ func TestParseTrackDevicesEmpty(t *testing.T) {
 }
 
 func TestParseTrackDevicesOffline(t *testing.T) {
-	devs := ParseTrackDevices("601c9f08\toffline\n")
+	devs := ParseTrackDevices("TEST0001\toffline\n")
 	if len(devs) != 1 || devs[0].State != "offline" || devs[0].ConnType != "usb" {
 		t.Fatalf("offline 解析错误: %+v", devs)
 	}
 }
 
 func TestParseTrackDevicesMergesTransportByModel(t *testing.T) {
-	block := "192.168.31.162:5555\tdevice model:Xiaomi_Pad_8_Pro\na743e1df\tdevice model:Xiaomi_Pad_8_Pro\n"
+	block := "192.0.2.162:5555\tdevice model:Xiaomi_Pad_8_Pro\nTEST0002\tdevice model:Xiaomi_Pad_8_Pro\n"
 	devs := ParseTrackDevices(block)
 	if len(devs) != 1 {
 		t.Fatalf("同 model 双 transport 应合并为一台设备: %+v", devs)
 	}
 	d := devs[0]
-	if d.Serial != "a743e1df" || d.ConnType != "usb" || d.Wireless != "192.168.31.162:5555" {
+	if d.Serial != "TEST0002" || d.ConnType != "usb" || d.Wireless != "192.0.2.162:5555" {
 		t.Fatalf("USB 优先合并错误: %+v", d)
 	}
 }

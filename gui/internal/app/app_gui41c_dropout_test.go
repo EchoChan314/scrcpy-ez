@@ -13,9 +13,9 @@ func gui41cK80Profiles(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		},
@@ -26,23 +26,23 @@ func TestGui41cAddrFailMarksStale(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
 
-	s.AddrFail("REDMI K80", "192.168.31.197:5555")
+	s.AddrFail("REDMI K80", "192.0.2.197:5555")
 	e, _ := s.Entry("REDMI K80")
-	a := gui24FindAddr(e, "192.168.31.197:5555")
+	a := gui24FindAddr(e, "192.0.2.197:5555")
 	if a == nil || a.State != AddrStateStale || a.Fail != 1 || a.LastFail == 0 {
 		t.Fatalf("失败应写 state=stale 并累计内存统计: %+v", a)
 	}
 
-	s.AddrSuccessWithMode("REDMI K80", "192.168.31.197:5555", ModeTcpip)
+	s.AddrSuccessWithMode("REDMI K80", "192.0.2.197:5555", ModeTcpip)
 	e, _ = s.Entry("REDMI K80")
-	if a := gui24FindAddr(e, "192.168.31.197:5555"); a == nil || a.State != AddrStateActive {
+	if a := gui24FindAddr(e, "192.0.2.197:5555"); a == nil || a.State != AddrStateActive {
 		t.Fatalf("成功应翻回 state=active（闭环）: %+v", a)
 	}
 }
@@ -53,9 +53,9 @@ func TestGui41cAppendOfflineCardStaleOnly(t *testing.T) {
 		seedProfiles(a, map[string]*DeviceEntry{
 			"REDMI K80": {
 				Marketname: "REDMI K80",
-				Serials:    []string{"601c9f08"},
+				Serials:    []string{"TEST0001"},
 				Addrs: []AddrEntry{
-					{Addr: "192.168.31.197:5555", State: AddrStateStale, LastOk: 100, Mode: ModeTcpip, Stale: true},
+					{Addr: "192.0.2.197:5555", State: AddrStateStale, LastOk: 100, Mode: ModeTcpip, Stale: true},
 				},
 				Profiles: DefaultProfile(),
 			},
@@ -70,24 +70,24 @@ func TestGui41cAppendOfflineCardStaleOnly(t *testing.T) {
 		seedProfiles(a, map[string]*DeviceEntry{
 			"REDMI K80": {
 				Marketname: "REDMI K80",
-				Serials:    []string{"601c9f08"},
+				Serials:    []string{"TEST0001"},
 				Addrs: []AddrEntry{
-					{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
-					{Addr: "192.168.31.197:33895", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
+					{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+					{Addr: "192.0.2.197:33895", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
 				},
 				Profiles: DefaultProfile(),
 			},
 		})
 		devs := a.appendProfileOfflineCards(nil)
 		if len(devs) != 1 || devs[0].State != "device" || devs[0].ConnType != "wifi" ||
-			devs[0].Serial != "192.168.31.197:5555" {
+			devs[0].Serial != "192.0.2.197:5555" {
 			t.Fatalf("档案有 active 应补在线合成卡（副行 active tcpip）: %+v", devs)
 		}
 	})
 	t.Run("已有卡不重复", func(t *testing.T) {
 		a, _ := newWirelessApp()
 		gui41cK80Profiles(a)
-		existing := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}
+		existing := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}
 		devs := a.appendProfileOfflineCards([]adb.Device{existing})
 		if len(devs) != 1 || devs[0] != existing {
 			t.Fatalf("已有卡不应重复补: %+v", devs)
@@ -98,8 +98,8 @@ func TestGui41cAppendOfflineCardStaleOnly(t *testing.T) {
 func TestGui41cJustDropped(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui41cK80Profiles(a)
-	online := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
-	offline := adb.Device{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	online := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	offline := adb.Device{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 
 	if !a.justDropped([]adb.Device{online}, nil) {
 		t.Fatal("上轮在线→本轮无：应为掉线首拍")

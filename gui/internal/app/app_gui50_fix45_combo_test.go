@@ -14,7 +14,7 @@ import (
 func gui50Fix45ManualPairingSvc() discovery.MdnsService {
 	return discovery.MdnsService{
 		Type: "_adb-tls-pairing._tcp",
-		Name: "adb-601c9f08-KWqpio",
+		Name: "adb-TEST0001-KWqpio",
 		Addr: "192.168.1.2:37033",
 		Mode: discovery.MdnsModePairing,
 	}

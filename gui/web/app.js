@@ -14,6 +14,7 @@
 //   PairConnect(devKey, ip, pairPort, connPort, code) -> error（无线调试配对向导：受理即返回，状态经 pairStatus 轮询）
 //   PairReset() -> error（清配对向导状态）
 //   RefreshNow() -> Snapshot JSON
+//   SetSettings(showParamOverlay, closeToTray) -> error（设置面板两个开关，落盘 settings.json）
 //   ExitApp()
 // 只读展示架构：GUI 不向 bat 写 stdin；choice 菜单按钮全部映射为会话级操作。
 // 多会话：sessions = map[serial] -> {tab, pane, refs, fading}，
@@ -2108,10 +2109,61 @@
     if (ev.target === el('guide-modal')) el('guide-modal').style.display = 'none';
   });
 
+  // ---------- 设置面板（右上角齿轮；两个开关即时保存，重启后保持） ----------
+  // Go 侧 settings.json 是权威值：每次快照回家；面板打开时按它渲染开关状态。
+  // 点击开关先本地翻转（即时反馈）再调 SetSettings 落盘，失败提示（快照下一轮会纠正）。
+  var settingsState = { showParamOverlay: true, closeToTray: false };
+
+  function setSwitch(node, on) {
+    if (!node) return;
+    node.classList[on ? 'add' : 'remove']('on');
+    node.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
+
+  function renderSettings() {
+    setSwitch(el('set-overlay'), settingsState.showParamOverlay);
+    setSwitch(el('set-tray'), settingsState.closeToTray);
+  }
+
+  function syncSettings(st) {
+    if (!st || !st.settings) return;
+    settingsState.showParamOverlay = !!st.settings.showParamOverlay;
+    settingsState.closeToTray = !!st.settings.closeToTray;
+    // 面板没开时不碰 DOM（避免与用户点击抢状态）
+    if (el('settings-modal').style.display !== 'none') renderSettings();
+  }
+
+  function saveSettings() {
+    SetSettings(settingsState.showParamOverlay, settingsState.closeToTray).catch(function (e) {
+      toast('设置保存失败：' + (e && e.message ? e.message : e));
+    });
+  }
+
+  el('btn-settings').addEventListener('click', function () {
+    syncSettings(lastState);
+    renderSettings();
+    el('settings-modal').style.display = '';
+  });
+  el('settings-close').addEventListener('click', function () { el('settings-modal').style.display = 'none'; });
+  el('settings-modal').addEventListener('click', function (ev) {
+    if (ev.target === el('settings-modal')) el('settings-modal').style.display = 'none';
+  });
+  el('set-overlay').addEventListener('click', function () {
+    settingsState.showParamOverlay = !settingsState.showParamOverlay;
+    renderSettings();
+    saveSettings();
+  });
+  el('set-tray').addEventListener('click', function () {
+    settingsState.closeToTray = !settingsState.closeToTray;
+    renderSettings();
+    saveSettings();
+  });
+
   // ---------- 轮询主循环 ----------
   function refreshNow() {
     GetState().then(function (st) {
       lastState = st;
+      syncSettings(st);
       var j = JSON.stringify(st);
       if (j !== lastJson) {
         lastJson = j;

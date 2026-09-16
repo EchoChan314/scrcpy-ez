@@ -18,7 +18,7 @@ import (
 
 // gui30UsbDev 构造一台 USB 在线设备卡。
 func gui30UsbDev() adb.Device {
-	return adb.Device{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80"}
+	return adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80"}
 }
 
 // TestGui30TeachTcpipLearnsOnUsbPlugged：USB 在线 + service.adb.tcp.port≠5555
@@ -29,7 +29,7 @@ func TestGui30TeachTcpipLearnsOnUsbPlugged(t *testing.T) {
 	var tcpipSerial, tcpipPort string
 	a.teachOps.getpropFn = func(ctx context.Context, serial, prop string) (string, error) {
 		getprops++
-		if serial != "601c9f08" || prop != "service.adb.tcp.port" {
+		if serial != "TEST0001" || prop != "service.adb.tcp.port" {
 			t.Errorf("getprop 参数错误: serial=%q prop=%q", serial, prop)
 		}
 		return "5554", nil
@@ -44,7 +44,7 @@ func TestGui30TeachTcpipLearnsOnUsbPlugged(t *testing.T) {
 	if getprops != 1 || tcpips != 1 {
 		t.Fatalf("端口≠5555 应 getprop+tcpip 各一次: getprop=%d tcpip=%d", getprops, tcpips)
 	}
-	if tcpipSerial != "601c9f08" || tcpipPort != "5555" {
+	if tcpipSerial != "TEST0001" || tcpipPort != "5555" {
 		t.Fatalf("tcpip 参数错误: %q %q", tcpipSerial, tcpipPort)
 	}
 }
@@ -86,7 +86,7 @@ func TestGui30TeachTcpipSkipsWirelessAndOffline(t *testing.T) {
 	}
 
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi"},
 		{Serial: "abc123", State: "offline", ConnType: "usb"},
 		{Serial: "abc456", State: "unauthorized", ConnType: "usb"},
 	}
@@ -259,7 +259,7 @@ func TestPollOnceGui30TeachTcpipFullChain(t *testing.T) {
 	}
 	os.Setenv("G30_REC", rec)
 	os.Setenv("G30_PORT", portFile)
-	os.Setenv("G30_DEV", "601c9f08\tdevice")
+	os.Setenv("G30_DEV", "TEST0001\tdevice")
 	defer os.Unsetenv("G30_DEV")
 	defer os.Unsetenv("G30_PORT")
 	defer os.Unsetenv("G30_REC")
@@ -276,8 +276,8 @@ func TestPollOnceGui30TeachTcpipFullChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return strings.Count(string(b), "-s 601c9f08 shell getprop service.adb.tcp.port"),
-			strings.Count(string(b), "-s 601c9f08 tcpip 5555")
+		return strings.Count(string(b), "-s TEST0001 shell getprop service.adb.tcp.port"),
+			strings.Count(string(b), "-s TEST0001 tcpip 5555")
 	}
 
 	// 插线轮 1：自动学习
@@ -286,7 +286,7 @@ func TestPollOnceGui30TeachTcpipFullChain(t *testing.T) {
 		t.Fatalf("插线轮应 getprop+tcpip 各一次: getprop=%d tcpip=%d", g, tp)
 	}
 	devs := a.Snapshot().Devices
-	if len(devs) != 1 || devs[0].Serial != "601c9f08" || devs[0].State != "device" {
+	if len(devs) != 1 || devs[0].Serial != "TEST0001" || devs[0].State != "device" {
 		t.Fatalf("插线轮设备卡错误: %+v", devs)
 	}
 
@@ -300,7 +300,7 @@ func TestPollOnceGui30TeachTcpipFullChain(t *testing.T) {
 	// → 只查一次不再 tcpip；恢复周期内再轮（轮 5）0 开销
 	os.Setenv("G30_DEV", "")
 	a.pollOnce(context.Background()) // 设备暂时消失
-	os.Setenv("G30_DEV", "601c9f08\tdevice")
+	os.Setenv("G30_DEV", "TEST0001\tdevice")
 	a.pollOnce(context.Background()) // 恢复
 	if g, tp := counts(); g != 2 || tp != 1 {
 		t.Fatalf("adbd 重启恢复后不应重复 tcpip: getprop=%d tcpip=%d", g, tp)
@@ -319,7 +319,7 @@ func TestPollOnceGui30TeachTcpipFullChain(t *testing.T) {
 	}
 	os.Setenv("G30_DEV", "")
 	a.pollOnce(context.Background()) // 拔线
-	os.Setenv("G30_DEV", "601c9f08\tdevice")
+	os.Setenv("G30_DEV", "TEST0001\tdevice")
 	a.pollOnce(context.Background()) // 再插线：端口又丢了 → 再学一次
 	if g, tp := counts(); g != 3 || tp != 2 {
 		t.Fatalf("再插线（端口丢失）应重新学习: getprop=%d tcpip=%d", g, tp)

@@ -13,7 +13,7 @@ import (
 func TestParseDevices(t *testing.T) {
 	out := `List of devices attached
 24117RK2CC	device
-192.168.31.45:5555	device
+192.0.2.45:5555	device
 24117RK2CC._adb-tls._tcp.local.	device
 emulator-5554	offline
 ABCDEF0123456789	unauthorized
@@ -28,7 +28,7 @@ ABCDEF0123456789	unauthorized
 		conn  string
 	}{
 		"24117RK2CC":                      {"device", "usb"},
-		"192.168.31.45:5555":              {"device", "wifi"},
+		"192.0.2.45:5555":              {"device", "wifi"},
 		"24117RK2CC._adb-tls._tcp.local.": {"device", "other"},
 		"emulator-5554":                   {"offline", "other"},
 		"ABCDEF0123456789":                {"unauthorized", "usb"},
@@ -48,8 +48,8 @@ ABCDEF0123456789	unauthorized
 
 func TestParseDevicesL(t *testing.T) {
 	out := `List of devices attached
-a743e1df               device product:nabu model:Xiaomi_Pad_8_Pro device:nabu transport_id:3
-192.168.31.162:5555    device product:nabu model:Xiaomi_Pad_8_Pro device:nabu transport_id:4
+TEST0002               device product:nabu model:Xiaomi_Pad_8_Pro device:nabu transport_id:3
+192.0.2.162:5555    device product:nabu model:Xiaomi_Pad_8_Pro device:nabu transport_id:4
 ZYX987                 device product:other model:Some_Other_Phone device:x transport_id:5
 OLDUSB                 unauthorized
 `
@@ -57,10 +57,10 @@ OLDUSB                 unauthorized
 	if len(devs) != 4 {
 		t.Fatalf("解析数量错误: %d", len(devs))
 	}
-	if devs[0].Serial != "a743e1df" || devs[0].ConnType != "usb" || devs[0].Model != "Xiaomi_Pad_8_Pro" {
+	if devs[0].Serial != "TEST0002" || devs[0].ConnType != "usb" || devs[0].Model != "Xiaomi_Pad_8_Pro" {
 		t.Fatalf("USB 条目解析错误: %+v", devs[0])
 	}
-	if devs[1].Serial != "192.168.31.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "Xiaomi_Pad_8_Pro" {
+	if devs[1].Serial != "192.0.2.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "Xiaomi_Pad_8_Pro" {
 		t.Fatalf("无线条目解析错误: %+v", devs[1])
 	}
 	if devs[3].Model != "" || devs[3].State != "unauthorized" {
@@ -71,8 +71,8 @@ OLDUSB                 unauthorized
 // 同 model 的多 transport 合并为一组；不同 model 分组；无 model 各自成组。
 func TestGroupDevices(t *testing.T) {
 	raw := []RawDevice{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
 		{Serial: "ZYX987", State: "device", ConnType: "usb", Model: "Other_Phone"},
 		{Serial: "OLDUSB", State: "device", ConnType: "usb"},
 		{Serial: "10.0.0.9:5555", State: "device", ConnType: "wifi"},
@@ -94,51 +94,51 @@ func TestGroupDevices(t *testing.T) {
 func TestBuildDeviceMergeTransports(t *testing.T) {
 	m := New("", "")
 	d := m.buildDevice(context.Background(), []RawDevice{
-		{Serial: "192.168.31.162:5555", State: "offline", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
-		{Serial: "a743e1df", State: "offline", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "192.0.2.162:5555", State: "offline", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "TEST0002", State: "offline", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
 	})
-	if d.Serial != "a743e1df" || d.ConnType != "usb" {
+	if d.Serial != "TEST0002" || d.ConnType != "usb" {
 		t.Fatalf("应 USB 优先: %+v", d)
 	}
-	if d.Wireless != "192.168.31.162:5555" {
+	if d.Wireless != "192.0.2.162:5555" {
 		t.Fatalf("无线地址未并入: %+v", d)
 	}
 
 	// 仅无线：单栏无线
 	d = m.buildDevice(context.Background(), []RawDevice{
-		{Serial: "192.168.31.162:5555", State: "offline", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "192.0.2.162:5555", State: "offline", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
 	})
-	if d.Serial != "192.168.31.162:5555" || d.ConnType != "wifi" || d.Wireless != "" {
+	if d.Serial != "192.0.2.162:5555" || d.ConnType != "wifi" || d.Wireless != "" {
 		t.Fatalf("仅无线设备错误: %+v", d)
 	}
 
 	// USB 离线 + 无线在线：以在线无线为主
 	d = m.buildDevice(context.Background(), []RawDevice{
-		{Serial: "a743e1df", State: "offline", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "TEST0002", State: "offline", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
 	})
-	if d.Serial != "192.168.31.162:5555" || d.ConnType != "wifi" {
+	if d.Serial != "192.0.2.162:5555" || d.ConnType != "wifi" {
 		t.Fatalf("USB 离线应回退无线: %+v", d)
 	}
 
 	// 双无线 transport（一个 offline 残留 + 一个 device 在线）：以在线无线为主
 	d = m.buildDevice(context.Background(), []RawDevice{
-		{Serial: "192.168.31.162:5555", State: "offline", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
-		{Serial: "192.168.31.183:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "192.0.2.162:5555", State: "offline", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
+		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
 	})
-	if d.Serial != "192.168.31.183:5555" || d.State != "device" || d.ConnType != "wifi" {
+	if d.Serial != "192.0.2.183:5555" || d.State != "device" || d.ConnType != "wifi" {
 		t.Fatalf("双无线应选在线者: %+v", d)
 	}
 }
 
 // 无 model 条目按市场名二次合并：USB 优先，无线地址并入。
 func TestMergeDevice(t *testing.T) {
-	a := Device{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"}
-	mergeDevice(&a, Device{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro"})
-	if a.Serial != "a743e1df" || a.ConnType != "usb" {
+	a := Device{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"}
+	mergeDevice(&a, Device{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro"})
+	if a.Serial != "TEST0002" || a.ConnType != "usb" {
 		t.Fatalf("合并应 USB 优先: %+v", a)
 	}
-	if a.Wireless != "192.168.31.162:5555" {
+	if a.Wireless != "192.0.2.162:5555" {
 		t.Fatalf("无线地址未并入: %+v", a)
 	}
 }
@@ -197,10 +197,10 @@ func TestReadConfigAddr(t *testing.T) {
 	p := filepath.Join(dir, "config.txt")
 
 	// bat 写入格式：单行 IP:port + CRLF
-	if err := os.WriteFile(p, []byte("192.168.31.162:5555\r\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("192.0.2.162:5555\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ReadConfigAddr(p); got != "192.168.31.162:5555" {
+	if got := ReadConfigAddr(p); got != "192.0.2.162:5555" {
 		t.Fatalf("地址解析错误: %q", got)
 	}
 
@@ -234,7 +234,7 @@ func TestReadConfigAddr(t *testing.T) {
 func TestRecoverIfEmpty(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.txt")
-	if err := os.WriteFile(cfg, []byte("192.168.31.162:5555\r\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte("192.0.2.162:5555\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,7 +248,7 @@ func TestRecoverIfEmpty(t *testing.T) {
 	if !m.RecoverIfEmpty(context.Background()) {
 		t.Fatal("首次应发起 connect")
 	}
-	if len(calls) != 1 || calls[0] != "192.168.31.162:5555" {
+	if len(calls) != 1 || calls[0] != "192.0.2.162:5555" {
 		t.Fatalf("connect 未按记忆地址调用: %v", calls)
 	}
 	// 30s 节流：立即再调应被跳过
@@ -336,7 +336,7 @@ func TestPairErrKind(t *testing.T) {
 		out  string
 		want string
 	}{
-		{"Successfully paired to 192.168.31.99:37033 [guid=adb-a743e1df-Ab12Cd]", ""},
+		{"Successfully paired to 192.0.2.99:37033 [guid=adb-TEST0002-Ab12Cd]", ""},
 		{"Failed: Wrong password or connection was dropped.", "code"},
 		{"Failed: Unable to start pairing client.", "port"},
 		{"Failed to parse address for pairing: bad", "addr"},
@@ -358,12 +358,12 @@ func TestManagerPairCommandLine(t *testing.T) {
 	rec := filepath.Join(dir, "calls.txt")
 	fake := filepath.Join(dir, "adb")
 	script := "#!/bin/sh\necho \"$@\" >> \"" + rec + "\"\n" +
-		"echo 'Successfully paired to 192.168.31.99:37033 [guid=adb-a743e1df-Ab12Cd]'\nexit 0\n"
+		"echo 'Successfully paired to 192.0.2.99:37033 [guid=adb-TEST0002-Ab12Cd]'\nexit 0\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	m := New(fake, "")
-	out, err := m.Pair(context.Background(), "192.168.31.99", "37033", "123456")
+	out, err := m.Pair(context.Background(), "192.0.2.99", "37033", "123456")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestManagerPairCommandLine(t *testing.T) {
 		t.Fatalf("配对输出应判成功: %q", out)
 	}
 	b, _ := os.ReadFile(rec)
-	if got := strings.TrimSpace(string(b)); got != "pair 192.168.31.99:37033 123456" {
+	if got := strings.TrimSpace(string(b)); got != "pair 192.0.2.99:37033 123456" {
 		t.Fatalf("pair 命令行错误: %q", got)
 	}
 }
@@ -390,7 +390,7 @@ func TestManagerGetprop(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := New(fake, "")
-	got, err := m.Getprop(context.Background(), "192.168.31.99:33895", "ro.product.marketname")
+	got, err := m.Getprop(context.Background(), "192.0.2.99:33895", "ro.product.marketname")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestManagerGetprop(t *testing.T) {
 		t.Fatalf("getprop 返回值错误: %q", got)
 	}
 	b, _ := os.ReadFile(rec)
-	if want := "-s 192.168.31.99:33895 shell getprop ro.product.marketname"; strings.TrimSpace(string(b)) != want {
+	if want := "-s 192.0.2.99:33895 shell getprop ro.product.marketname"; strings.TrimSpace(string(b)) != want {
 		t.Fatalf("getprop 命令行错误: %q", strings.TrimSpace(string(b)))
 	}
 }
@@ -415,12 +415,12 @@ func TestIdentityKey(t *testing.T) {
 		ser  string
 		want string
 	}{
-		{"Xiaomi Pad 8 Pro", "Xiaomi", "25091RP04C", "a743e1df", "Xiaomi Pad 8 Pro"},
-		{"  ", "Xiaomi", "25091RP04C", "a743e1df", "Xiaomi 25091RP04C"},
-		{"", "Xiaomi", "", "a743e1df", "a743e1df"},                 // 只有厂商无型号 → serial
-		{"", "", "25091RP04C", "a743e1df", "a743e1df"},             // 只有型号无厂商 → serial
-		{"", "", "", "a743e1df", "a743e1df"},                       // 都无 → serial
-		{"", "", "", "192.168.31.162:5555", "192.168.31.162:5555"}, // 无线设备回退到 IP:port
+		{"Xiaomi Pad 8 Pro", "Xiaomi", "25091RP04C", "TEST0002", "Xiaomi Pad 8 Pro"},
+		{"  ", "Xiaomi", "25091RP04C", "TEST0002", "Xiaomi 25091RP04C"},
+		{"", "Xiaomi", "", "TEST0002", "TEST0002"},                 // 只有厂商无型号 → serial
+		{"", "", "25091RP04C", "TEST0002", "TEST0002"},             // 只有型号无厂商 → serial
+		{"", "", "", "TEST0002", "TEST0002"},                       // 都无 → serial
+		{"", "", "", "192.0.2.162:5555", "192.0.2.162:5555"}, // 无线设备回退到 IP:port
 		{" Mi 11 ", "", "", "abc", "Mi 11"},                        // marketname 去空白
 	}
 	for _, c := range cases {

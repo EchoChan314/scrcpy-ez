@@ -97,7 +97,7 @@ func (g *mdns8ProbeGate) release(t *testing.T, i int, ok bool) {
 // Goodbye 探测通 → 翻回 active（硬事实直接定状态）+ 触发日志。
 func TestGui48Mdns8GoodbyeProbeSuccessActiveAndLog(t *testing.T) {
 	a, _ := newWirelessApp()
-	addr := "192.168.31.197:45005"
+	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
 	a.profiles.MarkAddrStale("REDMI K80", addr) // 先 stale：验证翻回
 	logPath := mdns8StartLogCapture(t)
@@ -107,7 +107,7 @@ func TestGui48Mdns8GoodbyeProbeSuccessActiveAndLog(t *testing.T) {
 		return true
 	}
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	a.onMdnsDropped(mdnsServiceDropKey(svc), svc)
 	waitForMdns(t, "Goodbye 探测通应翻回 active", func() bool {
 		ae := fix2Addr(a, addr)
@@ -127,7 +127,7 @@ func TestGui48Mdns8GoodbyeProbeSuccessActiveAndLog(t *testing.T) {
 // Goodbye 探测不通 → 打 stale（原降级语义保留）。
 func TestGui48Mdns8GoodbyeProbeFailStale(t *testing.T) {
 	a, _ := newWirelessApp()
-	addr := "192.168.31.197:45005"
+	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
 	probeCalls := make(chan string, 1)
 	a.disc.TcpProbeFn = func(ctx context.Context, got string) bool {
@@ -135,7 +135,7 @@ func TestGui48Mdns8GoodbyeProbeFailStale(t *testing.T) {
 		return false
 	}
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	a.onMdnsDropped(mdnsServiceDropKey(svc), svc)
 	waitForMdns(t, "Goodbye 探测不通应打 stale", func() bool {
 		ae := fix2Addr(a, addr)
@@ -154,10 +154,10 @@ func TestGui48Mdns8GoodbyeProbeFailStale(t *testing.T) {
 // Goodbye 非 IP:port 条目（令牌）→ 不探测直接打 stale（原语义）。
 func TestGui48Mdns8GoodbyeNonIPNoProbeDirectStale(t *testing.T) {
 	a, _ := newWirelessApp()
-	token := "adb-601c9f08-KWqpio"
+	token := "adb-TEST0001-KWqpio"
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs:      []AddrEntry{{Addr: token, State: AddrStateActive, Mode: ModeTls}},
 		Profiles:   DefaultProfile(),
 	})
@@ -186,7 +186,7 @@ func TestGui48Mdns8GoodbyeNonIPNoProbeDirectStale(t *testing.T) {
 // 90s 静默触发后不立即打 stale（档案状态不变）；探测结果回来才定状态。
 func TestGui48Mdns8IdleSignalNoImmediateStale(t *testing.T) {
 	a, _ := newWirelessApp()
-	addr := "192.168.31.197:45005"
+	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -223,7 +223,7 @@ func TestGui48Mdns8IdleSignalNoImmediateStale(t *testing.T) {
 // 收敛性：静默 → 探测通（翻回 active）→ 再次静默 → 探测不通（stale）。
 func TestGui48Mdns8IdleTwoRoundsConverge(t *testing.T) {
 	a, _ := newWirelessApp()
-	addr := "192.168.31.197:45005"
+	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
 	a.profiles.MarkAddrStale("REDMI K80", addr)
 	var mu sync.Mutex
@@ -257,12 +257,12 @@ func TestGui48Mdns8IdleTwoRoundsConverge(t *testing.T) {
 // Goodbye 探测与 90s 静默探测交错 → 后发者胜：先发结果过期直接丢弃。
 func TestGui48Mdns8InterleavedProbeLastWins(t *testing.T) {
 	a, _ := newWirelessApp()
-	addr := "192.168.31.197:45005"
+	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
 	gate := newMdns8ProbeGate()
 	a.disc.TcpProbeFn = gate.fn()
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	a.onMdnsDropped(mdnsServiceDropKey(svc), svc) // 探测 0：Goodbye（先发）
 	gate.waitCalls(t, 1)
 	a.onMdnsIdleSignal(addr) // 探测 1：静默问询（后发，最新）
@@ -284,15 +284,15 @@ func TestGui48Mdns8InterleavedProbeLastWins(t *testing.T) {
 func TestGui48Mdns8ProfileOfflineCardIdentityHave(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := a.appendProfileOfflineCards([]adb.Device{
-		{Serial: "192.168.31.183:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if len(devs) != 1 {
 		t.Fatalf("Identity 命中已有卡不应再补合成在线卡: %+v", devs)
 	}
-	if devs[0].Serial != "192.168.31.183:5555" || devs[0].Identity != "REDMI K80" {
+	if devs[0].Serial != "192.0.2.183:5555" || devs[0].Identity != "REDMI K80" {
 		t.Fatalf("原设备卡应原样保留: %+v", devs)
 	}
 }

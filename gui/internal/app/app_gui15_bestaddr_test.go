@@ -33,14 +33,14 @@ func TestBestAddrSkipsThrottledTls(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "Redmi K80", &DeviceEntry{
 		Marketname: "Redmi K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:33895", State: AddrStateActive, Fail: 2, LastOk: 1750000001, LastFail: time.Now().Unix(), Mode: ModeTls},
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000002, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:33895", State: AddrStateActive, Fail: 2, LastOk: 1750000001, LastFail: time.Now().Unix(), Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000002, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
-	if got := s.BestAddr("601c9f08"); got != "192.168.31.197:5555" {
+	if got := s.BestAddr("TEST0001"); got != "192.0.2.197:5555" {
 		t.Fatalf("60s 节流期内的 tls 地址不应胜出，BestAddr 应为 5555: %q", got)
 	}
 	if list := s.OfflineCandidateAddrs(nil)["Redmi K80"]; len(list) != 0 {
@@ -54,14 +54,14 @@ func TestBestAddrKeepsFail1(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "Redmi K80", &DeviceEntry{
 		Marketname: "Redmi K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:33895", State: AddrStateActive, Fail: 1, LastOk: 1750000002, Mode: ModeTls},
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000001, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:33895", State: AddrStateActive, Fail: 1, LastOk: 1750000002, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000001, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
-	if got := s.BestAddr("601c9f08"); got != "192.168.31.197:33895" {
+	if got := s.BestAddr("TEST0001"); got != "192.0.2.197:33895" {
 		t.Fatalf("fail=1 且无 lastFail 的 tls 地址应参与（tls 层优先）: %q", got)
 	}
 }
@@ -76,20 +76,20 @@ func TestOrderedAddrsThrottleFilter(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "Redmi K80", &DeviceEntry{
 		Marketname: "Redmi K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:33895", State: AddrStateHistory, Fail: 254, LastOk: 1750000004, LastFail: now.Unix(), Mode: ModeTls}, // 最新 history tls 但节流中：无 active 才轮到它
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000003, Mode: ModeTcpip},                         // 保留：tcpip 最新
-			{Addr: "192.168.31.197:41234", State: AddrStateActive, Fail: 1, LastOk: 1750000002, Mode: ModeTls},                          // 唯一 active tls → 严格优先（history 33895 lastOk 更新也不抢）
-			{Addr: "192.168.31.197:44444", State: AddrStateHistory, Fail: 3, LastOk: 1750000001, Mode: ModeTls},                         // 旧 tls：不参与
-			{Addr: "192.168.31.197:33333", State: AddrStateHistory, Fail: 1, LastOk: 0},                                                 // 从未成功：不参与
+			{Addr: "192.0.2.197:33895", State: AddrStateHistory, Fail: 254, LastOk: 1750000004, LastFail: now.Unix(), Mode: ModeTls}, // 最新 history tls 但节流中：无 active 才轮到它
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000003, Mode: ModeTcpip},                         // 保留：tcpip 最新
+			{Addr: "192.0.2.197:41234", State: AddrStateActive, Fail: 1, LastOk: 1750000002, Mode: ModeTls},                          // 唯一 active tls → 严格优先（history 33895 lastOk 更新也不抢）
+			{Addr: "192.0.2.197:44444", State: AddrStateHistory, Fail: 3, LastOk: 1750000001, Mode: ModeTls},                         // 旧 tls：不参与
+			{Addr: "192.0.2.197:33333", State: AddrStateHistory, Fail: 1, LastOk: 0},                                                 // 从未成功：不参与
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("601c9f08")
+	got := s.OrderedAddrs("TEST0001")
 	// gui32 active 严格优先：tls 层取唯一 active 41234（history 33895 虽 lastOk
 	// 更新也不抢——死记忆让位）；tcpip 层 5555。
-	if len(got) != 2 || got[0].Addr != "192.168.31.197:41234" || got[1].Addr != "192.168.31.197:5555" {
+	if len(got) != 2 || got[0].Addr != "192.0.2.197:41234" || got[1].Addr != "192.0.2.197:5555" {
 		t.Fatalf("active 严格优先结果错误（tls 41234 → tcpip 5555）: %+v", got)
 	}
 
@@ -97,13 +97,13 @@ func TestOrderedAddrsThrottleFilter(t *testing.T) {
 	// 整体跳过，旧条目=纯噪声；与 gui27 节流同口径）。
 	s.mu.Lock()
 	for i := range s.data.Devices["Redmi K80"].Addrs {
-		if s.data.Devices["Redmi K80"].Addrs[i].Addr == "192.168.31.197:41234" {
+		if s.data.Devices["Redmi K80"].Addrs[i].Addr == "192.0.2.197:41234" {
 			s.data.Devices["Redmi K80"].Addrs[i].LastFail = now.Unix()
 		}
 	}
 	s.mu.Unlock()
-	got = s.OrderedAddrs("601c9f08")
-	if len(got) != 1 || got[0].Addr != "192.168.31.197:5555" {
+	got = s.OrderedAddrs("TEST0001")
+	if len(got) != 1 || got[0].Addr != "192.0.2.197:5555" {
 		t.Fatalf("active 被节流后本类无候选（不回退 history）: %+v", got)
 	}
 }
@@ -116,26 +116,26 @@ func TestStartCastSkipsThrottledTlsAddr(t *testing.T) {
 	a, f := newWirelessApp()
 	gui15Seed(a.profiles, "Redmi K80", &DeviceEntry{
 		Marketname: "Redmi K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:33895", State: AddrStateActive, Fail: 2, LastOk: 1750000001, LastFail: time.Now().Unix(), Mode: ModeTls},
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000002, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:33895", State: AddrStateActive, Fail: 2, LastOk: 1750000001, LastFail: time.Now().Unix(), Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1750000002, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
 	a.mu.Lock()
 	a.devices = []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "Redmi K80",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "Redmi K80",
 			Marketname: "Redmi K80", Identity: "Redmi K80"},
 	}
 	a.mu.Unlock()
 	startVerifyAlwaysOK(a) // gui32 验证链：候选 5555 验证通过（本测试锁定候选语义）
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("SCEZ_ADDR 应注入 5555 而非节流中的 33895: %+v", p)
 	}
 }

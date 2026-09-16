@@ -10,8 +10,8 @@ import (
 
 func mdns9SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555", "192.168.31.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555", "192.0.2.197:45005"}),
 	})
 }
 
@@ -35,7 +35,7 @@ func TestGui48Mdns9DeviceStreamPlusProfileActiveOneCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	mdns9SeedK80(a)
 	out := mdns9Commit(t, a, []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if len(out) != 1 {
@@ -53,17 +53,17 @@ func TestGui48Mdns9EliminatedSerialStillShowsIpAndTls(t *testing.T) {
 	mdns9SeedK80(a)
 	// 183:5555 不在档案 addrs/serials 中：ResolveKey(Serial) 失败，只能走 Identity 直解。
 	out := mdns9Commit(t, a, []adb.Device{
-		{Serial: "192.168.31.183:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if len(out) != 1 {
 		t.Fatalf("应归并成一张卡: %+v", out)
 	}
 	d := out[0]
-	if d.Serial != "192.168.31.197:45005" {
+	if d.Serial != "192.0.2.197:45005" {
 		t.Fatalf("显示 IP 应按档案 active 排序取 TLS 优先（45005）: %+v", d)
 	}
-	if d.WirelessIP != "192.168.31.197:45005" {
+	if d.WirelessIP != "192.0.2.197:45005" {
 		t.Fatalf("WirelessIP 应与显示 IP 同源: %+v", d)
 	}
 	if !d.Tls || d.WirelessForm != ModeTls {
@@ -84,7 +84,7 @@ func TestGui48Mdns9AbsentDeviceProfileActiveGetsDecoratedCard(t *testing.T) {
 	if d.State != "device" || d.ConnType != "wifi" || d.Identity != "REDMI K80" {
 		t.Fatalf("补齐卡应为无线状态且绑定档案 identity: %+v", d)
 	}
-	if d.Serial != "192.168.31.197:45005" || d.WirelessIP != "192.168.31.197:45005" {
+	if d.Serial != "192.0.2.197:45005" || d.WirelessIP != "192.0.2.197:45005" {
 		t.Fatalf("补齐卡必须带档案 active IP（TLS 优先）: %+v", d)
 	}
 	if !d.Tls || d.WirelessForm != ModeTls {
@@ -96,14 +96,14 @@ func TestGui48Mdns9AbsentDeviceProfileActiveGetsDecoratedCard(t *testing.T) {
 func TestGui48Mdns9AllStaleNoDevicesOfflineCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	mdns9SeedK80(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:5555")
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:45005")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:45005")
 	out := mdns9Commit(t, a, nil)
 	if len(out) != 1 {
 		t.Fatalf("全 stale + 无设备流应只有一张离线卡: %+v", out)
 	}
 	d := out[0]
-	if d.State != "offline" || d.ConnType != "usb" || d.Serial != "601c9f08" {
+	if d.State != "offline" || d.ConnType != "usb" || d.Serial != "TEST0001" {
 		t.Fatalf("离线卡形态错误: %+v", d)
 	}
 	if d.WirelessIP != "" || d.Tls {
@@ -116,22 +116,22 @@ func TestGui48Mdns9UsbWifiDualTransportOneWiredCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	mdns9SeedK80(a)
 	out := mdns9Commit(t, a, []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
 	})
 	if len(out) != 1 {
 		t.Fatalf("双 transport 应归并成一张卡: %+v", out)
 	}
 	d := out[0]
-	if d.Serial != "601c9f08" || d.State != "device" || d.ConnType != "usb" {
+	if d.Serial != "TEST0001" || d.State != "device" || d.ConnType != "usb" {
 		t.Fatalf("状态优先级应是有线卡: %+v", d)
 	}
-	if d.Wireless != "192.168.31.197:5555" {
+	if d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("无线地址应并入副行: %+v", d)
 	}
-	if mdns9FindAddr(out, "192.168.31.197:5555") != &out[0] {
+	if mdns9FindAddr(out, "192.0.2.197:5555") != &out[0] {
 		t.Fatalf("无线 transport 不应独立成卡: %+v", out)
 	}
 }
@@ -149,28 +149,28 @@ func TestGui48Mdns9SameIdentitySourcesNeverDuplicate(t *testing.T) {
 	}{
 		{
 			name:       "仅在线无线卡",
-			devs:       []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}},
-			wantSerial: "192.168.31.197:45005", wantConn: "wifi", wantTls: true,
+			devs:       []adb.Device{{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}},
+			wantSerial: "192.0.2.197:45005", wantConn: "wifi", wantTls: true,
 		},
 		{
 			name:       "USB device + 无线 device",
-			devs:       []adb.Device{{Serial: "601c9f08", State: "device", ConnType: "usb", Identity: "REDMI K80"}, {Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}},
-			wantSerial: "601c9f08", wantConn: "usb", wantWireless: "192.168.31.197:5555", wantTls: true,
+			devs:       []adb.Device{{Serial: "TEST0001", State: "device", ConnType: "usb", Identity: "REDMI K80"}, {Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}},
+			wantSerial: "TEST0001", wantConn: "usb", wantWireless: "192.0.2.197:5555", wantTls: true,
 		},
 		{
 			name:       "USB offline + 无线 device",
-			devs:       []adb.Device{{Serial: "601c9f08", State: "offline", ConnType: "usb", Identity: "REDMI K80"}, {Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}},
-			wantSerial: "601c9f08", wantConn: "usb", wantWireless: "192.168.31.197:5555", wantTls: true,
+			devs:       []adb.Device{{Serial: "TEST0001", State: "offline", ConnType: "usb", Identity: "REDMI K80"}, {Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Identity: "REDMI K80"}},
+			wantSerial: "TEST0001", wantConn: "usb", wantWireless: "192.0.2.197:5555", wantTls: true,
 		},
 		{
 			name:       "仅无线 offline 残留（档案 active 接管）",
-			devs:       []adb.Device{{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"}},
-			wantSerial: "192.168.31.197:45005", wantConn: "wifi", wantTls: true,
+			devs:       []adb.Device{{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"}},
+			wantSerial: "192.0.2.197:45005", wantConn: "wifi", wantTls: true,
 		},
 		{
 			name:       "设备流完全缺失（档案补齐）",
 			devs:       nil,
-			wantSerial: "192.168.31.197:45005", wantConn: "wifi", wantTls: true,
+			wantSerial: "192.0.2.197:45005", wantConn: "wifi", wantTls: true,
 		},
 	}
 	for _, c := range cases {

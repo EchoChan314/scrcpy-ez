@@ -149,24 +149,24 @@ func TestStopCastStoppingViaIdentityFallback(t *testing.T) {
 	a, rec := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
 		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C",
-			[]string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+			[]string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	setDevices(a, []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Identity: "Xiaomi Pad 8 Pro"},
 	})
-	if err := a.StartCast("192.168.31.162:5555"); err != nil {
+	if err := a.StartCast("192.0.2.162:5555"); err != nil {
 		t.Fatal(err)
 	}
-	rec.serial("192.168.31.162:5555")[0].waitStarts(t, 1)
+	rec.serial("192.0.2.162:5555")[0].waitStarts(t, 1)
 
-	if err := a.StopCast("a743e1df"); err != nil {
+	if err := a.StopCast("TEST0002"); err != nil {
 		t.Fatal(err)
 	}
-	s := sessionBySerial(t, a, "192.168.31.162:5555")
+	s := sessionBySerial(t, a, "192.0.2.162:5555")
 	if !s.Stopping || !s.Active {
 		t.Fatalf("identity 兜底停止应置 Stopping: %+v", s)
 	}
-	rec.serial("192.168.31.162:5555")[0].waitStopped(t) // gui5：杀树异步
+	rec.serial("192.0.2.162:5555")[0].waitStopped(t) // gui5：杀树异步
 }
 
 // --- 任务（gui6）：closing 状态（投屏窗口点 X 关闭 → "正在关闭…"） ---
@@ -325,9 +325,9 @@ func TestListProfilesInSnapshot(t *testing.T) {
 
 	seedProfiles(a, map[string]*DeviceEntry{
 		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C",
-			[]string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+			[]string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC",
-			[]string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+			[]string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	items := a.Snapshot().Profiles
 	if len(items) != 2 {
@@ -339,8 +339,8 @@ func TestListProfilesInSnapshot(t *testing.T) {
 		t.Fatalf("排序/命名错误: %+v", items)
 	}
 	if items[1].Model != "25091RP04C" || len(items[1].Serials) != 1 ||
-		items[1].Serials[0] != "a743e1df" || len(items[1].Addrs) != 1 ||
-		items[1].Addrs[0] != "192.168.31.162:5555" {
+		items[1].Serials[0] != "TEST0002" || len(items[1].Addrs) != 1 ||
+		items[1].Addrs[0] != "192.0.2.162:5555" {
 		t.Fatalf("条目内容错误: %+v", items[1])
 	}
 }

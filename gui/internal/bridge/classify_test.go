@@ -15,8 +15,8 @@ func TestClassifyLine(t *testing.T) {
 		{"[提示] 检测到 USB 设备（24117RK2CC）但未授权或未就绪，", KindUSBHint, PromptNone},
 		{"[提示] 未检测到 USB 设备，进入无线模式", KindNoUSB, PromptNone},
 		{"[3] 无线模式：尝试连接上次保存的地址...", KindWifiTry, PromptNone},
-		{"[OK] 连接成功：192.168.31.45:5555", KindWifiOK, PromptNone},
-		{"[提示] 连接失败或设备未就绪：192.168.31.45:5555（请确认同一局域网且无线调试端口已开启）", KindWifiFail, PromptNone},
+		{"[OK] 连接成功：192.0.2.45:5555", KindWifiOK, PromptNone},
+		{"[提示] 连接失败或设备未就绪：192.0.2.45:5555（请确认同一局域网且无线调试端口已开启）", KindWifiFail, PromptNone},
 		{"[3] 扫描已有无线设备（IP 条目优先，自动去重）...", KindScanWifi, PromptNone},
 		{"===== 首次连接向导 =====", KindGuide, PromptNone},
 		{"===== 开始投屏：Redmi K80（24117RK2CC） =====", KindCasting, PromptNone},
@@ -31,14 +31,14 @@ func TestClassifyLine(t *testing.T) {
 		{"[提示] 检测到连接断开（退出码 1），2 秒后自动重连...", KindReconnect, PromptNone},
 		{"[提示] 已检测到窗口关闭（退出码 0），投屏已结束，退出投屏循环", KindDone, PromptNone},
 		{"SCRCPY_EZ_USER_CLOSE", KindUserClose, PromptNone},
-		{"[提示] 无线设备 192.168.31.45:5555 已离线，投屏连接已断开，退出投屏循环", KindOfflineExit, PromptNone},
+		{"[提示] 无线设备 192.0.2.45:5555 已离线，投屏连接已断开，退出投屏循环", KindOfflineExit, PromptNone},
 		{"[失败] adb 启动失败，请确认 adb 可用", KindError, PromptNone},
 		{"请选择 [1]重新检测 [2]配对向导 [3]退出：", KindPrompt, PromptMenu123},
 		{"   投屏已结束，请选择：", KindPrompt, PromptMenu123},
 		{"[自动切换] 2 秒后自动重新检测并投屏 Q=退出循环 R=立即重投：", KindPrompt, PromptRetryQR},
 		{"请按任意键继续. . .", KindPrompt, PromptAnyKey},
 		{"Press any key to continue . . .", KindPrompt, PromptAnyKey},
-		{"[OK] 已保存无线地址到 config.txt：192.168.31.45:5555", KindNone, PromptNone},
+		{"[OK] 已保存无线地址到 config.txt：192.0.2.45:5555", KindNone, PromptNone},
 		{"", KindNone, PromptNone},
 		{"完全无关的行", KindNone, PromptNone},
 	}
@@ -172,11 +172,11 @@ func TestClassifyModePrecise(t *testing.T) {
 	}{
 		{"[1] 重置 adb 服务...", KindADBReset, ""},
 		{"[2] 检测 USB 设备...", KindDetect, ""},
-		{"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（a743e1df）", KindUSBFound, ""}, // 非模式短语
+		{"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（TEST0002）", KindUSBFound, ""}, // 非模式短语
 		{"[学习] 有线模式：检测手机 WiFi IP...", KindLearning, "usb"},
-		{"[OK] 检测到手机 WiFi IP：192.168.31.197", KindNone, ""},
-		{"[OK] 已保存无线地址到 config.txt：192.168.31.162:5555", KindNone, ""}, // 关键：不改模式
-		{"===== 开始投屏：Xiaomi Pad 8 Pro（a743e1df） =====", KindCasting, ""},
+		{"[OK] 检测到手机 WiFi IP：192.0.2.197", KindNone, ""},
+		{"[OK] 已保存无线地址到 config.txt：192.0.2.162:5555", KindNone, ""}, // 关键：不改模式
+		{"===== 开始投屏：Xiaomi Pad 8 Pro（TEST0002） =====", KindCasting, ""},
 		{"[高清] 有线模式：检测到设备 3200x2136@120Hz，有线规格 h264/80M/2560/120fps（低延迟优化）", KindSpec, "usb"},
 		{"[custom] wired res=2560 fps=120 bitrate=80 (usb)", KindSpec, "usb"},
 	}
@@ -201,10 +201,10 @@ func TestClassifyModePrecise(t *testing.T) {
 	}
 	// 非模式短语不得携带 Mode
 	for _, l := range []string{
-		"[提示] 已保存无线地址到 config.txt：192.168.31.162:5555",
-		"[提示] 无线设备 192.168.31.162:5555 已离线，投屏连接已断开，退出投屏循环",
-		"[提示] 检测到 USB 设备（601c9f08）但未授权或未就绪，",
-		"[OK] 检测到手机 WiFi IP：192.168.31.197",
+		"[提示] 已保存无线地址到 config.txt：192.0.2.162:5555",
+		"[提示] 无线设备 192.0.2.162:5555 已离线，投屏连接已断开，退出投屏循环",
+		"[提示] 检测到 USB 设备（TEST0001）但未授权或未就绪，",
+		"[OK] 检测到手机 WiFi IP：192.0.2.197",
 	} {
 		if ev := ClassifyLine(l); ev.Mode != "" {
 			t.Errorf("非模式短语不应带 Mode: %q -> %+v", l, ev)

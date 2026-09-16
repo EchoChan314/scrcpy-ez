@@ -25,26 +25,26 @@ func TestBestAddrPrefersTls(t *testing.T) {
 	s.mu.Lock()
 	s.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 200},
-			{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
+			{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 200},
+			{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	}
 	s.mu.Unlock()
 
-	if got := s.BestAddr("a743e1df"); got != "192.168.31.99:33895" {
+	if got := s.BestAddr("TEST0002"); got != "192.0.2.99:33895" {
 		t.Fatalf("TLS 优先：history tls 应在 5555 active 前: %q", got)
 	}
 	// OrderedAddrs 顺序：tls 层在前
-	ordered := s.OrderedAddrs("a743e1df")
-	if len(ordered) != 2 || ordered[0].Addr != "192.168.31.99:33895" || ordered[1].Addr != "192.168.31.99:5555" {
+	ordered := s.OrderedAddrs("TEST0002")
+	if len(ordered) != 2 || ordered[0].Addr != "192.0.2.99:33895" || ordered[1].Addr != "192.0.2.99:5555" {
 		t.Fatalf("OrderedAddrs 应为 tls 优先: %+v", ordered)
 	}
 	// 层内 active 优先：两个 tls 地址时 active 在前（经 addrSuccess 正常排序路径）
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.77:33999", ModeTls)
-	if got := s.BestAddr("a743e1df"); got != "192.168.31.77:33999" {
+	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.77:33999", ModeTls)
+	if got := s.BestAddr("TEST0002"); got != "192.0.2.77:33999" {
 		t.Fatalf("tls 层内应 active 优先（最近成功）: %q", got)
 	}
 }
@@ -55,13 +55,13 @@ func TestBestAddrLegacyNoModeIsTcpip(t *testing.T) {
 	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.162:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.162:5555"},
 	})
-	if got := s.BestAddr("a743e1df"); got != "192.168.31.162:5555" {
+	if got := s.BestAddr("TEST0002"); got != "192.0.2.162:5555" {
 		t.Fatalf("旧档案地址应可用: %q", got)
 	}
-	e, _ := s.Entry("a743e1df")
+	e, _ := s.Entry("TEST0002")
 	if e.Wireless != ModeTcpip {
 		t.Fatalf("旧档案同步后 wireless 应回填 tcpip: %+v", e.Wireless)
 	}
@@ -74,26 +74,26 @@ func TestMatchMdnsModesTlsGuidMerge(t *testing.T) {
 	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.162:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.162:5555"},
 	})
 
 	matched := s.MatchMdnsModes([]MdnsMatch{
-		{Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:33895", Mode: discovery.MdnsModeTls},
+		{Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:33895", Mode: discovery.MdnsModeTls},
 	})
-	if len(matched) != 1 || matched[0].Addr != "192.168.31.99:33895" || matched[0].Mode != ModeTls {
+	if len(matched) != 1 || matched[0].Addr != "192.0.2.99:33895" || matched[0].Mode != ModeTls {
 		t.Fatalf("tls 服务应匹配为 tls 候选: %+v", matched)
 	}
-	e, _ := s.Entry("a743e1df")
+	e, _ := s.Entry("TEST0002")
 	if e.Wireless != ModeTls {
 		t.Fatalf("tls 服务命中后 wireless 应记 tls: %+v", e)
 	}
-	if e.TlsGuid != "adb-a743e1df-Ab12Cd" {
+	if e.TlsGuid != "adb-TEST0002-Ab12Cd" {
 		t.Fatalf("tlsGuid 应记录实例名: %+v", e)
 	}
 	var got *AddrEntry
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.99:33895" {
+		if e.Addrs[i].Addr == "192.0.2.99:33895" {
 			got = &e.Addrs[i]
 		}
 	}
@@ -102,16 +102,16 @@ func TestMatchMdnsModesTlsGuidMerge(t *testing.T) {
 	}
 	// 旧签名 MatchMdns 兼容：返回地址列表
 	if list := s.MatchMdns([]MdnsMatch{
-		{Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:33895", Mode: discovery.MdnsModeTls},
-	}); len(list) != 1 || list[0] != "192.168.31.99:33895" {
+		{Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:33895", Mode: discovery.MdnsModeTls},
+	}); len(list) != 1 || list[0] != "192.0.2.99:33895" {
 		t.Fatalf("旧 MatchMdns 签名应兼容: %v", list)
 	}
 	// tlsGuid 已知 → 换端口重播（同 guid 新端口）仍识别为已知设备
-	if !s.TlsGuidKnown("adb-a743e1df-Ab12Cd") {
+	if !s.TlsGuidKnown("adb-TEST0002-Ab12Cd") {
 		t.Fatal("TlsGuidKnown 应识别已入档 guid")
 	}
 	matched2 := s.MatchMdnsModes([]MdnsMatch{
-		{Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:41234", Mode: discovery.MdnsModeTls},
+		{Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:41234", Mode: discovery.MdnsModeTls},
 	})
 	if len(matched2) != 1 {
 		t.Fatalf("同 guid 换端口应仍匹配（端口变化场景）: %+v", matched2)
@@ -124,19 +124,19 @@ func TestMatchMdnsModesTcpipRegression(t *testing.T) {
 	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.162:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.162:5555"},
 	})
 
 	matched := s.MatchMdnsModes([]MdnsMatch{
-		{Name: "adb-a743e1df", Addr: "192.168.31.183:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-TEST0002", Addr: "192.0.2.183:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	if len(matched) != 1 || matched[0].Addr != "192.168.31.183:5555" || matched[0].Mode != ModeTcpip {
+	if len(matched) != 1 || matched[0].Addr != "192.0.2.183:5555" || matched[0].Mode != ModeTcpip {
 		t.Fatalf("经典服务应匹配 tcpip 候选: %+v", matched)
 	}
-	e, _ := s.Entry("a743e1df")
+	e, _ := s.Entry("TEST0002")
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.183:5555" && e.Addrs[i].Mode != ModeTcpip {
+		if e.Addrs[i].Addr == "192.0.2.183:5555" && e.Addrs[i].Mode != ModeTcpip {
 			t.Fatalf("经典地址应记 tcpip: %+v", e.Addrs[i])
 		}
 	}
@@ -145,9 +145,9 @@ func TestMatchMdnsModesTcpipRegression(t *testing.T) {
 	s.data.Devices["Xiaomi Pad 8 Pro"].Wireless = ModeTls
 	s.mu.Unlock()
 	s.MatchMdnsModes([]MdnsMatch{
-		{Name: "adb-a743e1df", Addr: "192.168.31.184:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-TEST0002", Addr: "192.0.2.184:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	e, _ = s.Entry("a743e1df")
+	e, _ = s.Entry("TEST0002")
 	if e.Wireless != ModeTls {
 		t.Fatalf("tcpip 观察不应覆盖 tls 形态: %+v", e.Wireless)
 	}
@@ -156,9 +156,9 @@ func TestMatchMdnsModesTcpipRegression(t *testing.T) {
 // tls 服务实例名解析：adb-<serial>-6位后缀 → serial；异常输入防御。
 func TestTlsServiceIdentity(t *testing.T) {
 	cases := map[string]string{
-		"adb-a743e1df-Ab12Cd":    "a743e1df",
+		"adb-TEST0002-Ab12Cd":    "TEST0002",
 		"adb-R58T00WA0YM-0x9zQ2": "R58T00WA0YM",
-		"a743e1df":               "a743e1df",         // 无前缀/后缀（旧 adb 输出兼容）
+		"TEST0002":               "TEST0002",         // 无前缀/后缀（旧 adb 输出兼容）
 		"adb-ABCDEF0123456789":   "ABCDEF0123456789", // 16 位随机 identity（无后缀）
 		"":                       "",
 	}
@@ -177,22 +177,22 @@ func TestPairArchiveWritesBackTls(t *testing.T) {
 	s := NewProfileStore(path)
 	_ = s.Load()
 
-	s.PairArchive("Xiaomi Pad 8 Pro", "a743e1df", "192.168.31.99:33895",
-		"adb-a743e1df-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
+	s.PairArchive("Xiaomi Pad 8 Pro", "TEST0002", "192.0.2.99:33895",
+		"adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
 
 	e, ok := s.Entry("Xiaomi Pad 8 Pro")
 	if !ok {
 		t.Fatalf("PairArchive 应新建 identity 档案: %v", s.Entries())
 	}
-	if e.Wireless != ModeTls || e.TlsGuid != "adb-a743e1df-Ab12Cd" {
+	if e.Wireless != ModeTls || e.TlsGuid != "adb-TEST0002-Ab12Cd" {
 		t.Fatalf("入档形态错误: %+v", e)
 	}
-	if !contains(e.Serials, "a743e1df") {
+	if !contains(e.Serials, "TEST0002") {
 		t.Fatalf("serials 未累积: %+v", e.Serials)
 	}
 	found := false
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.99:33895" && e.Addrs[i].Mode == ModeTls &&
+		if e.Addrs[i].Addr == "192.0.2.99:33895" && e.Addrs[i].Mode == ModeTls &&
 			e.Addrs[i].State == AddrStateActive {
 			found = true
 		}
@@ -207,7 +207,7 @@ func TestPairArchiveWritesBackTls(t *testing.T) {
 		t.Fatal(err)
 	}
 	e2, ok := s2.Entry("Xiaomi Pad 8 Pro")
-	if !ok || e2.Wireless != ModeTls || e2.TlsGuid != "adb-a743e1df-Ab12Cd" ||
+	if !ok || e2.Wireless != ModeTls || e2.TlsGuid != "adb-TEST0002-Ab12Cd" ||
 		len(e2.Addrs) != 1 || e2.Addrs[0].Mode != ModeTls {
 		t.Fatalf("落盘重载后 tls 字段丢失: %+v", e2)
 	}
@@ -226,11 +226,11 @@ func TestPairArchiveMergesIntoExistingEntry(t *testing.T) {
 	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.162:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.162:5555"},
 	})
 
-	s.PairArchive("", "a743e1df", "192.168.31.99:33895", "adb-a743e1df-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
+	s.PairArchive("", "TEST0002", "192.0.2.99:33895", "adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
 	entries := s.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("配对接入不应分裂档案: %v", entries)
@@ -250,10 +250,10 @@ func TestOfflineCandidateAddrsTlsFirst(t *testing.T) {
 	s.mu.Lock()
 	s.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 200},
-			{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
+			{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 200},
+			{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	}
@@ -269,7 +269,7 @@ func TestOfflineCandidateAddrsTlsFirst(t *testing.T) {
 	}
 	got := s.OfflineCandidateAddrs(nil)
 	list := got["Xiaomi Pad 8 Pro"]
-	if len(list) != 2 || list[0].Addr != "192.168.31.99:33895" || list[1].Addr != "192.168.31.99:5555" {
+	if len(list) != 2 || list[0].Addr != "192.0.2.99:33895" || list[1].Addr != "192.0.2.99:5555" {
 		t.Fatalf("离线候选应 TLS 优先: %+v", list)
 	}
 	// 旧签名兼容
@@ -285,14 +285,14 @@ func TestAddrSuccessWithModeBackfillsTls(t *testing.T) {
 	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.162:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.162:5555"},
 	})
-	s.AddrSuccessWithMode("a743e1df", "192.168.31.99:33895", ModeTls)
-	e, _ := s.Entry("a743e1df")
+	s.AddrSuccessWithMode("TEST0002", "192.0.2.99:33895", ModeTls)
+	e, _ := s.Entry("TEST0002")
 	var got *AddrEntry
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.99:33895" {
+		if e.Addrs[i].Addr == "192.0.2.99:33895" {
 			got = &e.Addrs[i]
 		}
 	}
@@ -302,7 +302,7 @@ func TestAddrSuccessWithModeBackfillsTls(t *testing.T) {
 	if e.Wireless != ModeTls {
 		t.Fatalf("tls 成功后 wireless 应更新: %+v", e)
 	}
-	if s.AddrMode("192.168.31.99:33895") != ModeTls {
+	if s.AddrMode("192.0.2.99:33895") != ModeTls {
 		t.Fatalf("AddrMode 应可查形态")
 	}
 	if s.AddrMode("unknown:1") != "" {
@@ -312,20 +312,20 @@ func TestAddrSuccessWithModeBackfillsTls(t *testing.T) {
 
 // 形态字段 JSON 序列化（frontend 契约）。
 func TestDeviceEntryTlsJsonTags(t *testing.T) {
-	e := DeviceEntry{Wireless: ModeTls, TlsGuid: "adb-a743e1df-Ab12Cd", Serials: []string{}, Addrs: []AddrEntry{}}
+	e := DeviceEntry{Wireless: ModeTls, TlsGuid: "adb-TEST0002-Ab12Cd", Serials: []string{}, Addrs: []AddrEntry{}}
 	b, err := json.Marshal(e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
-	if !strings.Contains(s, `"wireless":"tls"`) || !strings.Contains(s, `"tlsGuid":"adb-a743e1df-Ab12Cd"`) {
+	if !strings.Contains(s, `"wireless":"tls"`) || !strings.Contains(s, `"tlsGuid":"adb-TEST0002-Ab12Cd"`) {
 		t.Fatalf("JSON 字段缺失: %s", s)
 	}
 	var back DeviceEntry
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Wireless != ModeTls || back.TlsGuid != "adb-a743e1df-Ab12Cd" {
+	if back.Wireless != ModeTls || back.TlsGuid != "adb-TEST0002-Ab12Cd" {
 		t.Fatalf("round-trip 失败: %+v", back)
 	}
 }

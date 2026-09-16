@@ -13,11 +13,11 @@ func fix2SeedPad(a *App) {
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
 		Model:      "25091RP04C",
-		Serials:    []string{"a743e1df"},
-		TlsGuid:    "adb-a743e1df-KWqpio",
+		Serials:    []string{"TEST0002"},
+		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Mode: ModeTcpip},
-			{Addr: "192.168.31.162:46051", State: AddrStateActive, Mode: ModeTls},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:46051", State: AddrStateActive, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -28,7 +28,7 @@ func TestGui52Fix2DeviceEntryIPFallback(t *testing.T) {
 	a, _ := multiTestApp()
 	fix2SeedPad(a)
 
-	d := adb.Device{Serial: "192.168.31.162:33793", State: "device", ConnType: "wifi"}
+	d := adb.Device{Serial: "192.0.2.162:33793", State: "device", ConnType: "wifi"}
 	e, ok := a.deviceEntry(&d)
 	if !ok {
 		t.Fatalf("同 IP 瞬时端口 transport 应经 IP 回退命中档案: %+v", d)
@@ -51,19 +51,19 @@ func TestGui52Fix2ExactMatchBeforeIPFallback(t *testing.T) {
 	gui15Seed(a.profiles, "ExactDevice", &DeviceEntry{
 		Marketname: "ExactDevice",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:33793", State: AddrStateStale, Mode: ModeTls},
+			{Addr: "192.0.2.162:33793", State: AddrStateStale, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
 	gui15Seed(a.profiles, "SameIPDevice", &DeviceEntry{
 		Marketname: "SameIPDevice",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
 
-	d := adb.Device{Serial: "192.168.31.162:33793", State: "device", ConnType: "wifi"}
+	d := adb.Device{Serial: "192.0.2.162:33793", State: "device", ConnType: "wifi"}
 	e, ok := a.deviceEntry(&d)
 	if !ok || e.Marketname != "ExactDevice" {
 		t.Fatalf("精确 addr 匹配应优先于 IP 回退，got %+v ok=%v", e, ok)
@@ -80,7 +80,7 @@ func TestGui52Fix2UnknownPortTransportNoNewDevicePopup(t *testing.T) {
 	fix2SeedPad(a)
 
 	// 无 marketname/man/model/identity：修复前会退化为 serial 身份 → 判新设备。
-	d := adb.Device{Serial: "192.168.31.162:33793", State: "device", ConnType: "wifi"}
+	d := adb.Device{Serial: "192.0.2.162:33793", State: "device", ConnType: "wifi"}
 	a.applyTrackUpdate([]adb.Device{d})
 	if np := a.Snapshot().NewDevice; np != nil {
 		t.Fatalf("同 IP 已知档案的瞬时端口 transport 不得弹新设备窗: %+v", np)
@@ -98,15 +98,15 @@ func TestGui52Fix2UnknownPortTransportMergesIntoMainCard(t *testing.T) {
 	fix2SeedPad(a)
 
 	devs := []adb.Device{
-		{Serial: "192.168.31.162:33793", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro", Identity: ""},
-		{Serial: "192.168.31.162:46051", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.162:33793", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro", Identity: ""},
+		{Serial: "192.0.2.162:46051", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	out := a.unifyProfileCards(devs)
 	if len(out) != 1 {
 		t.Fatalf("同 IP transport 应归并成单卡: %+v", out)
 	}
-	if out[0].Serial != "192.168.31.162:46051" || !out[0].Tls {
+	if out[0].Serial != "192.0.2.162:46051" || !out[0].Tls {
 		t.Fatalf("主卡应显示 active TLS 46051: %+v", out[0])
 	}
 }

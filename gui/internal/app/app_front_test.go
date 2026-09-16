@@ -39,11 +39,11 @@ func noEntry(string) (DeviceEntry, bool) { return DeviceEntry{}, false }
 func TestFrontCandidateSerials(t *testing.T) {
 	// 合并卡：USB 主 transport + 无线条目
 	devs := []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Wireless: "192.168.31.162:5555", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Identity: "Redmi K80"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Wireless: "192.0.2.162:5555", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Identity: "Redmi K80"},
 	}
-	got := frontCandidateSerials("a743e1df", devs, idOfSelf, noEntry)
-	want := []string{"a743e1df", "192.168.31.162:5555"}
+	got := frontCandidateSerials("TEST0002", devs, idOfSelf, noEntry)
+	want := []string{"TEST0002", "192.0.2.162:5555"}
 	if len(got) != len(want) {
 		t.Fatalf("候选错误: %+v", got)
 	}
@@ -54,8 +54,8 @@ func TestFrontCandidateSerials(t *testing.T) {
 	}
 
 	// 卡片重键：会话键是旧无线地址 → 经 Wireless 反查卡片
-	got2 := frontCandidateSerials("192.168.31.162:5555", devs, idOfSelf, noEntry)
-	want2 := []string{"192.168.31.162:5555", "a743e1df"}
+	got2 := frontCandidateSerials("192.0.2.162:5555", devs, idOfSelf, noEntry)
+	want2 := []string{"192.0.2.162:5555", "TEST0002"}
 	if len(got2) != len(want2) {
 		t.Fatalf("重键候选错误: %+v", got2)
 	}
@@ -67,12 +67,12 @@ func TestFrontCandidateSerials(t *testing.T) {
 
 	// 同 identity 双卡（USB 卡 + 独立无线卡）：两卡 serial 都入候选
 	devs2 := []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Identity: "Redmi K80"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Identity: "Redmi K80"},
 	}
-	got3 := frontCandidateSerials("a743e1df", devs2, idOfSelf, noEntry)
-	want3 := []string{"a743e1df", "192.168.31.162:5555"}
+	got3 := frontCandidateSerials("TEST0002", devs2, idOfSelf, noEntry)
+	want3 := []string{"TEST0002", "192.0.2.162:5555"}
 	if len(got3) != len(want3) || got3[0] != want3[0] || got3[1] != want3[1] {
 		t.Fatalf("双卡候选错误: %+v", got3)
 	}
@@ -89,27 +89,27 @@ func TestFrontCandidateSerials(t *testing.T) {
 	}
 }
 
-// v3 修复（实况）：平板会话键=a743e1df（USB serial），但 scrcpy 实际命令行
-// `--serial 192.168.31.162:5555`（无线）——候选必须从档案补上全部 serials+addrs
-// 才能命中。档案是权威：a743e1df 的档案 addrs 有 162:5555 → 候选含 162:5555
+// v3 修复（实况）：平板会话键=TEST0002（USB serial），但 scrcpy 实际命令行
+// `--serial 192.0.2.162:5555`（无线）——候选必须从档案补上全部 serials+addrs
+// 才能命中。档案是权威：TEST0002 的档案 addrs 有 162:5555 → 候选含 162:5555
 // → 与 scrcpy 命令行匹配。
 func TestFrontCandidateSerialsProfileAddrs(t *testing.T) {
 	profiles := map[string]*DeviceEntry{
 		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C",
-			[]string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+			[]string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	}
 	entryOf := entryOfMap(profiles)
 	// 设备列表里只有无线卡（USB 卡本轮未出现：会话键查不到卡片）
 	devs := []adb.Device{
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Identity: "Xiaomi Pad 8 Pro"},
 	}
-	got := frontCandidateSerials("a743e1df", devs, idOfSelf, entryOf)
+	got := frontCandidateSerials("TEST0002", devs, idOfSelf, entryOf)
 	// 档案补全：会话键 + 档案 serials + 档案 addrs
-	if len(got) != 2 || got[0] != "a743e1df" || got[1] != "192.168.31.162:5555" {
+	if len(got) != 2 || got[0] != "TEST0002" || got[1] != "192.0.2.162:5555" {
 		t.Fatalf("候选应含档案 addrs: %+v", got)
 	}
 	// 组合验证（与 bridge 匹配逻辑同判据）：scrcpy 实际命令行命中候选
-	cmdline := `"C:\x\scrcpy.exe" --serial 192.168.31.162:5555 --max-size 1920`
+	cmdline := `"C:\x\scrcpy.exe" --serial 192.0.2.162:5555 --max-size 1920`
 	hit := false
 	for _, c := range got {
 		tok := "--serial " + c
@@ -122,8 +122,8 @@ func TestFrontCandidateSerialsProfileAddrs(t *testing.T) {
 		t.Fatalf("平板场景应命中 scrcpy 命令行 %q（候选 %v）", cmdline, got)
 	}
 	// 会话键直接按档案 identity 解析（键=无线地址时同样补全）
-	got2 := frontCandidateSerials("192.168.31.162:5555", devs, idOfSelf, entryOf)
-	if len(got2) != 2 || got2[0] != "192.168.31.162:5555" || got2[1] != "a743e1df" {
+	got2 := frontCandidateSerials("192.0.2.162:5555", devs, idOfSelf, entryOf)
+	if len(got2) != 2 || got2[0] != "192.0.2.162:5555" || got2[1] != "TEST0002" {
 		t.Fatalf("无线会话键也应补全档案 serials: %+v", got2)
 	}
 }

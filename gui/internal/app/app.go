@@ -217,6 +217,9 @@ type Snapshot struct {
 	DevOrder   []string        `json:"devOrder"`   // 设备卡顺序（gui45 后端持久化；空=未初始化，前端 merge 后写回）
 	NewDevice  *NewDeviceInfo  `json:"newDevice"`  // 新设备弹窗（非 nil = 需要弹）
 	PairStatus *PairStatus     `json:"pairStatus"` // 无线调试配对向导状态（非 idle = 前端弹窗展示步骤/结果）
+	// Settings 全局设置（设置面板两个开关；独立 settings.json 持久化）。
+	// 前端每次快照刷新拿到当前值，设置面板按它渲染开关状态。
+	Settings Settings `json:"settings"`
 }
 
 // sessionState 是一个投屏会话的全部后端状态（map[serial]*sessionState 的一个值）。
@@ -270,6 +273,12 @@ type App struct {
 	adbHealTried bool
 	cancel       context.CancelFunc
 
+	// gui54：「假关 + 并行清理」用。closeOnce 保证清理只启动一次（幂等）；
+	// closeDone 在全部会话 runner.Stop() 返回后关闭——main 侧据此决定真正退出进程的时机
+	// （BeginClose 立即返回该通道，阻塞版 Close 仍可同步等待）。
+	closeOnce sync.Once
+	closeDone chan struct{}
+
 	// 多会话核心（轮 B）：map[serial]*sessionState，App.mu 保护；
 	// nextParams=参数浮窗保存后的下一次 StartCast 注入覆盖（按 serial）。
 	sessions   map[string]*sessionState
@@ -279,7 +288,11 @@ type App struct {
 	// profiles=设备档案（identity 唯一化，全局共享只读）；
 	// 无线探测（mDNS + 并行 connect）：disc=adb 探测器；lastDisc=探测节流时间戳；
 	// discStatus=最近一次探测结果（Snapshot.Discovery 输出）。
-	profiles   *ProfileStore
+	profiles *ProfileStore
+	// settings=全局设置（设置面板两个开关：参数控件默认可见性 / 关闭窗口最小化到
+	// 托盘）。与设备档案分文件存放（settings.json），互不干扰；自带锁，可被
+	// UI 线程（窗口过程读"关闭是否最小化"）与 JS 绑定并发读取。
+	settings   *SettingsStore
 	disc       *discovery.Connector
 	lastDisc   time.Time
 	discBusy   bool // 探测 in-flight 标记（gui22 防抖）：runDiscovery 期间 true，ForceDiscover 幂等
@@ -481,6 +494,9 @@ type Config struct {
 	ConfigPath   string // 无线记忆 config.txt；默认 bat 同目录 config.txt（缺失回退 ..\..\config.txt）
 	CrashDir     string // panic 崩溃日志目录（exe 同目录）；空=不落盘
 	ProfilesPath string // 参数记忆 profiles.json（默认 %APPDATA%\scrcpy-ez\profiles.json）；空=内存模式
+	// SettingsPath 全局设置 settings.json（默认与 profiles.json 同目录，独立文件——
+	// 设备数据与壳设置分开存，互不污染）；空=内存模式（设置不落盘，测试用）。
+	SettingsPath string
 	Version      string
 }
 
@@ -490,6 +506,7 @@ func New(cfg Config) *App {
 		adb:        adb.New(cfg.AdbPath, cfg.ConfigPath),
 		adbOK:      true, // 真空期去抖：首轮轮询未回前视为"可用/刷新中"（不闪红条，前端显示扫描中空态）
 		profiles:   NewProfileStore(cfg.ProfilesPath),
+		settings:   NewSettingsStore(cfg.SettingsPath),
 		disc:       discovery.New(cfg.AdbPath),
 		sessions:   map[string]*sessionState{},
 		nextParams: map[string]bridge.CastParams{},
@@ -533,7 +550,7 @@ func New(cfg Config) *App {
 	// 插线即学习操作真实实现（测试可注入替换）
 	a.teachOps = teachOps{
 		getpropFn: a.adb.Getprop,
-			shellFn:   a.adb.Shell,
+		shellFn:   a.adb.Shell,
 	}
 	// gui48-teachfix：生产才挂真实 TCP 探测（5555 就绪验证）；测试 App 通过
 	// Version=="test" 保持 probeFn=nil（旧单测不触达真实网络），新测试显式注入。
@@ -542,11 +559,27 @@ func New(cfg Config) *App {
 	}
 	_ = a.profiles.Load() // 文件缺失/损坏=空档（全部自动档），不阻断启动；
 	// 旧结构 profiles.json 在 Load 内自动迁移（identity=serial 回退键）并落盘新结构
+	_ = a.settings.Load() // 全局设置（缺文件/缺键=出厂默认：参数控件显示、关窗完整退出）
 	return a
 }
 
 // SetRunnerFactory 注入 bat 桥接工厂（ui 层在启动时调用）。
 func (a *App) SetRunnerFactory(f RunnerFactory) { a.newR = f }
+
+// --- 全局设置（设置面板两个开关） ---
+
+// Settings 返回当前全局设置快照（UI 窗口过程读"关闭窗口是否最小化到托盘"、
+// 前端设置面板渲染开关状态都用它）。
+func (a *App) Settings() Settings { return a.settings.Get() }
+
+// SetSettings 写入并持久化全局设置（设置面板任一开关变化时调用；幂等全量写）。
+// 落盘失败会把错误上抛给前端提示，但内存值已更新（本次会话立即生效）。
+func (a *App) SetSettings(showParamOverlay, closeToTray bool) error {
+	err := a.settings.Set(showParamOverlay, closeToTray)
+	bridge.DebugLog("[app] 设置更新 showParamOverlay=%v closeToTray=%v (err=%v)",
+		showParamOverlay, closeToTray, err)
+	return err
+}
 
 // --- panic 防护与崩溃日志 ---
 // GUI 静默死是最恶劣的失败模式：所有桥接回调/轮询 goroutine 都经 guard 包裹，
@@ -3853,7 +3886,7 @@ func (a *App) buildPending(devs []adb.Device) {
 //	   从设备列表过滤（不建卡）。
 //
 // gui14 mDNS 令牌（adb 37）：`adb devices` 会列出服务名条目（完整 FQN，如
-// "adb-601c9f08-KWqpio._adb-tls-connect._tcp"，state 可能为 offline 或 device）——
+// "adb-TEST0001-KWqpio._adb-tls-connect._tcp"，state 可能为 offline 或 device）——
 // 令牌不是可投屏目标，无条件折叠：TlsServiceIdentity 解析出 serial 后按档案
 // 身份归并（隐去令牌卡；副行只写 ip:port 形态，绝不写令牌 FQN）；
 // 身份解析失败 → 直接过滤。判据 isMdnsToken 与 state/ConnType 无关
@@ -4009,7 +4042,7 @@ func (a *App) foldGhostWireless(devs []adb.Device) []adb.Device {
 // 无法按 model 把 USB 与无线条目归并 → USB/无线分两张卡，而无线探测
 // （5555 已可连）比 USB model 确认更快 → 无线卡先亮 1-2s（主人观察：
 // 从离线到无线再很快到有线）。这里用档案 identity 归并：USB serial 命中档案
-// （如 K80 601c9f08）且同身份无线在线卡在场 → USB 作主 transport 立即归并成
+// （如 K80 TEST0001）且同身份无线在线卡在场 → USB 作主 transport 立即归并成
 // 单卡（Serial/State/ConnType 取 USB，无线地址并入 Wireless 副行；名称/型号/
 // 电量/规格等富化字段从无线卡补缺——无线 transport 已富化，不等 USB getprop）。
 // 无同身份无线在线卡时 USB 幽灵卡原样保留（本身就是 USB 卡，不显示无线）；
@@ -4678,7 +4711,7 @@ func recentOkAddr(e DeviceEntry) string {
 
 // isMdnsToken 判定 serial 是否为 adb 37 在 `adb devices` 里列出的 mDNS 服务
 // 令牌（实例名._服务类型._tcp 完整 FQN，如
-// "adb-601c9f08-KWqpio._adb-tls-connect._tcp"）。判据宽松：
+// "adb-TEST0001-KWqpio._adb-tls-connect._tcp"）。判据宽松：
 // adb- 前缀 + "._adb" 后缀段即视为令牌（IsIPPort 优先于本判定——
 // ip:port 形式不会误中；裸实例名 "adb-xxx" 无 "._adb" 段也不中）。
 func isMdnsToken(serial string) bool {
@@ -5032,6 +5065,7 @@ func (a *App) snapshotRaw() Snapshot {
 		DevOrder:   a.profiles.DeviceOrder(),
 		NewDevice:  a.popup.info,
 		PairStatus: pair,
+		Settings:   a.settings.Get(), // 设置面板两个开关的当前值
 	}
 }
 
@@ -5236,6 +5270,13 @@ func (a *App) StartCast(serial string) error {
 	if !params.Wifi.Set && p.Wifi.Custom {
 		params.Wifi = bridge.ModeParams{Res: p.Wifi.Res, FPS: p.Wifi.FPS, Bitrate: p.Wifi.Bitrate, Set: true}
 	}
+	// 开关 A（设置面板）：参数控件默认可见性——每次启动投屏按当前设置注入
+	// SCEZ_PARAM_OVERLAY（1=启动可见，0=启动隐藏），由 bat 转交 scrcpy.exe
+	// 客户端（环境变量随进程树继承），客户端在浮层初始化时读取。
+	// 投屏中 Ctrl+F 的手动切换不受影响（客户端会话内状态）。
+	ov := a.settings.Get().ShowParamOverlay
+	params.OverlayVisible = ov
+	params.OverlayVisibleSet = true
 	// 设备锁定注入（多设备 Phase 1 轮 A + 修复）：
 	//   USB 在线 → SCEZ_SERIAL=USB serial——判据 = "该 identity 存在在线 USB transport"
 	//   （无论目标卡显示的 ConnType；双卡场景下同 identity 的 USB 卡也算）→ bat 首轮即 USB 投屏
@@ -6015,8 +6056,10 @@ func (a *App) completePairFlowAfterConnect(ctx context.Context, p PendingDevice,
 
 // ensurePairTcpip5555 无线配对成功后开启设备 tcpip 5555（gui52-fix8/fix9）：
 // ① getprop service.adb.tcp.port 检测：已 5555 → 幂等跳过，并直接写档 ip:5555 active
-//    （gui52-fix9：mDNS 对稳定不变的 _adb._tcp 服务永不产生 added 事件——「IP 交给
-//    mdns」对 5555 不成立，检测到已开即直写入档，关 TLS 时不再闪离线卡）；
+//
+//	（gui52-fix9：mDNS 对稳定不变的 _adb._tcp 服务永不产生 added 事件——「IP 交给
+//	mdns」对 5555 不成立，检测到已开即直写入档，关 TLS 时不再闪离线卡）；
+//
 // ② 未开 → adb tcpip 5555（2s 超时，失败仅日志，不阻断配对成功态），成功同写档；
 // ③ 不做 connect 探测（地址活性后续由缺席验尸负责）。
 func (a *App) ensurePairTcpip5555(profileKey, ip, serial string) {
@@ -6480,7 +6523,7 @@ func (a *App) StopCast(serial string) error {
 // 退出路径下永远命中（sessions 里的 runner 在 Stop 后仍非 nil），导致
 // kill-server 成死代码 → adb server 残留（2026-09-02 清理审计发现）。
 // 返回 (adbPath, ok)：ok=true 表示应清理；真正的 exec 由 UI/main 层执行
-//（Windows 隐藏窗口属性在 UI 层，app 包保持跨平台干净）。
+// （Windows 隐藏窗口属性在 UI 层，app 包保持跨平台干净）。
 func (a *App) ShouldKillServerOnExit() (string, bool) {
 	bridge.DebugLog("[app] GUI 退出：清理 adb server（投屏会话已全停）")
 	return a.cfg.AdbPath, true
@@ -6725,7 +6768,7 @@ func (a *App) ForgetSession(serial string) {
 // frontCandidateSerials 计算本会话 scrcpy 进程的 --serial 匹配候选（纯函数）：
 // 会话键 serial + 档案中该 identity 的全部 serials/全部 addrs（档案是权威——
 // 会话键可能过期/卡片重键，scrcpy 实际 --serial 是档案中某历史 serial 或无线
-// 地址，如平板会话键 a743e1df（USB）而 scrcpy 以无线 192.168.31.162:5555 运行）
+// 地址，如平板会话键 TEST0002（USB）而 scrcpy 以无线 192.0.2.162:5555 运行）
 // + 目标卡 Serial/Wireless + 同 identity 在线卡的 Serial/Wireless。
 // idOf 注入 identity 解析（App 用 a.identityOf）；entryOf 注入档案查询
 // （App 用 a.profiles.Entry；测试用固定表）。
@@ -6798,21 +6841,50 @@ func (a *App) BringCastToFront(serial string) error {
 	return bridge.BringCastToFront(cands)
 }
 
-// Close 释放轮询与全部会话资源。
-func (a *App) Close() {
-	a.mu.Lock()
-	cancel := a.cancel
-	runners := make([]Runner, 0, len(a.sessions))
-	for _, st := range a.sessions {
-		if st.runner != nil {
-			runners = append(runners, st.runner)
+// BeginClose 触发全部会话的并行清理，立即返回「全部 runner.Stop() 返回后关闭」的通道。
+//
+// 与 Close 的分工（gui54 退出体验优化）：
+//   - Close：阻塞到清理完成——JS ExitApp（ui 层）等同步调用方语义不变
+//     （它必须等会话全停后再 kill adb server）；
+//   - BeginClose：供「假关」退出路径用——窗口/托盘图标已先行消失，清理在后台并行跑，
+//     由 main 侧等待（含 15s 全局兜底）后再真正退出进程。
+//
+// 并行粒度：每个会话一个 goroutine；会话内部 ⓪~⑤ 顺序契约、防逃逸与多会话隔离判定
+// （WATCH_TAG/serial/父链）完全不变，总耗时≈最慢的那个会话。
+// 幂等：重复调用返回同一通道，不会重复停止（也不会重复 kill）。
+func (a *App) BeginClose() <-chan struct{} {
+	a.closeOnce.Do(func() {
+		a.mu.Lock()
+		cancel := a.cancel
+		runners := make([]Runner, 0, len(a.sessions))
+		for _, st := range a.sessions {
+			if st.runner != nil {
+				runners = append(runners, st.runner)
+			}
 		}
-	}
-	a.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	for _, r := range runners {
-		_ = r.Stop()
-	}
+		a.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		done := make(chan struct{})
+		a.closeDone = done
+		go func() {
+			defer close(done)
+			var wg sync.WaitGroup
+			for _, r := range runners {
+				wg.Add(1)
+				go func(r Runner) {
+					defer wg.Done()
+					_ = r.Stop()
+				}(r)
+			}
+			wg.Wait()
+		}()
+	})
+	return a.closeDone
+}
+
+// Close 释放轮询与全部会话资源（阻塞到全部会话停止完成）。
+func (a *App) Close() {
+	<-a.BeginClose()
 }

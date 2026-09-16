@@ -16,6 +16,7 @@
     <div class="ver" id="app-ver">v0.1</div>
     <div class="spacer"></div>
     <div class="iconbtn" title="刷新" id="btn-refresh">↻</div>
+    <div class="iconbtn" title="设置" aria-label="设置" id="btn-settings">⚙</div>
     <div class="iconbtn" title="指引" aria-label="指引" id="btn-guide">💡</div>
   </div>
 
@@ -185,6 +186,27 @@
     <div class="c-btns">
       <button class="btn ghost" id="batch-confirm-cancel" type="button">取消</button>
       <button class="btn danger-solid" id="batch-confirm-ok" type="button">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 设置面板（右上角齿轮；两个开关，独立 settings.json 持久化） ================= -->
+<div class="modal-mask" id="settings-modal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-head"><b>设置</b><span class="modal-close" id="settings-close">✕</span></div>
+    <div class="set-row">
+      <div class="set-main">
+        <div class="set-title">启动投屏时显示参数控件</div>
+        <div class="set-note">投屏窗口上的 fps/码率/状态浮层，投屏中 Ctrl+F 可随时开关</div>
+      </div>
+      <div class="switch" id="set-overlay" role="switch" aria-checked="true"><span class="knob"></span></div>
+    </div>
+    <div class="set-row">
+      <div class="set-main">
+        <div class="set-title">关闭窗口时最小化到托盘</div>
+        <div class="set-note">关闭后窗口收进托盘、投屏不中断，托盘菜单可恢复或退出</div>
+      </div>
+      <div class="switch" id="set-tray" role="switch" aria-checked="false"><span class="knob"></span></div>
     </div>
   </div>
 </div>

@@ -18,11 +18,11 @@ func seedPadProfile(t *testing.T, a *App) {
 	a.profiles.mu.Lock()
 	a.profiles.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
-		TlsGuid:    "adb-a743e1df-On9v2R",
+		Serials:    []string{"TEST0002"},
+		TlsGuid:    "adb-TEST0002-On9v2R",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:36983", State: AddrStateActive, Mode: ModeTls},
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:36983", State: AddrStateActive, Mode: ModeTls},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	}
@@ -38,11 +38,11 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 
 	// 删除前：设备在 adb 设备流（TLS 形态）→ 有卡
 	before := []adb.Device{{
-		Serial: "192.168.31.162:36983", State: "device", ConnType: "wifi",
+		Serial: "192.0.2.162:36983", State: "device", ConnType: "wifi",
 		Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro", Name: "Xiaomi Pad 8 Pro",
 	}}
 	a.applyTrackUpdate(before)
-	if !hasCard(a, "192.168.31.162:36983") {
+	if !hasCard(a, "192.0.2.162:36983") {
 		t.Fatalf("删除前应显示平板卡")
 	}
 
@@ -50,7 +50,7 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 		t.Fatalf("DeleteDevices: %v", err)
 	}
 	// 删除集键应含：档案键/市场名/短号/TlsGuid/IP 键
-	for _, k := range []string{"Xiaomi Pad 8 Pro", "a743e1df", "adb-a743e1df-On9v2R", "ip:192.168.31.162"} {
+	for _, k := range []string{"Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
 		if !a.deletedUsbMarked(k) {
 			t.Fatalf("删除集应含键 %q", k)
 		}
@@ -58,11 +58,11 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 
 	// adb server mdns auto-connect 秒回（新端口 45205，与删除时端口不同）
 	rebirth := []adb.Device{{
-		Serial: "192.168.31.162:45205", State: "device", ConnType: "wifi",
+		Serial: "192.0.2.162:45205", State: "device", ConnType: "wifi",
 		Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro", Name: "Xiaomi Pad 8 Pro",
 	}}
 	a.applyTrackUpdate(rebirth)
-	if hasCard(a, "192.168.31.162:45205") {
+	if hasCard(a, "192.0.2.162:45205") {
 		t.Fatalf("删除后秒回 transport 不得显示卡片")
 	}
 	if sn := a.Snapshot(); sn.NewDevice != nil {
@@ -73,14 +73,14 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 	}
 
 	// 端口再换（5555 tcpip 形态）+ 服务名令牌形态（adb server auto-connect 的 device 形态）
-	rebirth2 := []adb.Device{{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi"}}
+	rebirth2 := []adb.Device{{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi"}}
 	a.applyTrackUpdate(rebirth2)
-	if hasCard(a, "192.168.31.162:5555") {
+	if hasCard(a, "192.0.2.162:5555") {
 		t.Fatalf("5555 形态秒回也不得显示卡片")
 	}
-	token := []adb.Device{{Serial: "adb-a743e1df-On9v2R._adb-tls-connect._tcp", State: "device", ConnType: "other"}}
+	token := []adb.Device{{Serial: "adb-TEST0002-On9v2R._adb-tls-connect._tcp", State: "device", ConnType: "other"}}
 	a.applyTrackUpdate(token)
-	if hasCard(a, "adb-a743e1df-On9v2R._adb-tls-connect._tcp") {
+	if hasCard(a, "adb-TEST0002-On9v2R._adb-tls-connect._tcp") {
 		t.Fatalf("mDNS 令牌形态秒回也不得显示卡片")
 	}
 }
@@ -91,12 +91,12 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 // 重新配对」找不到设备（00:12 实测回退）。
 func TestGui52Fix17DeleteWirelessNoPendingCard(t *testing.T) {
 	a, _ := newWirelessApp()
-	a.setDeletedUsb("ip:192.168.31.162")
-	a.setDeletedUsb("a743e1df")
-	a.setDeletedUsb("adb-a743e1df-On9v2R")
+	a.setDeletedUsb("ip:192.0.2.162")
+	a.setDeletedUsb("TEST0002")
+	a.setDeletedUsb("adb-TEST0002-On9v2R")
 
 	svcs := []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-On9v2R", Addr: "192.168.31.162:45205", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-On9v2R", Addr: "192.0.2.162:45205", Mode: discovery.MdnsModeTls},
 	}
 	a.mdnsMu.Lock()
 	a.mdns = svcs
@@ -107,7 +107,7 @@ func TestGui52Fix17DeleteWirelessNoPendingCard(t *testing.T) {
 	}
 	// 无删除集时的基线对照（正常未入档设备也进卡）
 	p := a.Snapshot().Pending[0]
-	if p.Key != "192.168.31.162:45205" {
+	if p.Key != "192.0.2.162:45205" {
 		t.Fatalf("待配对卡 Key 异常：%+v", p)
 	}
 }
@@ -115,21 +115,21 @@ func TestGui52Fix17DeleteWirelessNoPendingCard(t *testing.T) {
 // 主动配对成功 = 重来：clearDeletedForProfile 全键清（扫码/手动配对成功路径）。
 func TestGui52Fix17PairSuccessClearsDeleted(t *testing.T) {
 	a, _ := newWirelessApp()
-	for _, k := range []string{"Xiaomi Pad 8 Pro", "a743e1df", "adb-a743e1df-On9v2R", "ip:192.168.31.162"} {
+	for _, k := range []string{"Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
 		a.setDeletedUsb(k)
 	}
 	// 配对成功：档案重建（PairArchive 语义简化：直接种档案）
 	a.profiles.mu.Lock()
 	a.profiles.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
-		Addrs:      []AddrEntry{{Addr: "192.168.31.162:45205", State: AddrStateActive, Mode: ModeTls}},
+		Serials:    []string{"TEST0002"},
+		Addrs:      []AddrEntry{{Addr: "192.0.2.162:45205", State: AddrStateActive, Mode: ModeTls}},
 		Profiles:   DefaultProfile(),
 	}
 	a.profiles.mu.Unlock()
 
-	a.clearDeletedForProfile("192.168.31.162", "a743e1df", "adb-a743e1df-On9v2R")
-	for _, k := range []string{"Xiaomi Pad 8 Pro", "a743e1df", "adb-a743e1df-On9v2R", "ip:192.168.31.162"} {
+	a.clearDeletedForProfile("192.0.2.162", "TEST0002", "adb-TEST0002-On9v2R")
+	for _, k := range []string{"Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
 		if a.deletedUsbMarked(k) {
 			t.Fatalf("配对成功后删除集应清空：%q 仍在", k)
 		}
@@ -145,18 +145,18 @@ func TestGui52Fix17DeleteBlocksMdnsArchive(t *testing.T) {
 	a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[0].State = AddrStateStale
 	a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[1].State = AddrStateStale
 	a.profiles.mu.Unlock()
-	a.setDeletedUsb("ip:192.168.31.162")
+	a.setDeletedUsb("ip:192.0.2.162")
 
 	a.applyMdnsServiceAdded(&discovery.MdnsService{
-		Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-On9v2R",
-		Addr: "192.168.31.162:45205", Mode: discovery.MdnsModeTls,
+		Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-On9v2R",
+		Addr: "192.0.2.162:45205", Mode: discovery.MdnsModeTls,
 	})
 	e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
 	if !ok {
 		t.Fatalf("档案应存在")
 	}
 	for _, ae := range e.Addrs {
-		if ae.Addr == "192.168.31.162:45205" {
+		if ae.Addr == "192.0.2.162:45205" {
 			t.Fatalf("删除集应拦截 mDNS 入档：新地址不得进档案 %+v", e.Addrs)
 		}
 		if ae.State != AddrStateStale {
@@ -175,8 +175,8 @@ func TestGui52Fix17bDeleteUsbReplugRebuildsArchive(t *testing.T) {
 	a.profiles.mu.Lock()
 	a.profiles.data.Devices["HUAWEI FLA-TL10"] = &DeviceEntry{
 		Marketname: "HUAWEI FLA-TL10",
-		Serials:    []string{"H9RNW18604002288"},
-		Addrs:      []AddrEntry{{Addr: "192.168.31.242:5555", State: AddrStateActive, Mode: ModeTcpip}},
+		Serials:    []string{"TEST0003"},
+		Addrs:      []AddrEntry{{Addr: "192.0.2.242:5555", State: AddrStateActive, Mode: ModeTcpip}},
 		Profiles:   DefaultProfile(),
 	}
 	a.profiles.data.DeviceOrder = []string{"HUAWEI FLA-TL10"}
@@ -187,31 +187,31 @@ func TestGui52Fix17bDeleteUsbReplugRebuildsArchive(t *testing.T) {
 		t.Fatalf("DeleteDevices: %v", err)
 	}
 	// 删除后无线 transport 立即被过滤（不复活）
-	a.applyTrackUpdate([]adb.Device{{Serial: "192.168.31.242:5555", State: "device", ConnType: "wifi"}})
+	a.applyTrackUpdate([]adb.Device{{Serial: "192.0.2.242:5555", State: "device", ConnType: "wifi"}})
 	if _, ok := a.profiles.Entry("HUAWEI FLA-TL10"); ok {
 		t.Fatalf("删除后无线秒回不得重建档案")
 	}
 
 	// 重插 USB：added offline（无 marketname——真实 adb 枚举首帧）
 	offline := []adb.Device{
-		{Serial: "H9RNW18604002288", State: "offline", ConnType: "usb"},
+		{Serial: "TEST0003", State: "offline", ConnType: "usb"},
 	}
 	a.applyTrackUpdate(offline)
 	// 索引全清必须在 added 帧生效（不再依赖 marketname 字段）
-	if a.deletedUsbMarked("HUAWEI FLA-TL10") || a.deletedUsbMarked("H9RNW18604002288") || a.deletedUsbMarked("ip:192.168.31.242") {
+	if a.deletedUsbMarked("HUAWEI FLA-TL10") || a.deletedUsbMarked("TEST0003") || a.deletedUsbMarked("ip:192.0.2.242") {
 		t.Fatalf("offline added 帧即应全清删除集（市场名键残留会挡建档）")
 	}
 
 	// changed device 帧（带市场名/身份——adb 富化后）
 	device := []adb.Device{{
-		Serial: "H9RNW18604002288", State: "device", ConnType: "usb",
+		Serial: "TEST0003", State: "device", ConnType: "usb",
 		Marketname: "HUAWEI FLA-TL10", Identity: "HUAWEI FLA-TL10", Name: "HUAWEI FLA-TL10",
 	}}
 	a.applyTrackUpdate(device)
 	if _, ok := a.profiles.Entry("HUAWEI FLA-TL10"); !ok {
 		t.Fatalf("device 帧应正常重建档案（删除集已清，不挡建档）")
 	}
-	if !hasCard(a, "H9RNW18604002288") {
+	if !hasCard(a, "TEST0003") {
 		t.Fatalf("重插后应显示华为卡")
 	}
 }

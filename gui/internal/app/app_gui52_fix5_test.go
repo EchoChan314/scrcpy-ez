@@ -12,12 +12,12 @@ func TestGui52Fix5UnauthorizedShownOffline(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
-		Addrs:      []AddrEntry{{Addr: "192.168.31.162:5555", State: AddrStateStale, Mode: ModeTcpip}},
+		Serials:    []string{"TEST0002"},
+		Addrs:      []AddrEntry{{Addr: "192.0.2.162:5555", State: AddrStateStale, Mode: ModeTcpip}},
 		Profiles:   DefaultProfile(),
 	})
 	devs := []adb.Device{
-		{Serial: "192.168.31.162:5555", State: "unauthorized", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"},
+		{Serial: "192.0.2.162:5555", State: "unauthorized", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"},
 	}
 	out := a.unifyProfileCards(devs)
 	if len(out) == 0 {
@@ -25,7 +25,7 @@ func TestGui52Fix5UnauthorizedShownOffline(t *testing.T) {
 	}
 	found := false
 	for _, d := range out {
-		if d.Serial == "192.168.31.162:5555" || d.Identity != "" {
+		if d.Serial == "192.0.2.162:5555" || d.Identity != "" {
 			if d.State == "device" {
 				t.Fatalf("unauthorized transport 不得显示为 device: %+v", d)
 			}
@@ -41,11 +41,11 @@ func TestGui52Fix5UnauthorizedShownOffline(t *testing.T) {
 func TestGui52Fix5DeviceUnaffected(t *testing.T) {
 	a, _ := newWirelessApp()
 	devs := []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
 	}
 	out := a.unifyProfileCards(devs)
 	for _, d := range out {
-		if d.Serial == "192.168.31.197:5555" && d.State != "device" {
+		if d.Serial == "192.0.2.197:5555" && d.State != "device" {
 			t.Fatalf("device transport 不被改动: %+v", d)
 		}
 	}

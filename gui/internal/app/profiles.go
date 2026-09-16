@@ -1980,7 +1980,7 @@ func (s *ProfileStore) MdnsWirelessAddr(key string, services []MdnsMatch) string
 // "adb-<serial>-XXXXXX" → 剥 "adb-" 前缀与末尾 6 位随机后缀（AOSP mdns.cpp
 // GenerateDeviceGuid：adb-<ro.serialno>-<six-random-alphanum>）。
 // gui14：adb 37 的 `adb devices` 会以完整 FQN 列出 mDNS 服务条目
-// （实例名._服务类型._tcp，如 "adb-601c9f08-KWqpio._adb-tls-connect._tcp"）——
+// （实例名._服务类型._tcp，如 "adb-TEST0001-KWqpio._adb-tls-connect._tcp"）——
 // 先剥离服务类型后缀段再走原逻辑；无后缀行为不变（回归不变）。
 // 无前缀/无后缀（旧 adb 输出或随机 16 位 identity）时退回剥前缀后的整体。
 func TlsServiceIdentity(name string) string {
@@ -1997,7 +1997,7 @@ func TlsServiceIdentity(name string) string {
 // stripMdnsServiceSuffix 循环剥离 mDNS 服务名的服务类型后缀段（._xxx）：
 // `adb devices` 的 mDNS 令牌形如 实例名._adb-tls-connect._tcp /
 // 实例名._adb._tcp / 实例名._tcp——按已知后缀从长到短逐段去掉，
-// 得到裸实例名（如 "adb-601c9f08-KWqpio"）。无后缀输入原样返回。
+// 得到裸实例名（如 "adb-TEST0001-KWqpio"）。无后缀输入原样返回。
 func stripMdnsServiceSuffix(name string) string {
 	for {
 		next := name

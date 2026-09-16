@@ -98,7 +98,7 @@ func TestGui50Fix6AutoConnectFastPathSkipsPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := waitPairPhase(t, a, PairPhaseSuccess)
-	if st == nil || st.Device == nil || st.Device.Serial != "192.168.31.99:33895" {
+	if st == nil || st.Device == nil || st.Device.Serial != "192.0.2.99:33895" {
 		t.Fatalf("自动快路径成功态异常: %+v", st)
 	}
 	waitFor(t, 2*time.Second, func() bool {
@@ -184,7 +184,7 @@ func TestGui50Fix7ExpiredQrScanBroadcastRefreshesQrOnly(t *testing.T) {
 	svc := discovery.MdnsService{
 		Type: "_adb-tls-pairing._tcp",
 		Name: pairQrServiceName,
-		Addr: "192.168.31.197:45531",
+		Addr: "192.0.2.197:45531",
 		Mode: discovery.MdnsModePairing,
 	}
 	a.maybeAutoPairQR([]discovery.MdnsService{svc})

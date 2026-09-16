@@ -140,7 +140,13 @@ public final class FakeContext extends ContextWrapper {
         // See:
         //  - <https://github.com/Genymobile/scrcpy/issues/6224>
         //  - <https://github.com/Genymobile/scrcpy/issues/6523>
-        if (Context.CLIPBOARD_SERVICE.equals(name) || "semclipboard".equals(name) || Context.ACTIVITY_SERVICE.equals(name)) {
+        //
+        // scrcpy-ez: NOTIFICATION_SERVICE 同样需要注入本 Context —— 否则拿到的
+        // NotificationManager 持有系统 Context（包名 "android"），notify() 时以
+        // "android" 包名义调用，shell uid 不拥有该包，抛
+        // SecurityException("Package android is not owned by uid 2000")。
+        if (Context.CLIPBOARD_SERVICE.equals(name) || "semclipboard".equals(name) || Context.ACTIVITY_SERVICE.equals(name)
+                || Context.NOTIFICATION_SERVICE.equals(name)) {
             try {
                 Field field = service.getClass().getDeclaredField("mContext");
                 field.setAccessible(true);

@@ -7,6 +7,8 @@ public final class DeviceMessage {
     public static final int TYPE_UHID_OUTPUT = 2;
     public static final int TYPE_IMAGE_CLIPBOARD = 3;
     public static final int TYPE_ABR_STATE = 4;
+    // scrcpy-ez: 设备端「停止投屏」按钮被点击（无 payload）
+    public static final int TYPE_STOP_MIRRORING = 5;
 
     private int type;
     private String text;
@@ -55,6 +57,13 @@ public final class DeviceMessage {
         event.type = TYPE_ABR_STATE;
         event.bitrate = bitrate;
         event.abrFps = abrFps;
+        return event;
+    }
+
+    // scrcpy-ez: 用户在设备端通知里点了「停止投屏」
+    public static DeviceMessage createStopMirroring() {
+        DeviceMessage event = new DeviceMessage();
+        event.type = TYPE_STOP_MIRRORING;
         return event;
     }
 

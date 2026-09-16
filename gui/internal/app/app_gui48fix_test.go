@@ -12,7 +12,7 @@ import (
 
 func fixSeedK80Tls(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 }
 
@@ -22,7 +22,7 @@ func fixK80TlsStale(a *App) bool {
 		return false
 	}
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.197:45005" {
+		if e.Addrs[i].Addr == "192.0.2.197:45005" {
 			return e.Addrs[i].Stale
 		}
 	}
@@ -46,7 +46,7 @@ func TestGui48FixStartupBaselineOnceDeviceFirst(t *testing.T) {
 	}
 
 	// 模拟广播再现翻回 active 后，mdns 重连首块不得重复跑基线对账
-	a.profiles.AddrSuccessMode("REDMI K80", "192.168.31.197:45005", ModeTls)
+	a.profiles.AddrSuccessMode("REDMI K80", "192.0.2.197:45005", ModeTls)
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: true})
 	if fixK80TlsStale(a) {
 		t.Fatal("mdns 重连首块不得重复跑基线 stale 对账")
@@ -77,7 +77,7 @@ func TestGui48FixPopupExpireTimer(t *testing.T) {
 
 	a, _ := newTestApp()
 	a.applyTrackUpdate(nil)
-	dev := adb.Device{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"}
+	dev := adb.Device{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"}
 	a.applyTrackUpdate([]adb.Device{dev})
 	if a.Snapshot().NewDevice == nil {
 		t.Fatal("应弹窗")

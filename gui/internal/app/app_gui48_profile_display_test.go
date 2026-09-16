@@ -11,7 +11,7 @@ import (
 func profileDisplaySeed(a *App, addrs []AddrEntry) {
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs:      addrs,
 		Profiles:   DefaultProfile(),
 	})
@@ -19,7 +19,7 @@ func profileDisplaySeed(a *App, addrs []AddrEntry) {
 
 func profileDisplayCard() []adb.Device {
 	return []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 }
@@ -27,12 +27,12 @@ func profileDisplayCard() []adb.Device {
 func TestGui48ProfileDisplayActiveTls(t *testing.T) {
 	a, _ := newWirelessApp()
 	profileDisplaySeed(a, []AddrEntry{
-		{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
-		{Addr: "192.168.31.99:35263", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+		{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+		{Addr: "192.0.2.99:35263", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
 	})
 	devs := profileDisplayCard()
 	a.decorateTls(devs)
-	if !devs[0].Tls || devs[0].Serial != "192.168.31.99:35263" || devs[0].WirelessForm != ModeTls {
+	if !devs[0].Tls || devs[0].Serial != "192.0.2.99:35263" || devs[0].WirelessForm != ModeTls {
 		t.Fatalf("active TLS 应标亮且副行 IP= TLS: %+v", devs[0])
 	}
 }
@@ -40,11 +40,11 @@ func TestGui48ProfileDisplayActiveTls(t *testing.T) {
 func TestGui48ProfileDisplayActiveTcpipNoTls(t *testing.T) {
 	a, _ := newWirelessApp()
 	profileDisplaySeed(a, []AddrEntry{
-		{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+		{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
 	})
 	devs := profileDisplayCard()
 	a.decorateTls(devs)
-	if devs[0].Tls || devs[0].Serial != "192.168.31.99:5555" || devs[0].WirelessForm != ModeTcpip {
+	if devs[0].Tls || devs[0].Serial != "192.0.2.99:5555" || devs[0].WirelessForm != ModeTcpip {
 		t.Fatalf("active 5555 应无标且副行 IP=5555: %+v", devs[0])
 	}
 }
@@ -52,10 +52,10 @@ func TestGui48ProfileDisplayActiveTcpipNoTls(t *testing.T) {
 func TestGui48ProfileDisplayAllStaleNoTls(t *testing.T) {
 	a, _ := newWirelessApp()
 	profileDisplaySeed(a, []AddrEntry{
-		{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
-		{Addr: "192.168.31.99:35263", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
+		{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+		{Addr: "192.0.2.99:35263", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
 	})
-	a.profiles.MarkAddrStale("Xiaomi Pad 8 Pro", "192.168.31.99:5555")
+	a.profiles.MarkAddrStale("Xiaomi Pad 8 Pro", "192.0.2.99:5555")
 	devs := profileDisplayCard()
 	a.decorateTls(devs)
 	if devs[0].Tls || devs[0].WirelessForm != "" {
@@ -67,24 +67,24 @@ func TestGui48ProfileDisplayFormsIndependent(t *testing.T) {
 	t.Run("TLS gone 不影响 5555", func(t *testing.T) {
 		a, _ := newWirelessApp()
 		profileDisplaySeed(a, []AddrEntry{
-			{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
-			{Addr: "192.168.31.99:35263", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
+			{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+			{Addr: "192.0.2.99:35263", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
 		})
 		devs := profileDisplayCard()
 		a.decorateTls(devs)
-		if devs[0].Tls || devs[0].Serial != "192.168.31.99:5555" || devs[0].WirelessForm != ModeTcpip {
+		if devs[0].Tls || devs[0].Serial != "192.0.2.99:5555" || devs[0].WirelessForm != ModeTcpip {
 			t.Fatalf("TLS stale 后应无标且 5555 显示: %+v", devs[0])
 		}
 	})
 	t.Run("5555 gone 不影响 TLS", func(t *testing.T) {
 		a, _ := newWirelessApp()
 		profileDisplaySeed(a, []AddrEntry{
-			{Addr: "192.168.31.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip, Stale: true},
-			{Addr: "192.168.31.99:35263", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+			{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip, Stale: true},
+			{Addr: "192.0.2.99:35263", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
 		})
 		devs := profileDisplayCard()
 		a.decorateTls(devs)
-		if !devs[0].Tls || devs[0].Serial != "192.168.31.99:35263" || devs[0].WirelessForm != ModeTls {
+		if !devs[0].Tls || devs[0].Serial != "192.0.2.99:35263" || devs[0].WirelessForm != ModeTls {
 			t.Fatalf("5555 stale 后 TLS 应仍标亮显示: %+v", devs[0])
 		}
 	})

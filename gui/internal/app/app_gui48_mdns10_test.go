@@ -13,11 +13,11 @@ func mdns10Seed(a *App, native string, usb, wifi ModeProfile) {
 		"REDMI K80": {
 			Marketname: "REDMI K80",
 			Model:      "24117RK2CC",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Res:        native,
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 1, Mode: ModeTcpip},
-				{Addr: "192.168.31.197:45005", State: AddrStateActive, LastOk: 2, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 1, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:45005", State: AddrStateActive, LastOk: 2, Mode: ModeTls},
 			},
 			Profiles: DeviceProfile{Usb: usb, Wifi: wifi},
 		},
@@ -48,7 +48,7 @@ func TestGui48Mdns10FallbackCardWifiDefaultSpec(t *testing.T) {
 	if d.WirelessRes != "1920x1281" || d.FPS != 60 {
 		t.Fatalf("无线规格应为档案 wifi 默认档 1920x1281@60: %+v", d)
 	}
-	if d.Serial != "192.168.31.197:45005" || d.WirelessIP != "192.168.31.197:45005" {
+	if d.Serial != "192.0.2.197:45005" || d.WirelessIP != "192.0.2.197:45005" {
 		t.Fatalf("补齐卡 IP 应为档案 active TLS 优先: %+v", d)
 	}
 }
@@ -81,7 +81,7 @@ func TestGui48Mdns10UsbCardDefaultSpec(t *testing.T) {
 	mdns10Seed(a, "2560x1440", p.Usb, p.Wifi)
 
 	out := mdns10Commit(t, a, []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Res: "2560x1440", FPS: 120},
 	})
@@ -89,7 +89,7 @@ func TestGui48Mdns10UsbCardDefaultSpec(t *testing.T) {
 		t.Fatalf("应一张有线卡: %+v", out)
 	}
 	d := out[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" || d.State != "device" {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" || d.State != "device" {
 		t.Fatalf("有线卡形态错误: %+v", d)
 	}
 	if d.Res != "2560x1440" || d.FPS != 120 {
@@ -108,7 +108,7 @@ func TestGui48Mdns10UsbCardCustomSpec(t *testing.T) {
 	mdns10Seed(a, "2560x1440", usb, p.Wifi)
 
 	out := mdns10Commit(t, a, []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Res: "2560x1440", FPS: 120},
 	})
@@ -119,7 +119,7 @@ func TestGui48Mdns10UsbCardCustomSpec(t *testing.T) {
 	if d.Res != "1080x607" || d.FPS != 90 {
 		t.Fatalf("USB 副行规格应为自定义档 1080x607@90: %+v", d)
 	}
-	if d.Serial != "601c9f08" {
+	if d.Serial != "TEST0001" {
 		t.Fatalf("USB 序列号应保留: %+v", d)
 	}
 }
@@ -131,7 +131,7 @@ func TestGui48Mdns10OnlineCardProfileSpecWins(t *testing.T) {
 	mdns10Seed(a, "2560x1708", p.Usb, p.Wifi)
 
 	out := mdns10Commit(t, a, []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Res: "2560x1708", FPS: 120, WirelessRes: "1920x1080"},
 	})
@@ -150,8 +150,8 @@ func TestGui48Mdns10OfflineCardNoSpecNoError(t *testing.T) {
 	a, _ := newWirelessApp()
 	p := DefaultProfile()
 	mdns10Seed(a, "2560x1708", p.Usb, p.Wifi)
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:5555")
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:45005")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:45005")
 
 	out := mdns10Commit(t, a, nil)
 	if len(out) != 1 {

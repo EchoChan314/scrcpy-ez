@@ -93,7 +93,7 @@ func TestGui49Fix6StableTimerResetsOnFluctuation(t *testing.T) {
 func TestGui49Fix6TimeoutConnectSuccess(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix3SeedK80(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:5555")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555")
 	ops := &teachfix3Ops{port: "0"}
 	ops.install(a)
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error { return nil }
@@ -107,13 +107,13 @@ func TestGui49Fix6TimeoutConnectSuccess(t *testing.T) {
 	if gui49fix6PlugActive(a) {
 		t.Fatal("兜底 connect 后插线遮罩应退出")
 	}
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if ae == nil || ae.State != AddrStateActive || ae.Stale {
 		t.Fatalf("connect 成功应写 active: %+v", ae)
 	}
 	out := a.Snapshot().Devices
 	if len(out) != 1 || out[0].Connecting || out[0].ConnType != "wifi" ||
-		out[0].Serial != "192.168.31.197:5555" {
+		out[0].Serial != "192.0.2.197:5555" {
 		t.Fatalf("兜底后应呈现档案态无线卡: %+v", out)
 	}
 }
@@ -135,7 +135,7 @@ func TestGui49Fix6TimeoutConnectFail(t *testing.T) {
 	if gui49fix6PlugActive(a) {
 		t.Fatal("兜底 connect 失败后插线遮罩也应退出")
 	}
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if ae == nil || !ae.Stale {
 		t.Fatalf("connect 失败应写 stale: %+v", ae)
 	}
@@ -152,9 +152,9 @@ func TestGui49Fix6MaskPeriodOfflineObservationExempt(t *testing.T) {
 	a.plugStart("REDMI K80", time.Now(), "测试插线")
 
 	a.profiles.SyncDevicesExempt([]adb.Device{
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"},
 	}, a.plugExemptIDs())
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if ae == nil || ae.Stale || ae.LastFail != 0 || ae.Fail != 0 {
 		t.Fatalf("遮罩期 wifi offline 应豁免（不打标/不节流）: %+v", ae)
 	}

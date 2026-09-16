@@ -27,6 +27,8 @@ enum {
     SC_EVENT_CLIPBOARD_CHANGED,
     // Keyboard layout restore retry (Windows HID keyboard focus handling)
     SC_EVENT_KEYBOARD_LAYOUT_RESTORE,
+    // scrcpy-ez: user pressed "stop mirroring" on the device notification
+    SC_EVENT_STOP_MIRRORING,
 };
 
 bool

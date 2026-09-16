@@ -47,13 +47,13 @@ func teachfix3SetPort(o *teachfix3Ops, port string) {
 
 func teachfix3SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 }
 
 func teachfix3OfflineUSB() adb.Device {
-	return adb.Device{Serial: "601c9f08", State: "offline", ConnType: "usb",
+	return adb.Device{Serial: "TEST0001", State: "offline", ConnType: "usb",
 		Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"}
 }
 
@@ -64,7 +64,7 @@ func teachfix3DeviceUSB() adb.Device {
 }
 
 func teachfix3Wifi() adb.Device {
-	return adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+	return adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 		Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"}
 }
 
@@ -170,7 +170,7 @@ func TestTeachfix3GetpropNoLongerClearsStableDoes(t *testing.T) {
 	if !teachfix3PlugActive(a) {
 		t.Fatal("插线应启动遮罩")
 	}
-	a.plugCheckTcpipReady(context.Background(), "601c9f08")
+	a.plugCheckTcpipReady(context.Background(), "TEST0001")
 	if !teachfix3PlugActive(a) {
 		t.Fatal("getprop==5555 不得清遮罩（清因改为稳定 device）")
 	}

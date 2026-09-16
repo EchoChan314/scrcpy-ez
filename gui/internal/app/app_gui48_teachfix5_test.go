@@ -16,8 +16,8 @@ import (
 
 func teachfix5SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 }
 
@@ -64,7 +64,7 @@ func TestTeachfix5DropTransitionDoesNotStartMask(t *testing.T) {
 	gui49fix6WaitPlugClear(t, a)
 	waitForMdns(t, "稳定清后的显示提交完成", func() bool {
 		out := a.Snapshot().Devices
-		return len(out) == 1 && out[0].Serial == "601c9f08" && !out[0].Connecting
+		return len(out) == 1 && out[0].Serial == "TEST0001" && !out[0].Connecting
 	})
 }
 
@@ -115,7 +115,7 @@ func TestTeachfix5PlugClearRefreshesImmediately(t *testing.T) {
 	a.plugClear("REDMI K80", "稳定device2s")
 	out = a.Snapshot().Devices
 	if len(out) != 1 || out[0].Connecting || out[0].ConnType != "wifi" ||
-		out[0].Serial != "192.168.31.197:5555" {
+		out[0].Serial != "192.0.2.197:5555" {
 		t.Fatalf("plugClear 应立即刷新出档案态无线卡（不等 60s 校准）: %+v", out)
 	}
 }
@@ -171,7 +171,7 @@ func TestTeachfix5Unplug10sFallbackConnectSuccess(t *testing.T) {
 	waitForMdns(t, "connect 成功后应呈现无线卡", func() bool {
 		out := a.Snapshot().Devices
 		return len(out) == 1 && !out[0].Connecting && out[0].ConnType == "wifi" &&
-			out[0].Serial == "192.168.31.197:5555"
+			out[0].Serial == "192.0.2.197:5555"
 	})
 }
 
@@ -184,7 +184,7 @@ func TestTeachfix5GetpropReadyStillClears(t *testing.T) {
 	gui49fix6FastStable(t)
 
 	a.applyTrackUpdate([]adb.Device{teachfix3OfflineUSB()})
-	a.plugCheckTcpipReady(context.Background(), "601c9f08")
+	a.plugCheckTcpipReady(context.Background(), "TEST0001")
 	if !teachfix5PlugActive(a) {
 		t.Fatal("getprop==5555 不得清遮罩（fix6 清因=稳定 device）")
 	}

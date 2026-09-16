@@ -122,20 +122,20 @@ func TestMultiSessionParallelStart(t *testing.T) {
 func TestMultiSessionSameDeviceRejected(t *testing.T) {
 	a, _ := multiTestApp()
 	setDevices(a, []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro",
-			Identity: "Xiaomi Pad 8 Pro", Wireless: "192.168.31.162:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro",
+			Identity: "Xiaomi Pad 8 Pro", Wireless: "192.0.2.162:5555"},
 	})
-	_ = a.StartCast("a743e1df")
-	if err := a.StartCast("a743e1df"); err == nil || !strings.Contains(err.Error(), "投屏已在运行") {
+	_ = a.StartCast("TEST0002")
+	if err := a.StartCast("TEST0002"); err == nil || !strings.Contains(err.Error(), "投屏已在运行") {
 		t.Fatalf("同 serial 重复 Start 应拒绝: %v", err)
 	}
 	// 卡片重键：同 identity 的旧无线 serial 再开 → 拒绝
-	if err := a.StartCast("192.168.31.162:5555"); err == nil || !strings.Contains(err.Error(), "投屏已在运行") {
+	if err := a.StartCast("192.0.2.162:5555"); err == nil || !strings.Contains(err.Error(), "投屏已在运行") {
 		t.Fatalf("同 identity 并行会话应拒绝: %v", err)
 	}
 	// 结束态后可再开（原地替换，不开第二条）
-	a.OnBatExit("a743e1df", 0)
-	if err := a.StartCast("a743e1df"); err != nil {
+	a.OnBatExit("TEST0002", 0)
+	if err := a.StartCast("TEST0002"); err != nil {
 		t.Fatalf("结束态重新投屏应成功: %v", err)
 	}
 	if len(a.Snapshot().Sessions) != 1 {
@@ -423,21 +423,21 @@ func TestMultiSessionOrdering(t *testing.T) {
 func TestNewDevicePopupFlow(t *testing.T) {
 	a, rec := multiTestApp()
 	devs := []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "Redmi K80", Identity: "Redmi K80"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "Redmi K80", Identity: "Redmi K80"},
 	}
 	setDevices(a, devs)
 
 	// 首次检测：弹第一台
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "a743e1df" || np.Name != "Xiaomi Pad 8 Pro" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0002" || np.Name != "Xiaomi Pad 8 Pro" || np.ConnType != "usb" {
 		t.Fatalf("首台在线设备应弹窗: %+v", np)
 	}
 
 	// 已有弹窗：不覆盖（一次一个）
 	a.applyTrackUpdate(devs)
-	if np = a.Snapshot().NewDevice; np == nil || np.Serial != "a743e1df" {
+	if np = a.Snapshot().NewDevice; np == nil || np.Serial != "TEST0002" {
 		t.Fatalf("已有弹窗不应被第二台覆盖: %+v", np)
 	}
 
@@ -448,7 +448,7 @@ func TestNewDevicePopupFlow(t *testing.T) {
 	if a.Snapshot().NewDevice != nil {
 		t.Fatal("开始投屏后弹窗应清除")
 	}
-	if p := rec.serial("a743e1df")[0].waitParams(t, 1); p.NoWatch || p.Serial != "a743e1df" {
+	if p := rec.serial("TEST0002")[0].waitParams(t, 1); p.NoWatch || p.Serial != "TEST0002" {
 		t.Fatalf("弹窗开始投屏应走并行会话（SCEZ_SERIAL；NO_WATCH 已废弃不注入）: %+v", p)
 	}
 
@@ -456,7 +456,7 @@ func TestNewDevicePopupFlow(t *testing.T) {
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
 	np = a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" || np.Name != "Redmi K80" {
+	if np == nil || np.Serial != "TEST0001" || np.Name != "Redmi K80" {
 		t.Fatalf("第二台设备应接着弹: %+v", np)
 	}
 }
@@ -464,14 +464,14 @@ func TestNewDevicePopupFlow(t *testing.T) {
 // 【暂不】→ 本在线周期不再弹（用户可手动点投屏）；设备离线再上线 → 新周期可再弹。
 func TestNewDevicePopupDismissCycle(t *testing.T) {
 	a, _ := multiTestApp()
-	devs := []adb.Device{{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"}}
+	devs := []adb.Device{{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"}}
 	setDevices(a, devs)
 
 	a.applyTrackUpdate(devs)
 	if a.Snapshot().NewDevice == nil {
 		t.Fatal("应弹窗")
 	}
-	a.DismissNewDevice("a743e1df")
+	a.DismissNewDevice("TEST0002")
 	if a.Snapshot().NewDevice != nil {
 		t.Fatal("暂不后弹窗应关闭")
 	}
@@ -484,7 +484,7 @@ func TestNewDevicePopupDismissCycle(t *testing.T) {
 	// 设备离线（列表空）→ 新在线周期 → 可再弹
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
-	if np := a.Snapshot().NewDevice; np == nil || np.Serial != "a743e1df" {
+	if np := a.Snapshot().NewDevice; np == nil || np.Serial != "TEST0002" {
 		t.Fatalf("离线再上线应重新允许弹窗: %+v", np)
 	}
 }
@@ -492,7 +492,7 @@ func TestNewDevicePopupDismissCycle(t *testing.T) {
 // 防重复：同设备 30s 内不重复弹；弹窗未处理 30s 自动消失后可再弹。
 func TestNewDevicePopupThrottleAndExpire(t *testing.T) {
 	a, _ := multiTestApp()
-	devs := []adb.Device{{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"}}
+	devs := []adb.Device{{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"}}
 	setDevices(a, devs)
 
 	a.applyTrackUpdate(devs)
@@ -514,7 +514,7 @@ func TestNewDevicePopupThrottleAndExpire(t *testing.T) {
 	a.mu.Unlock()
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
-	if np := a.Snapshot().NewDevice; np == nil || np.Serial != "a743e1df" {
+	if np := a.Snapshot().NewDevice; np == nil || np.Serial != "TEST0002" {
 		t.Fatalf("30s 后应允许再弹: %+v", np)
 	}
 
@@ -534,33 +534,33 @@ func TestNewDevicePopupThrottleAndExpire(t *testing.T) {
 func TestNewDevicePopupSkipsCastingDevice(t *testing.T) {
 	a, _ := multiTestApp()
 	devs := []adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "Redmi K80", Identity: "Redmi K80"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "Redmi K80", Identity: "Redmi K80"},
 	}
 	setDevices(a, devs)
-	_ = a.StartCast("a743e1df")
+	_ = a.StartCast("TEST0002")
 
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" {
+	if np == nil || np.Serial != "TEST0001" {
 		t.Fatalf("投屏中的设备不应弹窗，应弹 K80: %+v", np)
 	}
 
 	// 停止后（结束态条目仍在）下一轮仍不弹该设备
-	a.DismissNewDevice("601c9f08") // 清掉 K80 弹窗
-	a.OnBatExit("a743e1df", 0)
+	a.DismissNewDevice("TEST0001") // 清掉 K80 弹窗
+	a.OnBatExit("TEST0002", 0)
 	a.applyTrackUpdate(devs)
 	np = a.Snapshot().NewDevice
-	if np != nil && np.Serial == "a743e1df" {
+	if np != nil && np.Serial == "TEST0002" {
 		t.Fatalf("刚结束的设备不应立刻再弹: %+v", np)
 	}
 
 	// 结束态 GC 后（新会话周期）→ 需要一次新的 device 事件才可再弹
-	a.ForgetSession("a743e1df")
+	a.ForgetSession("TEST0002")
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
 	np = a.Snapshot().NewDevice
-	if np == nil || np.Serial != "a743e1df" {
+	if np == nil || np.Serial != "TEST0002" {
 		t.Fatalf("结束态移除后应可再弹: %+v", np)
 	}
 }
@@ -573,7 +573,7 @@ func TestPollOnceDetectsNewDevicePopup(t *testing.T) {
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "adb")
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"devices\" ]; then printf 'List of devices attached\\n601c9f08\\tdevice\\n'; fi\n" +
+		"if [ \"$1\" = \"devices\" ]; then printf 'List of devices attached\\nTEST0001\\tdevice\\n'; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -589,7 +589,7 @@ func TestPollOnceDetectsNewDevicePopup(t *testing.T) {
 
 	a.pollOnce(context.Background())
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0001" || np.ConnType != "usb" {
 		t.Fatalf("pollOnce 应发现新设备弹窗: %+v", np)
 	}
 	if err := a.StartCastParallel(np.Serial); err != nil {
@@ -598,7 +598,7 @@ func TestPollOnceDetectsNewDevicePopup(t *testing.T) {
 	if a.Snapshot().NewDevice != nil {
 		t.Fatal("开始投屏后弹窗应清除")
 	}
-	if p := rec.serial("601c9f08")[0].waitParams(t, 1); p.NoWatch {
+	if p := rec.serial("TEST0001")[0].waitParams(t, 1); p.NoWatch {
 		t.Fatalf("弹窗开始投屏不应注入 NO_WATCH（已废弃）: %+v", p)
 	}
 	if len(a.Snapshot().Sessions) != 1 || !a.Snapshot().Sessions[0].Active {

@@ -11,11 +11,11 @@ import (
 func TestGui38RecentOkAddrTlsFormPriority(t *testing.T) {
 	e := DeviceEntry{
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 400, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 300, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 400, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 300, Mode: ModeTls},
 		},
 	}
-	if got := recentOkAddr(e); got != "192.168.31.197:42449" {
+	if got := recentOkAddr(e); got != "192.0.2.197:42449" {
 		t.Fatalf("TLS 形态优先，应返回 TLS 42449 而非 tcpip 5555: %q", got)
 	}
 }
@@ -23,12 +23,12 @@ func TestGui38RecentOkAddrTlsFormPriority(t *testing.T) {
 func TestGui38RecentOkAddrNoTlsFallsBackTcpip(t *testing.T) {
 	e := DeviceEntry{
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 400, Mode: ModeTcpip},
-			{Addr: "192.168.31.162:5555", State: AddrStateStale, LastOk: 350, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:42449", State: AddrStateStale, LastOk: 0, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 400, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:5555", State: AddrStateStale, LastOk: 350, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:42449", State: AddrStateStale, LastOk: 0, Mode: ModeTls},
 		},
 	}
-	if got := recentOkAddr(e); got != "192.168.31.197:5555" {
+	if got := recentOkAddr(e); got != "192.0.2.197:5555" {
 		t.Fatalf("TLS stale 后应回退 active tcpip 5555: %q", got)
 	}
 }
@@ -36,8 +36,8 @@ func TestGui38RecentOkAddrNoTlsFallsBackTcpip(t *testing.T) {
 func TestGui38RecentOkAddrNoSuccessReturnsEmpty(t *testing.T) {
 	e := DeviceEntry{
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateStale, LastOk: 100, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:42449", State: AddrStateStale, LastOk: 200, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateStale, LastOk: 100, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:42449", State: AddrStateStale, LastOk: 200, Mode: ModeTls},
 		},
 	}
 	if got := recentOkAddr(e); got != "" {

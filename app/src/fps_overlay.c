@@ -1,6 +1,7 @@
 #include "fps_overlay.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "util/log.h"
@@ -175,6 +176,23 @@ render_text(struct sc_fps_overlay *overlay, const char *text) {
     return true;
 }
 
+// scrcpy-ez: initial visibility of the parameter overlay (fps/bitrate/status)
+// is chosen by the GUI launcher through the SCEZ_PARAM_OVERLAY environment
+// variable, inherited by this process from the launcher (the GUI sets it on
+// the .bat process tree, which starts scrcpy.exe):
+//   - "0"     → start hidden (GUI setting "show parameter overlay" = off)
+//   - unset or any other value → start visible (historical default)
+// Ctrl+F still toggles the overlay at runtime; this only sets the startup
+// state. The variable is read once, during overlay initialization.
+static bool
+initial_visible_from_env(void) {
+    const char *value = getenv("SCEZ_PARAM_OVERLAY");
+    if (!value) {
+        return true;
+    }
+    return strcmp(value, "0") != 0;
+}
+
 bool
 sc_fps_overlay_init(struct sc_fps_overlay *overlay, SDL_Renderer *renderer) {
     overlay->renderer = renderer;
@@ -187,7 +205,7 @@ sc_fps_overlay_init(struct sc_fps_overlay *overlay, SDL_Renderer *renderer) {
     overlay->bitrate = 0;
     overlay->abr_fps = 0;
     overlay->abr_dirty = false;
-    overlay->visible = true;
+    overlay->visible = initial_visible_from_env();
     overlay->always_on_top = false;
     overlay->lamp_hovered = false;
     overlay->lamp_hover_suppressed = false;

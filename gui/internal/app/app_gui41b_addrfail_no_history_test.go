@@ -14,18 +14,18 @@ func TestGui41bAddrFailKeepsActive(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:39419", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
+			{Addr: "192.0.2.197:39419", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
 
 	for i := 0; i < 4; i++ {
-		s.AddrFail("REDMI K80", "192.168.31.197:39419")
+		s.AddrFail("REDMI K80", "192.0.2.197:39419")
 	}
 	e, _ := s.Entry("REDMI K80")
-	a := gui24FindAddr(e, "192.168.31.197:39419")
+	a := gui24FindAddr(e, "192.0.2.197:39419")
 	if a == nil || a.State != AddrStateStale {
 		t.Fatalf("gui52 失败必须写 state=stale（不转 history 也不保持 active）: %+v", a)
 	}
@@ -40,20 +40,20 @@ func TestGui41bAddrFailThenNormalizeKeeps(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 200, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 200, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
 
 	for i := 0; i < 3; i++ {
-		s.AddrFail("REDMI K80", "192.168.31.197:5555")
+		s.AddrFail("REDMI K80", "192.0.2.197:5555")
 	}
 	s.normalizeLocked()
 
 	e, _ := s.Entry("REDMI K80")
-	a := gui24FindAddr(e, "192.168.31.197:5555")
+	a := gui24FindAddr(e, "192.0.2.197:5555")
 	if a == nil || a.State != AddrStateStale {
 		t.Fatalf("normalizeLocked 后唯一 stale 记忆不得被删除: %+v", e.Addrs)
 	}
@@ -83,16 +83,16 @@ func TestGui41bHasOnlineWirelessTcpipOnly(t *testing.T) {
 		return a.hasOnlineWirelessLocked()
 	}
 
-	if set([]adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi"}}) {
+	if set([]adb.Device{{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi"}}) {
 		t.Fatal("5555 tcpip 设备不应算 mDNS 广播者")
 	}
-	if !set([]adb.Device{{Serial: "192.168.31.197:39419", State: "device", ConnType: "wifi"}}) {
+	if !set([]adb.Device{{Serial: "192.0.2.197:39419", State: "device", ConnType: "wifi"}}) {
 		t.Fatal("TLS 端口无线设备应算 mDNS 广播者")
 	}
-	if set([]adb.Device{{Serial: "601c9f08", State: "device", ConnType: "usb"}}) {
+	if set([]adb.Device{{Serial: "TEST0001", State: "device", ConnType: "usb"}}) {
 		t.Fatal("USB 设备不应算无线广播者")
 	}
-	if set([]adb.Device{{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi"}}) {
+	if set([]adb.Device{{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi"}}) {
 		t.Fatal("offline 设备不应算广播者")
 	}
 }

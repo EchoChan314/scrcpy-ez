@@ -14,9 +14,9 @@ import (
 // 满 2s 清遮罩（波动重置）｜10s 兜底｜清除时并行 connect 档案地址刷 active/stale。
 
 type fix14Recorder struct {
-	mu    sync.Mutex
-	conns []string
-	fail  map[string]error
+	mu           sync.Mutex
+	conns        []string
+	fail         map[string]error
 	failSuppress bool
 }
 
@@ -41,11 +41,11 @@ func seedPadArchive(t *testing.T, a *App) {
 	a.profiles.mu.Lock()
 	a.profiles.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
-		TlsGuid:    "adb-a743e1df-On9v2R",
+		Serials:    []string{"TEST0002"},
+		TlsGuid:    "adb-TEST0002-On9v2R",
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Mode: ModeTcpip},
-			{Addr: "192.168.31.162:40989", State: AddrStateStale, Mode: ModeTls},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:40989", State: AddrStateStale, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	}
@@ -59,9 +59,9 @@ func TestGui52Fix14ShieldStartConnectInjection(t *testing.T) {
 	a.pairOps.connectFn = rec.connectFn
 	seedPadArchive(t, a)
 
-	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.168.31.162")
+	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.0.2.162")
 	time.Sleep(80 * time.Millisecond)
-	if got := rec.last(); len(got) == 0 || got[0] != "192.168.31.162:5555" {
+	if got := rec.last(); len(got) == 0 || got[0] != "192.0.2.162:5555" {
 		t.Fatalf("遮罩开始应 connect 注入 5555: %v", got)
 	}
 	// 遮罩应已置位
@@ -79,13 +79,13 @@ func TestGui52Fix14ShieldStableClear(t *testing.T) {
 	a.pairOps.connectFn = rec.connectFn
 	seedPadArchive(t, a)
 
-	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.168.31.162")
+	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.0.2.162")
 	// 任一 transport device → 2s 稳定 → 清遮罩
-	d := adb.Device{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi"}
+	d := adb.Device{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi"}
 	if !a.pairWirelessStable([]adb.Device{d}, "Xiaomi Pad 8 Pro") {
 		t.Fatal("pairWirelessStable 应识别 5555 device")
 	}
-	if a.pairWirelessStable([]adb.Device{{Serial: "192.168.31.162:5555", State: "offline", ConnType: "wifi"}}, "Xiaomi Pad 8 Pro") {
+	if a.pairWirelessStable([]adb.Device{{Serial: "192.0.2.162:5555", State: "offline", ConnType: "wifi"}}, "Xiaomi Pad 8 Pro") {
 		t.Fatal("offline 不应稳定")
 	}
 	a.pairStabilityUpdate([]adb.Device{d})
@@ -100,7 +100,7 @@ func TestGui52Fix14ShieldStableClear(t *testing.T) {
 		got := rec.last()
 		found := false
 		for _, c := range got {
-			if c == "192.168.31.162:40989" {
+			if c == "192.0.2.162:40989" {
 				found = true
 			}
 		}
@@ -114,13 +114,13 @@ func TestGui52Fix14ShieldWaveResets(t *testing.T) {
 	a.pairOps.connectFn = rec.connectFn
 	seedPadArchive(t, a)
 
-	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.168.31.162")
+	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.0.2.162")
 	// 波动序列：device → offline（tcpip 重置期）→ device —— 遮罩保持
-	a.pairStabilityUpdate([]adb.Device{{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi"}})
+	a.pairStabilityUpdate([]adb.Device{{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi"}})
 	time.Sleep(300 * time.Millisecond)
-	a.pairStabilityUpdate([]adb.Device{{Serial: "192.168.31.162:5555", State: "offline", ConnType: "wifi"}})
+	a.pairStabilityUpdate([]adb.Device{{Serial: "192.0.2.162:5555", State: "offline", ConnType: "wifi"}})
 	time.Sleep(300 * time.Millisecond)
-	a.pairStabilityUpdate([]adb.Device{{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi"}})
+	a.pairStabilityUpdate([]adb.Device{{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi"}})
 	time.Sleep(1500 * time.Millisecond) // 不足 2s 连续稳定（波动重置了：总 device 时间 <2s 连续）
 	a.teachMu.Lock()
 	_, active := a.pairing["Xiaomi Pad 8 Pro"]
@@ -138,7 +138,7 @@ func TestGui52Fix14ShieldWaveResets(t *testing.T) {
 
 func TestGui52Fix14ShieldProbeStatus(t *testing.T) {
 	a, _ := newWirelessApp()
-	rec := &fix14Recorder{fail: map[string]error{"192.168.31.162:40989": errors.New("dead")}}
+	rec := &fix14Recorder{fail: map[string]error{"192.0.2.162:40989": errors.New("dead")}}
 	a.pairOps.connectFn = rec.connectFn
 	seedPadArchive(t, a)
 
@@ -149,10 +149,10 @@ func TestGui52Fix14ShieldProbeStatus(t *testing.T) {
 			return false
 		}
 		for i := range e.Addrs {
-			if e.Addrs[i].Addr == "192.168.31.162:5555" && e.Addrs[i].State != AddrStateActive {
+			if e.Addrs[i].Addr == "192.0.2.162:5555" && e.Addrs[i].State != AddrStateActive {
 				return false
 			}
-			if e.Addrs[i].Addr == "192.168.31.162:40989" && e.Addrs[i].State != AddrStateStale {
+			if e.Addrs[i].Addr == "192.0.2.162:40989" && e.Addrs[i].State != AddrStateStale {
 				return false
 			}
 		}
@@ -166,9 +166,9 @@ func TestGui52Fix14ShieldSynthCard(t *testing.T) {
 	a.pairOps.connectFn = rec.connectFn
 	seedPadArchive(t, a)
 
-	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.168.31.162")
+	a.pairShieldStart("Xiaomi Pad 8 Pro", "192.0.2.162")
 	out := a.shieldPairing([]adb.Device{
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi"},
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi"},
 	})
 	if len(out) != 1 {
 		t.Fatalf("遮罩期应合成单卡: %+v", out)

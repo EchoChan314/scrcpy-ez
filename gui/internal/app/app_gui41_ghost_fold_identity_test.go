@@ -21,20 +21,20 @@ func TestGui41GhostFoldNoIpMerge(t *testing.T) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		},
 		"Xiaomi Pad 8 Pro": {
 			Marketname: "Xiaomi Pad 8 Pro",
-			Serials:    []string{"a743e1df"},
+			Serials:    []string{"TEST0002"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.162:5555", State: AddrStateActive, LastOk: 200, Mode: ModeTcpip},
+				{Addr: "192.0.2.162:5555", State: AddrStateActive, LastOk: 200, Mode: ModeTcpip},
 				// 故意制造 IP 复用污染：历史 TLS 条目曾在 K80 的 IP 上
-				{Addr: "192.168.31.197:36155", State: AddrStateHistory, LastOk: 150, Mode: ModeTls},
-				{Addr: "192.168.31.197:42379", State: AddrStateHistory, LastOk: 140, Mode: ModeTls},
+				{Addr: "192.0.2.197:36155", State: AddrStateHistory, LastOk: 150, Mode: ModeTls},
+				{Addr: "192.0.2.197:42379", State: AddrStateHistory, LastOk: 140, Mode: ModeTls},
 			},
 			Profiles: DefaultProfile(),
 		},
@@ -42,20 +42,20 @@ func TestGui41GhostFoldNoIpMerge(t *testing.T) {
 
 	devs := []adb.Device{
 		{Serial: "HUAWEI123", State: "device", ConnType: "usb", Name: "HUAWEI"},
-		{Serial: "192.168.31.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80",
 			Identity: "REDMI K80"},
 	}
 	folded := a.foldGhostWireless(devs)
 
 	// ① 平板不得被 K80 IP 误导写入 Wireless 副行
-	tablet := gui34Find(folded, "192.168.31.162:5555")
+	tablet := gui34Find(folded, "192.0.2.162:5555")
 	if tablet == nil || tablet.Wireless != "" {
 		t.Fatalf("平板 Wireless 不应被 K80 幽灵污染: %+v", folded)
 	}
 	// ② K80 独立保留为离线卡
-	k80 := gui34Find(folded, "192.168.31.197:5555")
+	k80 := gui34Find(folded, "192.0.2.197:5555")
 	if k80 == nil || k80.State != "offline" || k80.ConnType != "wifi" || k80.Identity != "REDMI K80" {
 		t.Fatalf("K80 幽灵应独立成离线卡（Identity=REDMI K80）: %+v", folded)
 	}
@@ -67,7 +67,7 @@ func TestGui41GhostFoldNoIpMerge(t *testing.T) {
 		t.Fatalf("active 地址=在线证据，不应有离线候选: %+v", offline)
 	}
 	// 翻 stale 后恢复离线候选（闭环验证）。
-	if !a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:5555") {
+	if !a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555") {
 		t.Fatal("MarkAddrStale 应有改动")
 	}
 	if _, ok := a.profiles.OfflineCandidateAddrs(folded)["REDMI K80"]; !ok {
@@ -85,14 +85,14 @@ func TestGui41GhostFoldSameDeviceMerge(t *testing.T) {
 	gui31K80Profiles(a)
 
 	devs := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"},
 	}
 	folded := a.foldGhostWireless(devs)
 	if len(folded) != 1 {
 		t.Fatalf("同身份幽灵应归并为主卡副行: %+v", folded)
 	}
-	if folded[0].Serial != "601c9f08" || folded[0].Wireless != "192.168.31.197:5555" {
+	if folded[0].Serial != "TEST0001" || folded[0].Wireless != "192.0.2.197:5555" {
 		t.Fatalf("K80 USB 卡应带 Wireless 副行=197:5555: %+v", folded[0])
 	}
 }
@@ -116,16 +116,16 @@ func TestGui41GhostFoldTlsTokenUnchanged(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui31K80Profiles(a)
 
-	token := "adb-601c9f08-Ab12Cd._adb-tls-connect._tcp"
+	token := "adb-TEST0001-Ab12Cd._adb-tls-connect._tcp"
 	devs := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
 		{Serial: token, State: "offline", ConnType: "other"},
 	}
 	folded := a.foldGhostWireless(devs)
 	if len(folded) != 1 {
 		t.Fatalf("令牌应隐去、主卡保留: %+v", folded)
 	}
-	if folded[0].Serial != "601c9f08" || folded[0].Wireless != "192.168.31.197:5555" {
+	if folded[0].Serial != "TEST0001" || folded[0].Wireless != "192.0.2.197:5555" {
 		t.Fatalf("令牌命中同身份时应把档案 ip:port 补进主卡 Wireless: %+v", folded[0])
 	}
 	if gui34Find(folded, token) != nil {

@@ -17,6 +17,8 @@ enum sc_device_msg_type {
     DEVICE_MSG_TYPE_UHID_OUTPUT,
     DEVICE_MSG_TYPE_IMAGE_CLIPBOARD,
     DEVICE_MSG_TYPE_ABR_STATE,
+    // scrcpy-ez: device-side "stop mirroring" request (device notification action)
+    DEVICE_MSG_TYPE_STOP_MIRRORING,
 };
 
 struct sc_device_msg {

@@ -15,7 +15,7 @@ func TestGui48Mdns6fix3ForceAddedTurnsActive(t *testing.T) {
 	gui31K80Profiles(a)
 	a.applyTrackUpdate(nil)
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	// 先把该 TLS 地址打 stale（模拟此前 Goodbye/无信号）。
 	a.profiles.MarkAddrStale("REDMI K80", svc.Addr)
 	a.applyMdnsSnapshot([]discovery.MdnsService{svc}, true, nil, nil)
@@ -36,7 +36,7 @@ func TestGui48Mdns6fix3FallbackDiffStillWorks(t *testing.T) {
 	a, _ := newTestApp()
 	gui31K80Profiles(a)
 
-	svc := mdnsTlsSvc("adb-601c9f08-KWqpio", "192.168.31.197", "45005")
+	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	added, removed := a.applyMdnsSnapshot([]discovery.MdnsService{svc}, false, nil, nil)
 	if len(added) != 1 || len(removed) != 0 {
 		t.Fatalf("evAdded/evRemoved 为空时应回退本地 diff: added=%+v removed=%+v", added, removed)

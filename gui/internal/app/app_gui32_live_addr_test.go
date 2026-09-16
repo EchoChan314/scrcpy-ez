@@ -13,7 +13,7 @@ import (
 
 // --- gui32：投屏地址基准=活着的（mDNS 广播优先 + 档案地址验证后才选，不选死记忆） ---
 //
-// 实况（2026-08-26 22:56 K80）：无线调试关，广播只有 adb-601c9f08 @ 197:5555
+// 实况（2026-08-26 22:56 K80）：无线调试关，广播只有 adb-TEST0001 @ 197:5555
 // （tcpip 活）；档案 TLS 类 35263(history, lastOk 更晚, fail19) 与
 // 42449(active, fail2)——旧 newestOfClassLocked 比较键只有 lastOk → 选 35263
 // 死端口，投屏 fail19。修复：
@@ -35,11 +35,11 @@ func startVerifyAlwaysOK(a *App) {
 func k80Gui32Archive(a *App) {
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:42449", State: AddrStateActive, Fail: 2, LastOk: 1787745225, Mode: ModeTls},
-			{Addr: "192.168.31.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:42449", State: AddrStateActive, Fail: 2, LastOk: 1787745225, Mode: ModeTls},
+			{Addr: "192.0.2.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -49,7 +49,7 @@ func k80Gui32Archive(a *App) {
 func k80Gui32WifiCard(a *App) {
 	a.mu.Lock()
 	a.devices = []adb.Device{
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	}
 	a.mu.Unlock()
@@ -62,35 +62,35 @@ func TestGui32NewestOfClassActiveFirst(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
-			{Addr: "192.168.31.197:42449", State: AddrStateActive, Fail: 2, LastOk: 1787745225, Mode: ModeTls},
-			{Addr: "192.168.31.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:42449", State: AddrStateActive, Fail: 2, LastOk: 1787745225, Mode: ModeTls},
+			{Addr: "192.0.2.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("601c9f08")
-	if len(got) != 2 || got[0].Addr != "192.168.31.197:42449" || got[1].Addr != "192.168.31.197:5555" {
+	got := s.OrderedAddrs("TEST0001")
+	if len(got) != 2 || got[0].Addr != "192.0.2.197:42449" || got[1].Addr != "192.0.2.197:5555" {
 		t.Fatalf("TLS 类应选 active 42449 而非 history 35263（tls → tcpip 分层）: %+v", got)
 	}
-	if s.BestAddr("601c9f08") != "192.168.31.197:42449" {
-		t.Fatalf("BestAddr 应为 active 42449: %q", s.BestAddr("601c9f08"))
+	if s.BestAddr("TEST0001") != "192.0.2.197:42449" {
+		t.Fatalf("BestAddr 应为 active 42449: %q", s.BestAddr("TEST0001"))
 	}
 
 	// gui52 二态：旧 history 归一为 stale=离线候选 → 取档案顺序第一条 stale
 	s2 := NewProfileStore("")
 	gui15Seed(s2, "X", &DeviceEntry{
 		Marketname: "X",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
-			{Addr: "192.168.31.197:44444", State: AddrStateHistory, Fail: 5, LastOk: 1787744000, Mode: ModeTls},
+			{Addr: "192.0.2.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
+			{Addr: "192.0.2.197:44444", State: AddrStateHistory, Fail: 5, LastOk: 1787744000, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
-	got2 := s2.OrderedAddrs("601c9f08")
-	if len(got2) != 1 || got2[0].Addr != "192.168.31.197:35263" || got2[0].State != AddrStateStale {
+	got2 := s2.OrderedAddrs("TEST0001")
+	if len(got2) != 1 || got2[0].Addr != "192.0.2.197:35263" || got2[0].State != AddrStateStale {
 		t.Fatalf("旧 history 应归一为 stale 离线候选（第一条 35263）: %+v", got2)
 	}
 }
@@ -101,7 +101,7 @@ func TestGui32NewestOfClassActiveFirst(t *testing.T) {
 func TestGui32StartCastBroadcastDirectNoVerify(t *testing.T) {
 	a, f := newWirelessApp()
 	k80Gui32Archive(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:42449")
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:42449")
 	k80Gui32WifiCard(a)
 	var mu sync.Mutex
 	var calls []string
@@ -112,11 +112,11 @@ func TestGui32StartCastBroadcastDirectNoVerify(t *testing.T) {
 		return nil
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("广播命中应直接选 5555: %+v", p)
 	}
 	if s := a.Snapshot(); s.Cast.Tls {
@@ -128,11 +128,11 @@ func TestGui32StartCastBroadcastDirectNoVerify(t *testing.T) {
 		t.Fatalf("广播命中不得触发档案候选验证: %v", calls)
 	}
 	// 不写档案：35263 死记忆状态原样（state/lastOk 不被触碰）
-	e, ok := a.profiles.Entry("192.168.31.197:5555")
+	e, ok := a.profiles.Entry("192.0.2.197:5555")
 	if !ok {
 		t.Fatal("档案应可解析")
 	}
-	a35263 := gui24FindAddr(e, "192.168.31.197:35263")
+	a35263 := gui24FindAddr(e, "192.0.2.197:35263")
 	if a35263 == nil || a35263.State != AddrStateHistory || a35263.LastOk != 1787745659 {
 		t.Fatalf("广播路径不应触碰档案死记忆: %+v", a35263)
 	}
@@ -145,11 +145,11 @@ func TestGui32StartCastVerifyCandidatesOrderAndPickLive(t *testing.T) {
 	a, f := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, Fail: 0, LastOk: 1787745800, Mode: ModeTcpip},
 			// TLS 类无 active → history 35263 兜底候选（死）
-			{Addr: "192.168.31.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
+			{Addr: "192.0.2.197:35263", State: AddrStateHistory, Fail: 19, LastOk: 1787745659, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -163,11 +163,11 @@ func TestGui32StartCastVerifyCandidatesOrderAndPickLive(t *testing.T) {
 		return nil // 即使可连也不应被调用：gui36 不验证
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:5555" {
+	if p.Addr != "192.0.2.197:5555" {
 		t.Fatalf("history 退役后应直取唯一 active 候选 5555: %+v", p)
 	}
 	mu.Lock()
@@ -177,15 +177,15 @@ func TestGui32StartCastVerifyCandidatesOrderAndPickLive(t *testing.T) {
 		t.Fatalf("gui36 投屏不得触发 disc.Connect 验证: %v", gotCalls)
 	}
 	// 不写档案：35263/5555 原样（无验证成功回写）
-	e, ok := a.profiles.Entry("192.168.31.197:5555")
+	e, ok := a.profiles.Entry("192.0.2.197:5555")
 	if !ok {
 		t.Fatal("档案应可解析")
 	}
-	a35263 := gui24FindAddr(e, "192.168.31.197:35263")
+	a35263 := gui24FindAddr(e, "192.0.2.197:35263")
 	if a35263 == nil || a35263.State != AddrStateHistory || a35263.Fail != 19 || a35263.LastFail != 0 {
 		t.Fatalf("直选路径不应触碰档案死记忆: %+v", a35263)
 	}
-	a5555 := gui24FindAddr(e, "192.168.31.197:5555")
+	a5555 := gui24FindAddr(e, "192.0.2.197:5555")
 	if a5555 == nil || a5555.State != AddrStateActive || a5555.LastFail != 0 {
 		t.Fatalf("直选路径不应写档案（5555 原样）: %+v", a5555)
 	}
@@ -199,7 +199,7 @@ func TestGui32StartCastAllCandidatesDeadPrompts(t *testing.T) {
 	k80Gui32Archive(a) // 候选 [42449(tls active), 5555(tcpip active)]
 	k80Gui32WifiCard(a)
 	a.mu.Lock()
-	a.nextParams["192.168.31.197:5555"] = bridge.CastParams{Usb: bridge.ModeParams{Res: 2400, Set: true}}
+	a.nextParams["192.0.2.197:5555"] = bridge.CastParams{Usb: bridge.ModeParams{Res: 2400, Set: true}}
 	a.mu.Unlock()
 	var mu sync.Mutex
 	var calls []string
@@ -210,18 +210,18 @@ func TestGui32StartCastAllCandidatesDeadPrompts(t *testing.T) {
 		return errors.New("cannot connect")
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatalf("有候选即直选，不应提示「未找到可用无线地址」: %v", err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:42449" {
+	if p.Addr != "192.0.2.197:42449" {
 		t.Fatalf("应直取 OrderedAddrs[0]=42449（候选全死也选）: %+v", p)
 	}
 	if f.startsN() != 1 {
 		t.Fatalf("有候选应启动 bat: %d", f.startsN())
 	}
 	a.mu.RLock()
-	_, kept := a.nextParams["192.168.31.197:5555"]
+	_, kept := a.nextParams["192.0.2.197:5555"]
 	a.mu.RUnlock()
 	if kept {
 		t.Fatalf("启动成功应消耗参数浮窗覆盖: %+v", p)
@@ -239,8 +239,8 @@ func TestGui32StartCastTlsBroadcastStillFirst(t *testing.T) {
 	a, f := newWirelessApp()
 	k80Gui32Archive(a)
 	setMdns(a, []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-601c9f08-Kk80Xx", Addr: "192.168.31.197:42449", Mode: discovery.MdnsModeTls},
-		{Type: "_adb._tcp", Name: "adb-601c9f08", Addr: "192.168.31.197:5555", Mode: discovery.MdnsModeTcpip},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0001-Kk80Xx", Addr: "192.0.2.197:42449", Mode: discovery.MdnsModeTls},
+		{Type: "_adb._tcp", Name: "adb-TEST0001", Addr: "192.0.2.197:5555", Mode: discovery.MdnsModeTcpip},
 	})
 	k80Gui32WifiCard(a)
 	var mu sync.Mutex
@@ -252,11 +252,11 @@ func TestGui32StartCastTlsBroadcastStillFirst(t *testing.T) {
 		return nil
 	}
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:42449" {
+	if p.Addr != "192.0.2.197:42449" {
 		t.Fatalf("TLS 广播在场应直接选 TLS 地址: %+v", p)
 	}
 	if s := a.Snapshot(); !s.Cast.Tls {
@@ -276,7 +276,7 @@ func TestGui32StartCastUsbCardNotInvolved(t *testing.T) {
 	k80Gui32Archive(a) // 候选全死（ConnectFn 恒失败）
 	a.mu.Lock()
 	a.devices = []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80",
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},
 	}
 	a.mu.Unlock()
@@ -289,11 +289,11 @@ func TestGui32StartCastUsbCardNotInvolved(t *testing.T) {
 		return errors.New("cannot connect")
 	}
 
-	if err := a.StartCast("601c9f08"); err != nil {
+	if err := a.StartCast("TEST0001"); err != nil {
 		t.Fatalf("USB 卡投屏不应被无线地址验证阻断: %v", err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Serial != "601c9f08" {
+	if p.Serial != "TEST0001" {
 		t.Fatalf("USB 卡应注入 SCEZ_SERIAL: %+v", p)
 	}
 	mu.Lock()

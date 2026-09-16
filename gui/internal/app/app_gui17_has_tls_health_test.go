@@ -25,7 +25,7 @@ func TestHasTlsAddrHealth(t *testing.T) {
 		s := NewProfileStore("")
 		gui15Seed(s, "Xiaomi Pad 8 Pro", &DeviceEntry{
 			Marketname: "Xiaomi Pad 8 Pro",
-			Serials:    []string{"a743e1df"},
+			Serials:    []string{"TEST0002"},
 			Addrs:      addrs,
 			Profiles:   DefaultProfile(),
 		})
@@ -39,50 +39,50 @@ func TestHasTlsAddrHealth(t *testing.T) {
 		{
 			name: "tls+fail0 健康",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
+				{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
 			},
 			want: true,
 		},
 		{
 			name: "tls+fail1 瞬态保留",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 1, LastOk: 100, Mode: ModeTls},
+				{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 1, LastOk: 100, Mode: ModeTls},
 			},
 			want: true,
 		},
 		{
 			name: "tls+fail2 但 state=active 仍标（fail 不入判据）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 2, LastOk: 100, Mode: ModeTls},
+				{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 2, LastOk: 100, Mode: ModeTls},
 			},
 			want: true,
 		},
 		{
 			name: "tls+state=stale 不标",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:33895", State: AddrStateStale, Fail: 3, LastOk: 100, Mode: ModeTls},
+				{Addr: "192.0.2.99:33895", State: AddrStateStale, Fail: 3, LastOk: 100, Mode: ModeTls},
 			},
 			want: false,
 		},
 		{
 			name: "无 tls 地址",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:5555", State: AddrStateActive, Fail: 0, LastOk: 100},
+				{Addr: "192.0.2.99:5555", State: AddrStateActive, Fail: 0, LastOk: 100},
 			},
 			want: false,
 		},
 		{
 			name: "mode 空 tcpip 5555",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:5555", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ""},
+				{Addr: "192.0.2.99:5555", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ""},
 			},
 			want: false,
 		},
 		{
 			name: "死 tls + 健康 tls 并存（新端口入档恢复）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 2, LastOk: 100, Mode: ModeTls},
-				{Addr: "192.168.31.99:41234", State: AddrStateActive, Fail: 0, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 2, LastOk: 100, Mode: ModeTls},
+				{Addr: "192.0.2.99:41234", State: AddrStateActive, Fail: 0, LastOk: 200, Mode: ModeTls},
 			},
 			want: true,
 		},
@@ -93,14 +93,14 @@ func TestHasTlsAddrHealth(t *testing.T) {
 			if got := s.HasTlsAddr("Xiaomi Pad 8 Pro"); got != c.want {
 				t.Fatalf("HasTlsAddr(identity) = %v, want %v", got, c.want)
 			}
-			if got := s.HasTlsAddr("a743e1df"); got != c.want {
+			if got := s.HasTlsAddr("TEST0002"); got != c.want {
 				t.Fatalf("HasTlsAddr(serial) = %v, want %v", got, c.want)
 			}
 		})
 	}
 	// 未知 key 防御
 	if s := seed([]AddrEntry{
-		{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
+		{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: 0, LastOk: 100, Mode: ModeTls},
 	}); s.HasTlsAddr("unknown") {
 		t.Fatal("未知 key 应 false")
 	}
@@ -113,11 +113,11 @@ func gui17SeedK80(a *App, tlsFail int) {
 	defer a.profiles.mu.Unlock()
 	a.profiles.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Wireless:   ModeTls,
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.99:5555", State: AddrStateActive, Fail: 0, LastOk: 200, Mode: ModeTcpip},
-			{Addr: "192.168.31.99:33895", State: AddrStateActive, Fail: tlsFail, LastOk: 100, Mode: ModeTls},
+			{Addr: "192.0.2.99:5555", State: AddrStateActive, Fail: 0, LastOk: 200, Mode: ModeTcpip},
+			{Addr: "192.0.2.99:33895", State: AddrStateActive, Fail: tlsFail, LastOk: 100, Mode: ModeTls},
 		},
 		Profiles: DefaultProfile(),
 	}
@@ -138,7 +138,7 @@ func TestDecorateTlsDeadAddrNoTlsTag(t *testing.T) {
 	a.profiles.mu.Unlock()
 
 	devs := []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.decorateTls(devs)
@@ -157,7 +157,7 @@ func TestDecorateTlsHealthyArchiveNoTagWithoutLiveSignal(t *testing.T) {
 	gui17SeedK80(a, 0)
 
 	devs := []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.decorateTls(devs)
@@ -173,7 +173,7 @@ func TestDecorateTlsLiveMdnsStillTags(t *testing.T) {
 	gui17SeedK80(a, 2)
 
 	devs := []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.decorateTls(devs)

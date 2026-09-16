@@ -3,8 +3,8 @@
 //   设备卡 → 会话唯一绑定（serial 直配 → 无线地址（卡片重键）→ 档案 identity 兜底）。
 // 不变量（后端保证，映射据此唯一）：
 //   - 同一设备（identity）同时最多一个活动会话（StartCast 同 identity 拒绝）；
-//   - 会话键与设备卡 serial 不一致时（同身份双键：会话键 197:5555、卡 serial
-//     601c9f08）经 d.wireless / d.identity 兜底仍命中唯一会话。
+//   - 会话键与设备卡 serial 不一致时（同身份双键：会话键 192.0.2.1:5555、卡 serial
+//     TEST0001）经 d.wireless / d.identity 兜底仍命中唯一会话。
 // 纯函数：无 DOM、无闭包副作用——node 单测覆盖（session_map_test.js）。
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {

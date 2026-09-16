@@ -42,7 +42,7 @@ func gui50Fix3InstallSuccessFakes(a *App) *int {
 	}
 	a.pairOps.mdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
 		return []discovery.MdnsService{
-			{Type: "_adb-tls-connect._tcp", Name: "adb-601c9f08-KWqpio", Addr: "192.168.1.2:33895", Mode: discovery.MdnsModeTls},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0001-KWqpio", Addr: "192.168.1.2:33895", Mode: discovery.MdnsModeTls},
 		}, nil
 	}
 	return &pairCalls

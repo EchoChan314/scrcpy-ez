@@ -44,7 +44,7 @@ func gui50PairFakes(a *App) (*string, *[]string, *string) {
 		scanned = "1"
 		mu.Unlock()
 		return []discovery.MdnsService{
-			{Type: "_adb-tls-connect._tcp", Name: "adb-601c9f08-KWqpio", Addr: "192.168.1.2:33895", Mode: discovery.MdnsModeTls},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0001-KWqpio", Addr: "192.168.1.2:33895", Mode: discovery.MdnsModeTls},
 		}, nil
 	}
 	return &pairArg, &conns, &scanned
@@ -115,18 +115,18 @@ func TestGui50PairQrAutoFlowOnPairingBroadcast(t *testing.T) {
 		t.Fatal("连接端口现场重扫应被调用")
 	}
 	// gui52-fix7：无线接入学习（TLS/5555 connect 探测）已移除——TLS 由配对返回
-	// 端口入档 + mDNS 服务名 adb-601c9f08-KWqpio 解析短号写入 Serials；5555
+	// 端口入档 + mDNS 服务名 adb-TEST0001-KWqpio 解析短号写入 Serials；5555
 	// 由 mDNS _adb._tcp 广播匹配入档（MatchMdnsModes）。
 	waitFor(t, 2*time.Second, func() bool {
 		e, ok := a.profiles.Entry("REDMI K80")
 		return ok && gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls) &&
-			contains(e.Serials, "601c9f08")
+			contains(e.Serials, "TEST0001")
 	}, "TLS 入档 + 短号学习应完成")
 	e, ok := a.profiles.Entry("REDMI K80")
 	if !ok {
 		t.Fatalf("配对成功应建档: %+v", st)
 	}
-	if !contains(e.Serials, "601c9f08") {
+	if !contains(e.Serials, "TEST0001") {
 		t.Fatalf("纯无线接入应学习设备短号: %+v", e.Serials)
 	}
 	// 配对码必须与二维码一致。

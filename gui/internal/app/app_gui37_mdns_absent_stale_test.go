@@ -24,10 +24,10 @@ import (
 func gui37SeedTablet(a *App) {
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Serials:    []string{"a743e1df"},
+		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.162:42627", State: AddrStateActive, Fail: 2, LastOk: 1787740000, LastFail: 1787700000, Mode: ModeTls},
-			{Addr: "192.168.31.162:5555", State: AddrStateActive, Fail: 0, LastOk: 1787741000, Mode: ModeTcpip},
+			{Addr: "192.0.2.162:42627", State: AddrStateActive, Fail: 2, LastOk: 1787740000, LastFail: 1787700000, Mode: ModeTls},
+			{Addr: "192.0.2.162:5555", State: AddrStateActive, Fail: 0, LastOk: 1787741000, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
@@ -46,14 +46,14 @@ func gui37SetWifiDevice(a *App, serial string) {
 // gui37MdnsTcpipOnly 平板只广播 5555（无线调试关：无 TLS 广播）。
 func gui37MdnsTcpipOnly() []discovery.MdnsService {
 	return []discovery.MdnsService{
-		{Type: "_adb._tcp", Name: "adb-a743e1df", Addr: "192.168.31.162:5555", Mode: discovery.MdnsModeTcpip},
+		{Type: "_adb._tcp", Name: "adb-TEST0002", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	}
 }
 
 // gui37MdnsTlsOnly 平板只广播 TLS 42627（经典 5555 缺席）。
 func gui37MdnsTlsOnly() []discovery.MdnsService {
 	return []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Xy9zQ2", Addr: "192.168.31.162:42627", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Xy9zQ2", Addr: "192.0.2.162:42627", Mode: discovery.MdnsModeTls},
 	}
 }
 
@@ -79,25 +79,25 @@ func runGui37Scan(t *testing.T, a *App, svcs []discovery.MdnsService) {
 func TestGui37TlsAbsentMarksStaleAndStartCastPicksTcpip(t *testing.T) {
 	a, f := newWirelessApp()
 	gui37SeedTablet(a)
-	gui37SetWifiDevice(a, "192.168.31.162:5555")
+	gui37SetWifiDevice(a, "192.0.2.162:5555")
 
 	runGui37Scan(t, a, gui37MdnsTcpipOnly())
 
-	e, ok := a.profiles.Entry("a743e1df")
+	e, ok := a.profiles.Entry("TEST0002")
 	if !ok {
 		t.Fatal("档案应可解析")
 	}
-	tls := gui24FindAddr(e, "192.168.31.162:42627")
+	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil || !tls.Stale {
 		t.Fatalf("TLS 广播缺席应打标 Stale=true: %+v", tls)
 	}
-	tcpip := gui24FindAddr(e, "192.168.31.162:5555")
+	tcpip := gui24FindAddr(e, "192.0.2.162:5555")
 	if tcpip == nil || tcpip.Stale {
 		t.Fatalf("5555 广播在场不应打标: %+v", tcpip)
 	}
-	got := a.profiles.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.162:5555" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.162:42627" || got[1].State != AddrStateStale {
+	got := a.profiles.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.162:5555" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.162:42627" || got[1].State != AddrStateStale {
 		t.Fatalf("OrderedAddrs 应 active 5555 优先、stale TLS 作离线候选: %+v", got)
 	}
 
@@ -111,11 +111,11 @@ func TestGui37TlsAbsentMarksStaleAndStartCastPicksTcpip(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}
-	if err := a.StartCast("192.168.31.162:5555"); err != nil {
+	if err := a.StartCast("192.0.2.162:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.162:5555" {
+	if p.Addr != "192.0.2.162:5555" {
 		t.Fatalf("直选应跳过打标 TLS 选 5555: %+v", p)
 	}
 	mu.Lock()
@@ -133,24 +133,24 @@ func TestGui37TlsRebroadcastClearsStaleAndOrderedAddrsIncludesTls(t *testing.T) 
 
 	// 先构造"TLS 缺席已打标"状态（直接走检视，等价于上一轮只有 5555 广播）
 	a.profiles.MarkMdnsAbsentStale([]MdnsMatch{
-		{Name: "adb-a743e1df", Addr: "192.168.31.162:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-TEST0002", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	e0, _ := a.profiles.Entry("a743e1df")
-	if tls0 := gui24FindAddr(e0, "192.168.31.162:42627"); tls0 == nil || !tls0.Stale {
+	e0, _ := a.profiles.Entry("TEST0002")
+	if tls0 := gui24FindAddr(e0, "192.0.2.162:42627"); tls0 == nil || !tls0.Stale {
 		t.Fatalf("前置：TLS 应已打标: %+v", tls0)
 	}
 
 	// 本轮 TLS 广播再现
 	runGui37Scan(t, a, gui37MdnsTlsOnly())
 
-	e, _ := a.profiles.Entry("a743e1df")
-	tls := gui24FindAddr(e, "192.168.31.162:42627")
+	e, _ := a.profiles.Entry("TEST0002")
+	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil || tls.Stale {
 		t.Fatalf("TLS 广播再现应清除 Stale（复活）: %+v", tls)
 	}
-	got := a.profiles.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.162:42627" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.162:5555" || got[1].State != AddrStateStale {
+	got := a.profiles.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("复活后 OrderedAddrs 应 active TLS 优先（5555 本轮缺席变 stale 候选）: %+v", got)
 	}
 }
@@ -160,18 +160,18 @@ func TestGui37TlsRebroadcastClearsStaleAndOrderedAddrsIncludesTls(t *testing.T) 
 func TestGui37TcpipAbsentMarksStaleAndDirectPicksTls(t *testing.T) {
 	a, f := newWirelessApp()
 	gui37SeedTablet(a)
-	gui37SetWifiDevice(a, "192.168.31.162:5555")
+	gui37SetWifiDevice(a, "192.0.2.162:5555")
 
 	runGui37Scan(t, a, gui37MdnsTlsOnly())
 
-	e, _ := a.profiles.Entry("a743e1df")
-	tcpip := gui24FindAddr(e, "192.168.31.162:5555")
+	e, _ := a.profiles.Entry("TEST0002")
+	tcpip := gui24FindAddr(e, "192.0.2.162:5555")
 	if tcpip == nil || !tcpip.Stale {
 		t.Fatalf("5555 广播缺席应打标 Stale=true: %+v", tcpip)
 	}
-	got := a.profiles.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.162:42627" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.162:5555" || got[1].State != AddrStateStale {
+	got := a.profiles.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("OrderedAddrs 应 active TLS 优先、stale 5555 作离线候选: %+v", got)
 	}
 
@@ -184,11 +184,11 @@ func TestGui37TcpipAbsentMarksStaleAndDirectPicksTls(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}
-	if err := a.StartCast("192.168.31.162:5555"); err != nil {
+	if err := a.StartCast("192.0.2.162:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.162:42627" {
+	if p.Addr != "192.0.2.162:42627" {
 		t.Fatalf("5555 打标后直选应取 TLS 42627: %+v", p)
 	}
 	mu.Lock()
@@ -206,17 +206,17 @@ func TestGui37EmptySnapshotNoMark(t *testing.T) {
 
 	runGui37Scan(t, a, nil) // 成功扫描、无任何广播
 
-	e, _ := a.profiles.Entry("a743e1df")
-	tls := gui24FindAddr(e, "192.168.31.162:42627")
-	tcpip := gui24FindAddr(e, "192.168.31.162:5555")
+	e, _ := a.profiles.Entry("TEST0002")
+	tls := gui24FindAddr(e, "192.0.2.162:42627")
+	tcpip := gui24FindAddr(e, "192.0.2.162:5555")
 	if tls == nil || tls.Stale {
 		t.Fatalf("空快照不应打标 TLS: %+v", tls)
 	}
 	if tcpip == nil || tcpip.Stale {
 		t.Fatalf("空快照不应打标 tcpip: %+v", tcpip)
 	}
-	got := a.profiles.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.162:42627" || got[1].Addr != "192.168.31.162:5555" {
+	got := a.profiles.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" || got[1].Addr != "192.0.2.162:5555" {
 		t.Fatalf("空快照应保持两个形态原样参与: %+v", got)
 	}
 }
@@ -227,8 +227,8 @@ func TestGui37StaleEntriesRetainedInArchive(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui37SeedTablet(a)
 
-	eBefore, _ := a.profiles.Entry("a743e1df")
-	tlsBefore := gui24FindAddr(eBefore, "192.168.31.162:42627")
+	eBefore, _ := a.profiles.Entry("TEST0002")
+	tlsBefore := gui24FindAddr(eBefore, "192.0.2.162:42627")
 	if tlsBefore == nil {
 		t.Fatal("前置 TLS 条目应存在")
 	}
@@ -236,8 +236,8 @@ func TestGui37StaleEntriesRetainedInArchive(t *testing.T) {
 
 	runGui37Scan(t, a, gui37MdnsTcpipOnly())
 
-	e, _ := a.profiles.Entry("a743e1df")
-	tls := gui24FindAddr(e, "192.168.31.162:42627")
+	e, _ := a.profiles.Entry("TEST0002")
+	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil {
 		t.Fatalf("打标不应删除 TLS 条目: %+v", e.Addrs)
 	}
@@ -248,10 +248,10 @@ func TestGui37StaleEntriesRetainedInArchive(t *testing.T) {
 		tls.LastOk != before.LastOk || tls.LastFail != before.LastFail {
 		t.Fatalf("打标应只改 state（其余内存字段原样）: before=%+v after=%+v", before, *tls)
 	}
-	all := a.profiles.AllAddrs("a743e1df")
+	all := a.profiles.AllAddrs("TEST0002")
 	found := false
 	for _, addr := range all {
-		if addr == "192.168.31.162:42627" {
+		if addr == "192.0.2.162:42627" {
 			found = true
 		}
 	}
@@ -268,20 +268,20 @@ func TestGui37BroadcastNewTlsPortRetireNotRegress(t *testing.T) {
 	gui37SeedTablet(a)
 
 	runGui37Scan(t, a, []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.162:45005", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.162:45005", Mode: discovery.MdnsModeTls},
 	})
 
-	e, _ := a.profiles.Entry("a743e1df")
-	newTls := gui24FindAddr(e, "192.168.31.162:45005")
+	e, _ := a.profiles.Entry("TEST0002")
+	newTls := gui24FindAddr(e, "192.0.2.162:45005")
 	if newTls == nil || newTls.State != AddrStateActive || newTls.Stale {
 		t.Fatalf("新 TLS 广播应入档 active 且未打标: %+v", newTls)
 	}
-	if gui24FindAddr(e, "192.168.31.162:42627") != nil {
+	if gui24FindAddr(e, "192.0.2.162:42627") != nil {
 		t.Fatalf("旧 TLS 应按单记忆删除（不再 history）: %+v", e.Addrs)
 	}
-	got := a.profiles.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.162:45005" || got[0].State != AddrStateActive ||
-		got[1].Addr != "192.168.31.162:5555" || got[1].State != AddrStateStale {
+	got := a.profiles.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.162:45005" || got[0].State != AddrStateActive ||
+		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("候选应 active 新 TLS 45005 优先（5555 本轮缺席变 stale 候选）: %+v", got)
 	}
 }
@@ -294,25 +294,25 @@ func TestGui37AddrSuccessWithModeClearsStale(t *testing.T) {
 
 	// 先打标 TLS（等价于上一轮只有 5555 广播）
 	a.profiles.MarkMdnsAbsentStale([]MdnsMatch{
-		{Name: "adb-a743e1df", Addr: "192.168.31.162:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-TEST0002", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	e0, _ := a.profiles.Entry("a743e1df")
-	if tls0 := gui24FindAddr(e0, "192.168.31.162:42627"); tls0 == nil || !tls0.Stale {
+	e0, _ := a.profiles.Entry("TEST0002")
+	if tls0 := gui24FindAddr(e0, "192.0.2.162:42627"); tls0 == nil || !tls0.Stale {
 		t.Fatalf("前置：TLS 应已打标: %+v", tls0)
 	}
 
-	a.profiles.AddrSuccessWithMode("a743e1df", "192.168.31.162:42627", ModeTls)
+	a.profiles.AddrSuccessWithMode("TEST0002", "192.0.2.162:42627", ModeTls)
 
-	e, _ := a.profiles.Entry("a743e1df")
-	tls := gui24FindAddr(e, "192.168.31.162:42627")
+	e, _ := a.profiles.Entry("TEST0002")
+	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil || tls.Stale {
 		t.Fatalf("连接成功应解除打标: %+v", tls)
 	}
 	if tls.State != AddrStateActive || tls.LastFail != 0 {
 		t.Fatalf("连接成功应恢复 active/清 lastFail: %+v", tls)
 	}
-	got := a.profiles.OrderedAddrs("a743e1df")
-	if len(got) != 2 || got[0].Addr != "192.168.31.162:42627" {
+	got := a.profiles.OrderedAddrs("TEST0002")
+	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" {
 		t.Fatalf("解除打标后 TLS 应重新参与候选: %+v", got)
 	}
 }

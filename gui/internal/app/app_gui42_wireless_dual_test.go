@@ -17,40 +17,40 @@ func TestGui42SecondaryWirelessAddr(t *testing.T) {
 		{
 			name: "主 tls + tcpip active → 备=tcpip",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
 			},
-			want: "192.168.31.197:5555",
+			want: "192.0.2.197:5555",
 		},
 		{
 			name: "仅 tls active → 备=空",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
 			},
 			want: "",
 		},
 		{
 			name: "仅 tcpip active → 备=空",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 200, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 200, Mode: ModeTcpip},
 			},
 			want: "",
 		},
 		{
 			name: "tls active + tcpip Stale → 备=tcpip（stale 不再拦备选）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip, Stale: true},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip, Stale: true},
 			},
-			want: "192.168.31.197:5555",
+			want: "192.0.2.197:5555",
 		},
 		{
 			name: "tls active + tcpip lastOk=0 → 备=tcpip（lastOk 不再拦备选）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 0, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 0, Mode: ModeTcpip},
 			},
-			want: "192.168.31.197:5555",
+			want: "192.0.2.197:5555",
 		},
 	}
 	for _, c := range cases {
@@ -58,7 +58,7 @@ func TestGui42SecondaryWirelessAddr(t *testing.T) {
 			a, _ := newWirelessApp()
 			gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 				Marketname: "REDMI K80",
-				Serials:    []string{"601c9f08"},
+				Serials:    []string{"TEST0001"},
 				Addrs:      c.addrs,
 				Profiles:   DefaultProfile(),
 			})
@@ -75,23 +75,23 @@ func TestGui42StartCastCarriesDualAddr(t *testing.T) {
 	a, f := newWirelessApp()
 	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
 		Marketname: "REDMI K80",
-		Serials:    []string{"601c9f08"},
+		Serials:    []string{"TEST0001"},
 		Addrs: []AddrEntry{
-			{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
-			{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
+			{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 200, Mode: ModeTls},
+			{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
 		},
 		Profiles: DefaultProfile(),
 	})
 	k80Gui32WifiCard(a)
 
-	if err := a.StartCast("192.168.31.197:5555"); err != nil {
+	if err := a.StartCast("192.0.2.197:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.197:42449" {
+	if p.Addr != "192.0.2.197:42449" {
 		t.Fatalf("主地址应为 TLS 42449: %+v", p)
 	}
-	if p.Addr2 != "192.168.31.197:5555" {
+	if p.Addr2 != "192.0.2.197:5555" {
 		t.Fatalf("备用地址应为 tcpip 5555: %+v", p)
 	}
 }

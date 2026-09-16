@@ -27,7 +27,7 @@ func TestGui42ParamsAddr2Injected(t *testing.T) {
 
 	done := make(chan int, 1)
 	r := NewBatRunner(bat, "adb.exe", func(string) {}, func(code int) { done <- code })
-	if err := r.Start("X", CastParams{Addr: "192.168.31.197:33895", Addr2: "192.168.31.197:5555"}); err != nil {
+	if err := r.Start("X", CastParams{Addr: "192.0.2.197:33895", Addr2: "192.0.2.197:5555"}); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -36,7 +36,7 @@ func TestGui42ParamsAddr2Injected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(string(b)); got != "192.168.31.197:5555" {
+	if got := strings.TrimSpace(string(b)); got != "192.0.2.197:5555" {
 		t.Fatalf("SCEZ_ADDR2 应注入 bat 环境: %q", got)
 	}
 

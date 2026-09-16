@@ -59,7 +59,7 @@ func ParseMdnsServices(output string) []MdnsService {
 		}
 		fields := strings.Fields(line)
 		// adb 37+ 的 mdns services 输出实例名后带服务计数 "(n)"
-		// （如 "adb-601c9f08-KWqpio (2)"）——计数字段不参与列序判定，
+		// （如 "adb-TEST0001-KWqpio (2)"）——计数字段不参与列序判定，
 		// 先剥离；旧 adb 输出无计数，剥离后原样。
 		stripped := fields[:0]
 		for _, f := range fields {

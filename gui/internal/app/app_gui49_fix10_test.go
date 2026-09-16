@@ -15,9 +15,9 @@ func TestGui49Fix10PluggingAlwaysShieldsRealUsbDevice(t *testing.T) {
 	a.plugStart("REDMI K80", time.Now(), "测试插线")
 
 	devs := []adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb",
+		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "REDMI K80", Identity: "REDMI K80", Battery: 90, Res: "2560x1440", FPS: 120},
-		{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi",
+		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Identity: "REDMI K80"},
 	}
 	out := a.shieldUsbLearning(devs)
@@ -25,13 +25,13 @@ func TestGui49Fix10PluggingAlwaysShieldsRealUsbDevice(t *testing.T) {
 		t.Fatalf("plugging 活跃期应只输出一张遮罩卡: %+v", out)
 	}
 	d := out[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" || d.State != "device" || !d.Connecting {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" || d.State != "device" || !d.Connecting {
 		t.Fatalf("plugging 活跃期必须是连接中遮罩卡: %+v", d)
 	}
 	if d.Battery != 0 || d.Res != "" || d.FPS != 0 {
 		t.Fatalf("遮罩卡不得携带真卡规格/电量: %+v", d)
 	}
-	if d.Wireless != "192.168.31.197:5555" {
+	if d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("在线无线地址应并入遮罩卡副行: %+v", d)
 	}
 
@@ -43,7 +43,7 @@ func TestGui49Fix10PluggingAlwaysShieldsRealUsbDevice(t *testing.T) {
 	}
 	foundReal := false
 	for i := range out {
-		if out[i].Serial == "601c9f08" && !out[i].Connecting {
+		if out[i].Serial == "TEST0001" && !out[i].Connecting {
 			foundReal = true
 		}
 	}

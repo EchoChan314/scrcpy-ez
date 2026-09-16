@@ -29,16 +29,16 @@ func TestFilterLanInterfaces(t *testing.T) {
 		in   mdnsIface
 		keep bool
 	}{
-		{"物理以太网", mdnsTestIface("Ethernet", "00:11:22:33:44:55", "192.168.31.174", upMulti), true},
+		{"物理以太网", mdnsTestIface("Ethernet", "00:11:22:33:44:55", "192.0.2.174", upMulti), true},
 		{"vEthernet 排除", mdnsTestIface("vEthernet (WSL)", "00:15:5d:aa:bb:cc", "172.17.208.1", upMulti), false},
 		{"ZeroTier 排除", mdnsTestIface("ZeroTier One [xxxx]", "02:00:00:aa:bb:cc", "10.151.76.18", upMulti), false},
-		{"虚拟 MAC 排除", mdnsTestIface("Ethernet 2", "00:50:56:aa:bb:cc", "192.168.31.175", upMulti), false},
+		{"虚拟 MAC 排除", mdnsTestIface("Ethernet 2", "00:50:56:aa:bb:cc", "192.0.2.175", upMulti), false},
 		{"无 IPv4 排除", mdnsTestIface("Ethernet 3", "00:11:22:33:44:66", "", upMulti), false},
 		{"链路本地排除", mdnsTestIface("Ethernet 4", "00:11:22:33:44:77", "169.254.1.1", upMulti), false},
 		{"回环排除", mdnsTestIface("Loopback", "", "127.0.0.1", upMulti), false},
-		{"FlagDown 排除", mdnsTestIface("Ethernet 5", "00:11:22:33:44:88", "192.168.31.176", 0), false},
-		{"无 Multicast 排除", mdnsTestIface("Ethernet 6", "00:11:22:33:44:99", "192.168.31.177", net.FlagUp), false},
-		{"空 MAC 排除", mdnsTestIface("Ethernet 7", "", "192.168.31.178", upMulti), false},
+		{"FlagDown 排除", mdnsTestIface("Ethernet 5", "00:11:22:33:44:88", "192.0.2.176", 0), false},
+		{"无 Multicast 排除", mdnsTestIface("Ethernet 6", "00:11:22:33:44:99", "192.0.2.177", net.FlagUp), false},
+		{"空 MAC 排除", mdnsTestIface("Ethernet 7", "", "192.0.2.178", upMulti), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestMdnsNameParsing(t *testing.T) {
 		"_adb-tls-connect._tcp.local.":                     "_adb-tls-connect._tcp",
 		"_adb._tcp.local.":                                 "_adb._tcp",
 		"_adb-tls-pairing._tcp.local.":                     "_adb-tls-pairing._tcp",
-		"adb-a743e1df-On9v2R._adb-tls-connect._tcp.local.": "_adb-tls-connect._tcp",
+		"adb-TEST0002-On9v2R._adb-tls-connect._tcp.local.": "_adb-tls-connect._tcp",
 	} {
 		got, ok := mdnsServiceTypeForName(name)
 		if !ok || got != want {
@@ -71,7 +71,7 @@ func TestMdnsNameParsing(t *testing.T) {
 	if _, ok := mdnsServiceTypeForName("_http._tcp.local."); ok {
 		t.Fatal("非 adb 服务不应识别")
 	}
-	if got := mdnsInstanceForName("adb-a743e1df-On9v2R._adb-tls-connect._tcp.local.", "_adb-tls-connect._tcp"); got != "adb-a743e1df-On9v2R" {
+	if got := mdnsInstanceForName("adb-TEST0002-On9v2R._adb-tls-connect._tcp.local.", "_adb-tls-connect._tcp"); got != "adb-TEST0002-On9v2R" {
 		t.Fatalf("实例名剥离错误: %q", got)
 	}
 }
@@ -86,7 +86,7 @@ func TestMdnsListenStateFirstAndUpsertGone(t *testing.T) {
 	st := newMdnsListenState(nil, nil, nil)
 	evs := collectEvents(st)
 	st.initial()
-	st.upsert(MdnsService{Type: "_adb._tcp", Name: "adb-a", Addr: "192.168.31.2:5555", Mode: MdnsModeTcpip}, time.Now(), false)
+	st.upsert(MdnsService{Type: "_adb._tcp", Name: "adb-a", Addr: "192.0.2.2:5555", Mode: MdnsModeTcpip}, time.Now(), false)
 	st.gone(MdnsService{Type: "_adb._tcp", Name: "adb-a"})
 	if len(*evs) != 3 {
 		t.Fatalf("事件数错误: %+v", *evs)
@@ -111,7 +111,7 @@ func TestMdnsListenStateIdleProbe(t *testing.T) {
 	var probes []string
 	probeDone := make(chan struct{})
 	var probeDoneOnce sync.Once
-	svc := MdnsService{Type: "_adb-tls-connect._tcp", Name: "adb-a-Xy9zQ2", Addr: "192.168.31.2:36329", Mode: MdnsModeTls}
+	svc := MdnsService{Type: "_adb-tls-connect._tcp", Name: "adb-a-Xy9zQ2", Addr: "192.0.2.2:36329", Mode: MdnsModeTls}
 	var st *mdnsListenState
 	st = newMdnsListenState(nil, func(addr string) {
 		probesMu.Lock()
@@ -141,7 +141,7 @@ func TestMdnsListenStateIdleProbe(t *testing.T) {
 			all := append([]string(nil), probes...)
 			probesMu.Unlock()
 			if n > 0 {
-				if addr != "192.168.31.2:36329" {
+				if addr != "192.0.2.2:36329" {
 					t.Fatalf("onIdleProbe 地址错误: %v", all)
 				}
 				return
@@ -187,7 +187,7 @@ func TestMdnsListenStateUpsertResetsIdleTimer(t *testing.T) {
 	var probesMu sync.Mutex
 	var probes []string
 	probeDone := make(chan struct{})
-	svc := MdnsService{Type: "_adb._tcp", Name: "adb-a", Addr: "192.168.31.2:5555", Mode: MdnsModeTcpip}
+	svc := MdnsService{Type: "_adb._tcp", Name: "adb-a", Addr: "192.0.2.2:5555", Mode: MdnsModeTcpip}
 	var st *mdnsListenState
 	st = newMdnsListenState(nil, func(addr string) {
 		probesMu.Lock()
@@ -240,7 +240,7 @@ func TestMdnsListenStateGoodbyeStopsIdleTimer(t *testing.T) {
 
 	var probes []string
 	st := newMdnsListenState(nil, func(addr string) { probes = append(probes, addr) }, nil)
-	svc := MdnsService{Type: "_adb-tls-connect._tcp", Name: "adb-a-Xy9zQ2", Addr: "192.168.31.2:36329", Mode: MdnsModeTls}
+	svc := MdnsService{Type: "_adb-tls-connect._tcp", Name: "adb-a-Xy9zQ2", Addr: "192.0.2.2:36329", Mode: MdnsModeTls}
 	st.upsert(svc, time.Now(), false)
 	st.gone(svc)
 	time.Sleep(80 * time.Millisecond)
@@ -277,7 +277,7 @@ func TestMdnsProcessMessageGoodbyeAndUpdate(t *testing.T) {
 		host := "a.local."
 		ptr := &dns.PTR{Hdr: dns.RR_Header{Name: svc, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: ttl}, Ptr: inst}
 		srv := &dns.SRV{Hdr: dns.RR_Header{Name: inst, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: ttl}, Port: 36329, Target: host}
-		a := &dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl}, A: net.ParseIP("192.168.31.2")}
+		a := &dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl}, A: net.ParseIP("192.0.2.2")}
 		m.Answer = append(m.Answer, ptr)
 		m.Extra = append(m.Extra, srv, a)
 		return m
@@ -287,7 +287,7 @@ func TestMdnsProcessMessageGoodbyeAndUpdate(t *testing.T) {
 	if len(*evs) != 2 || len((*evs)[1].Snapshot) != 1 {
 		t.Fatalf("注册通告应产生 appeared 快照: %+v", *evs)
 	}
-	if s := (*evs)[1].Snapshot[0]; s.Name != "adb-a-Xy9zQ2" || s.Addr != "192.168.31.2:36329" || s.Mode != MdnsModeTls {
+	if s := (*evs)[1].Snapshot[0]; s.Name != "adb-a-Xy9zQ2" || s.Addr != "192.0.2.2:36329" || s.Mode != MdnsModeTls {
 		t.Fatalf("解析错误: %+v", s)
 	}
 
@@ -331,7 +331,7 @@ func TestMdnsQueryResponseUpsertResetsIdleTimer(t *testing.T) {
 	var probesMu sync.Mutex
 	var probes []string
 	probeDone := make(chan struct{})
-	svc := MdnsService{Type: "_adb-tls-connect._tcp", Name: "adb-a-Xy9zQ2", Addr: "192.168.31.2:36329", Mode: MdnsModeTls}
+	svc := MdnsService{Type: "_adb-tls-connect._tcp", Name: "adb-a-Xy9zQ2", Addr: "192.0.2.2:36329", Mode: MdnsModeTls}
 	var st *mdnsListenState
 	st = newMdnsListenState(nil, func(addr string) {
 		probesMu.Lock()
@@ -356,7 +356,7 @@ func TestMdnsQueryResponseUpsertResetsIdleTimer(t *testing.T) {
 		host := "a.local."
 		ptr := &dns.PTR{Hdr: dns.RR_Header{Name: svcName, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: 120}, Ptr: inst}
 		srv := &dns.SRV{Hdr: dns.RR_Header{Name: inst, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: 120}, Port: 36329, Target: host}
-		a := &dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120}, A: net.ParseIP("192.168.31.2")}
+		a := &dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120}, A: net.ParseIP("192.0.2.2")}
 		m.Answer = append(m.Answer, ptr)
 		m.Extra = append(m.Extra, srv, a)
 		return m
@@ -450,7 +450,7 @@ func TestMdnsQueryResponseForcedEmit(t *testing.T) {
 	st := newMdnsListenState(nil, nil, nil)
 	evs := collectEvents(st)
 	st.initial()
-	svc := MdnsService{Type: "_adb._tcp", Name: "adb-a", Addr: "192.168.31.2:5555", Mode: MdnsModeTcpip}
+	svc := MdnsService{Type: "_adb._tcp", Name: "adb-a", Addr: "192.0.2.2:5555", Mode: MdnsModeTcpip}
 	st.upsert(svc, time.Now(), false)
 	n := len(*evs)
 
@@ -462,7 +462,7 @@ func TestMdnsQueryResponseForcedEmit(t *testing.T) {
 		host := "a.local."
 		ptr := &dns.PTR{Hdr: dns.RR_Header{Name: svcName, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: 120}, Ptr: inst}
 		srv := &dns.SRV{Hdr: dns.RR_Header{Name: inst, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: 120}, Port: 5555, Target: host}
-		a := &dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120}, A: net.ParseIP("192.168.31.2")}
+		a := &dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120}, A: net.ParseIP("192.0.2.2")}
 		m.Answer = append(m.Answer, ptr)
 		m.Extra = append(m.Extra, srv, a)
 		return m
@@ -585,7 +585,7 @@ func mdnsTestAdvertise(inst, svcType string) *dns.Msg {
 	})
 	m.Extra = append(m.Extra,
 		&dns.SRV{Hdr: dns.RR_Header{Name: instFQDN, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: 120}, Port: 5555, Target: host},
-		&dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120}, A: net.ParseIP("192.168.31.2")},
+		&dns.A{Hdr: dns.RR_Header{Name: host, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120}, A: net.ParseIP("192.0.2.2")},
 	)
 	return m
 }

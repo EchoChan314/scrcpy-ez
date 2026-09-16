@@ -10,8 +10,8 @@ import (
 
 func gui49fix5SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 }
 
@@ -21,10 +21,10 @@ func TestGui49Fix5UsbInListWirelessOfflineExempt(t *testing.T) {
 	gui49fix5SeedK80(a)
 
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Identity: "REDMI K80"},
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Identity: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"},
 	})
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if ae == nil || ae.Stale || ae.LastFail != 0 || ae.Fail != 0 {
 		t.Fatalf("USB 在列时无线 offline 应豁免（不打标/不节流）: %+v", ae)
 	}
@@ -36,9 +36,9 @@ func TestGui49Fix5UsbRemovedWirelessOfflineStillStale(t *testing.T) {
 	gui49fix5SeedK80(a)
 
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"},
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Identity: "REDMI K80"},
 	})
-	ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+	ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 	if ae == nil || !ae.Stale || ae.LastFail == 0 {
 		t.Fatalf("USB removed 后无线 offline 应打 stale/记失败: %+v", ae)
 	}

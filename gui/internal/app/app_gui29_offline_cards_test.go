@@ -53,38 +53,38 @@ func TestGui29OfflineCardAppendedOnlyForMissingProfileDevice(t *testing.T) {
 		"REDMI K80": {
 			Marketname: "REDMI K80",
 			Model:      "24117RK2CC",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
-				{Addr: "192.168.31.197:33895", State: AddrStateActive, LastOk: 1750000020, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:33895", State: AddrStateActive, LastOk: 1750000020, Mode: ModeTls},
 			},
 			Profiles: DefaultProfile(),
 		},
 		"Xiaomi Pad 8 Pro": {
 			Marketname: "Xiaomi Pad 8 Pro",
 			Model:      "25091RP04C",
-			Serials:    []string{"a743e1df"},
+			Serials:    []string{"TEST0002"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.162:5555", State: AddrStateActive, LastOk: 1750000030, Mode: ModeTcpip},
+				{Addr: "192.0.2.162:5555", State: AddrStateActive, LastOk: 1750000030, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		},
 	})
 
 	devs := a.appendProfileOfflineCards([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	})
 	if len(devs) != 2 {
 		t.Fatalf("应追加一张 K80 离线卡（平板在线不补）: %+v", devs)
 	}
-	if devs[0].Serial != "a743e1df" || devs[0].State != "device" {
+	if devs[0].Serial != "TEST0002" || devs[0].State != "device" {
 		t.Fatalf("原有在线卡应保持在前: %+v", devs[0])
 	}
 	if gui29CountIdentity(a, devs, "Xiaomi Pad 8 Pro") != 1 {
 		t.Fatalf("平板已有在线卡，不得重复补离线卡: %+v", devs)
 	}
 	k80 := devs[1]
-	if k80.Serial != "192.168.31.197:33895" {
+	if k80.Serial != "192.0.2.197:33895" {
 		t.Fatalf("离线卡副行地址应为最近 lastOk 地址（tls 33895=20 胜 5555=10）: %+v", k80)
 	}
 	if k80.State != "device" || k80.ConnType != "wifi" || k80.Name != "REDMI K80" || k80.Identity != "REDMI K80" {
@@ -103,35 +103,35 @@ func TestGui29OfflineCardAddrPicksLatestLastOkPerClass(t *testing.T) {
 		{
 			name: "active 严格优先（stale lastOk 再大也不压）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 150, Mode: ModeTcpip},
-				{Addr: "192.168.31.162:5555", State: AddrStateStale, LastOk: 90, Mode: ModeTcpip},
-				{Addr: "192.168.31.197:33895", State: AddrStateActive, LastOk: 100, Mode: ModeTls},
-				{Addr: "192.168.31.197:42449", State: AddrStateStale, LastOk: 200, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 150, Mode: ModeTcpip},
+				{Addr: "192.0.2.162:5555", State: AddrStateStale, LastOk: 90, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:33895", State: AddrStateActive, LastOk: 100, Mode: ModeTls},
+				{Addr: "192.0.2.197:42449", State: AddrStateStale, LastOk: 200, Mode: ModeTls},
 			},
-			want: "192.168.31.197:33895", // active TLS 33895 > active tcpip 5555
+			want: "192.0.2.197:33895", // active TLS 33895 > active tcpip 5555
 		},
 		{
 			name: "tls 形态优先（tcpip lastOk 更新仍选 tls）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 400, Mode: ModeTcpip},
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 300, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 400, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 300, Mode: ModeTls},
 			},
-			want: "192.168.31.197:42449",
+			want: "192.0.2.197:42449",
 		},
 		{
 			name: "同刻 tls 优先",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 300, Mode: ModeTcpip},
-				{Addr: "192.168.31.197:42449", State: AddrStateActive, LastOk: 300, Mode: ModeTls},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 300, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:42449", State: AddrStateActive, LastOk: 300, Mode: ModeTls},
 			},
-			want: "192.168.31.197:42449",
+			want: "192.0.2.197:42449",
 		},
 		{
 			name: "失败节流不影响展示（lastFail=now 仍显示）",
 			addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 300, LastFail: time.Now().Unix(), Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 300, LastFail: time.Now().Unix(), Mode: ModeTcpip},
 			},
-			want: "192.168.31.197:5555",
+			want: "192.0.2.197:5555",
 		},
 	}
 	for _, c := range cases {
@@ -140,7 +140,7 @@ func TestGui29OfflineCardAddrPicksLatestLastOkPerClass(t *testing.T) {
 			seedProfiles(a, map[string]*DeviceEntry{
 				"REDMI K80": {
 					Marketname: "REDMI K80",
-					Serials:    []string{"601c9f08"},
+					Serials:    []string{"TEST0001"},
 					Addrs:      c.addrs,
 					Profiles:   DefaultProfile(),
 				},
@@ -187,9 +187,9 @@ func TestGui29OfflineCardSkipsExistingCards(t *testing.T) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		},
@@ -197,25 +197,25 @@ func TestGui29OfflineCardSkipsExistingCards(t *testing.T) {
 
 	// ① adb 的离线残留卡（foldGhostWireless 保留路径）→ 不补
 	devs := a.appendProfileOfflineCards([]adb.Device{
-		{Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi"},
+		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi"},
 	})
-	if len(devs) != 1 || gui29FindDev(devs, "192.168.31.197:5555") == nil {
+	if len(devs) != 1 || gui29FindDev(devs, "192.0.2.197:5555") == nil {
 		t.Fatalf("已有离线残留卡不应再补: %+v", devs)
 	}
 
 	// ② 未授权卡（USB 插线未授权）→ 不补
 	devs = a.appendProfileOfflineCards([]adb.Device{
-		{Serial: "601c9f08", State: "unauthorized", ConnType: "usb"},
+		{Serial: "TEST0001", State: "unauthorized", ConnType: "usb"},
 	})
-	if len(devs) != 1 || gui29FindDev(devs, "601c9f08") == nil {
+	if len(devs) != 1 || gui29FindDev(devs, "TEST0001") == nil {
 		t.Fatalf("未授权卡在列不应再补离线卡: %+v", devs)
 	}
 
 	// ③ 在线 USB 卡 + Wireless 副行（身份经 Wireless 解析）→ 不补
 	devs = a.appendProfileOfflineCards([]adb.Device{
-		{Serial: "601c9f08", State: "device", ConnType: "usb", Wireless: "192.168.31.197:5555"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Wireless: "192.0.2.197:5555"},
 	})
-	if len(devs) != 1 || gui29FindDev(devs, "601c9f08") == nil {
+	if len(devs) != 1 || gui29FindDev(devs, "TEST0001") == nil {
 		t.Fatalf("Wireless 副行已带身份不应再补: %+v", devs)
 	}
 }
@@ -225,10 +225,10 @@ func TestGui29OfflineCardSkipsExistingCards(t *testing.T) {
 func TestGui29OfflineCardsLeavePendingUntouched(t *testing.T) {
 	a, _ := newWirelessApp()
 	setMdns(a, []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-HW12345-Xy9zQ2", Addr: "192.168.31.99:33895", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-HW12345-Xy9zQ2", Addr: "192.0.2.99:33895", Mode: discovery.MdnsModeTls},
 	})
 	a.buildPending(nil)
-	if len(a.Snapshot().Pending) != 1 || a.Snapshot().Pending[0].Addr != "192.168.31.99:33895" {
+	if len(a.Snapshot().Pending) != 1 || a.Snapshot().Pending[0].Addr != "192.0.2.99:33895" {
 		t.Fatalf("buildPending 应产出待配对卡: %+v", a.Snapshot().Pending)
 	}
 
@@ -236,19 +236,19 @@ func TestGui29OfflineCardsLeavePendingUntouched(t *testing.T) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		},
 	})
 	devs := a.appendProfileOfflineCards(nil)
-	if len(devs) != 1 || devs[0].Serial != "192.168.31.197:5555" || devs[0].State != "device" {
+	if len(devs) != 1 || devs[0].Serial != "192.0.2.197:5555" || devs[0].State != "device" {
 		t.Fatalf("应只补 K80 在线合成卡（档案含 active）: %+v", devs)
 	}
 	p := a.Snapshot().Pending
-	if len(p) != 1 || p[0].Addr != "192.168.31.99:33895" {
+	if len(p) != 1 || p[0].Addr != "192.0.2.99:33895" {
 		t.Fatalf("待配对卡应原样保留（不受离线卡补齐影响）: %+v", p)
 	}
 }
@@ -310,20 +310,20 @@ func TestPollOnceGui29OfflineCardWhenDeviceGone(t *testing.T) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Serials:    []string{"601c9f08"},
+			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
-				{Addr: "192.168.31.197:5555", State: AddrStateActive, LastOk: 1750000000, Mode: ModeTcpip},
+				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 1750000000, Mode: ModeTcpip},
 			},
 			Profiles: DefaultProfile(),
 		},
 	})
 
 	// 在线：正常在线卡（无离线补卡）
-	os.Setenv("FAKE_DEV", "601c9f08\tdevice")
+	os.Setenv("FAKE_DEV", "TEST0001\tdevice")
 	defer os.Unsetenv("FAKE_DEV")
 	a.pollOnce(context.Background())
 	devs := a.Snapshot().Devices
-	if len(devs) != 1 || devs[0].Serial != "601c9f08" || devs[0].State != "device" {
+	if len(devs) != 1 || devs[0].Serial != "TEST0001" || devs[0].State != "device" {
 		t.Fatalf("在线轮应单在线卡: %+v", devs)
 	}
 
@@ -337,8 +337,8 @@ func TestPollOnceGui29OfflineCardWhenDeviceGone(t *testing.T) {
 	}
 	d := devs[0]
 	// 当前实现路径：学习遮罩把合成在线卡转成 USB 连接中卡（USB serial + 副行 5555）
-	if d.State != "device" || d.Name != "REDMI K80" || d.Serial != "601c9f08" ||
-		d.ConnType != "usb" || d.Wireless != "192.168.31.197:5555" || !d.Connecting {
+	if d.State != "device" || d.Name != "REDMI K80" || d.Serial != "TEST0001" ||
+		d.ConnType != "usb" || d.Wireless != "192.0.2.197:5555" || !d.Connecting {
 		t.Fatalf("拔线后应保留 K80 卡（当前为 USB 连接中遮罩）: %+v", d)
 	}
 	if a.Snapshot().NewDevice != nil {
@@ -346,10 +346,10 @@ func TestPollOnceGui29OfflineCardWhenDeviceGone(t *testing.T) {
 	}
 
 	// 再插 USB：恢复在线卡（离线卡随之消失，不重复）
-	os.Setenv("FAKE_DEV", "601c9f08\tdevice")
+	os.Setenv("FAKE_DEV", "TEST0001\tdevice")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
-	if len(devs) != 1 || devs[0].State != "device" || devs[0].Serial != "601c9f08" {
+	if len(devs) != 1 || devs[0].State != "device" || devs[0].Serial != "TEST0001" {
 		t.Fatalf("再插线应恢复单在线卡: %+v", devs)
 	}
 }

@@ -14,8 +14,8 @@ import (
 
 func gui49SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"},
-			[]string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+			[]string{"192.0.2.197:5555"}),
 	})
 }
 
@@ -58,7 +58,7 @@ func TestGui49UnplugStartOnRemoved(t *testing.T) {
 	}
 	d := out[0]
 	if d.Serial != "unplug-REDMI K80" || d.ConnType != "wifi" || d.State != "device" ||
-		!d.Connecting || d.WirelessIP != "192.168.31.197:5555" {
+		!d.Connecting || d.WirelessIP != "192.0.2.197:5555" {
 		t.Fatalf("拔线遮罩卡形态错误: %+v", d)
 	}
 }
@@ -74,7 +74,7 @@ func TestGui49UnplugStartsWithWirelessOfflineStillListed(t *testing.T) {
 
 	a.applyTrackUpdate([]adb.Device{teachfix3DeviceUSB()})
 	gui49fix6SettlePlug(a) // 模拟稳定 device 2s 清插线遮罩，进入拔线场景
-	wifiOffline := adb.Device{Serial: "192.168.31.197:5555", State: "offline",
+	wifiOffline := adb.Device{Serial: "192.0.2.197:5555", State: "offline",
 		ConnType: "wifi", Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{wifiOffline}) // USB removed + 无线 offline 仍在列表
 
@@ -124,7 +124,7 @@ func TestGui49UnplugClearsOnWirelessDevice(t *testing.T) {
 	}
 	out := a.Snapshot().Devices
 	if len(out) != 1 || out[0].Connecting || out[0].ConnType != "wifi" ||
-		out[0].Serial != "192.168.31.197:5555" {
+		out[0].Serial != "192.0.2.197:5555" {
 		t.Fatalf("清遮罩后应立即呈现正常无线卡: %+v", out)
 	}
 }
@@ -186,7 +186,7 @@ func gui49FastRetry(t *testing.T) {
 func TestGui49ConnectConfirmSuccessActiveAndClear(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui49SeedK80(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.168.31.197:5555") // 先 stale：验证复活
+	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555") // 先 stale：验证复活
 	ops := &teachfix3Ops{port: "5555"}
 	ops.install(a)
 
@@ -204,7 +204,7 @@ func TestGui49ConnectConfirmSuccessActiveAndClear(t *testing.T) {
 	a.applyTrackUpdate(nil) // removed → 拔线遮罩 + connect 确认
 	waitForMdns(t, "connect 成功应清拔线遮罩", func() bool { return !gui49UnplugActive(a) })
 	waitForMdns(t, "connect 成功应写 active", func() bool {
-		ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+		ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 		return ae != nil && ae.State == AddrStateActive && !ae.Stale
 	})
 	mu.Lock()
@@ -215,7 +215,7 @@ func TestGui49ConnectConfirmSuccessActiveAndClear(t *testing.T) {
 	}
 	out := a.Snapshot().Devices
 	if len(out) != 1 || out[0].Connecting || out[0].ConnType != "wifi" ||
-		out[0].Serial != "192.168.31.197:5555" {
+		out[0].Serial != "192.0.2.197:5555" {
 		t.Fatalf("connect 成功后应呈现正常无线卡: %+v", out)
 	}
 }
@@ -246,7 +246,7 @@ func TestGui49ConnectConfirmFailRetriesThenTimeoutOffline(t *testing.T) {
 		return attempts >= unplugConnectAttempts
 	})
 	waitForMdns(t, "失败应打 stale", func() bool {
-		ae := teachfixAddrState(a, "REDMI K80", "192.168.31.197:5555")
+		ae := teachfixAddrState(a, "REDMI K80", "192.0.2.197:5555")
 		return ae != nil && ae.Stale
 	})
 	if !gui49UnplugActive(a) {
@@ -276,7 +276,7 @@ func TestGui49PlugGetpropNoLongerClears(t *testing.T) {
 	gui49fix6FastStable(t)
 
 	a.applyTrackUpdate([]adb.Device{teachfix3OfflineUSB()})
-	a.plugCheckTcpipReady(context.Background(), "601c9f08")
+	a.plugCheckTcpipReady(context.Background(), "TEST0001")
 	if !teachfix3PlugActive(a) {
 		t.Fatal("getprop==5555 不得清插线遮罩（清因=稳定 device）")
 	}

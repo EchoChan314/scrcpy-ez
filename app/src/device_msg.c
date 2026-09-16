@@ -120,6 +120,9 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
             msg->abr_state.fps = sc_read32be(&buf[5]);
             return 9;
         }
+        // scrcpy-ez: device-side "stop mirroring" request, no payload
+        case DEVICE_MSG_TYPE_STOP_MIRRORING:
+            return 1; // only the type byte
         default:
             LOGW("Unknown device message type: %d", (int) msg->type);
             return -1; // error, we cannot recover

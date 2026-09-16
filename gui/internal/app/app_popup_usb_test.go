@@ -26,9 +26,9 @@ func wifiDev(addr, market string) adb.Device {
 // （"仅无线不弹"只约束已建档设备）。
 func TestPopupNewDeviceUnconditional(t *testing.T) {
 	a, _ := multiTestApp()
-	a.applyTrackUpdate([]adb.Device{wifiDev("192.168.31.197:5555", "Redmi K80")})
+	a.applyTrackUpdate([]adb.Device{wifiDev("192.0.2.197:5555", "Redmi K80")})
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "192.168.31.197:5555" || np.ConnType != "wifi" || np.Name != "Redmi K80" {
+	if np == nil || np.Serial != "192.0.2.197:5555" || np.ConnType != "wifi" || np.Name != "Redmi K80" {
 		t.Fatalf("新设备应无条件弹: %+v", np)
 	}
 }
@@ -37,9 +37,9 @@ func TestPopupNewDeviceUnconditional(t *testing.T) {
 func TestPopupProfiledWifiOnlyNoPop(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
-	devs := []adb.Device{wifiDev("192.168.31.197:5555", "REDMI K80")}
+	devs := []adb.Device{wifiDev("192.0.2.197:5555", "REDMI K80")}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs)
 	if a.Snapshot().NewDevice != nil {
@@ -56,21 +56,21 @@ func TestPopupProfiledWifiOnlyNoPop(t *testing.T) {
 func TestPopupProfiledUSBPlugPops(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	// 上轮：仅无线在线（无线就绪）→ 不弹
-	devsWifi := []adb.Device{wifiDev("192.168.31.162:5555", "Xiaomi Pad 8 Pro")}
+	devsWifi := []adb.Device{wifiDev("192.0.2.162:5555", "Xiaomi Pad 8 Pro")}
 	setDevices(a, devsWifi)
 	a.applyTrackUpdate(devsWifi)
 	if a.Snapshot().NewDevice != nil {
 		t.Fatal("无线就绪阶段不应弹")
 	}
 	// 本轮：USB 插线（新 USB 条目出现，合并卡 USB 主 transport）→ 弹（USB）
-	devsBoth := []adb.Device{usbDev("a743e1df", "Xiaomi Pad 8 Pro", "192.168.31.162:5555")}
+	devsBoth := []adb.Device{usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555")}
 	setDevices(a, devsBoth)
 	a.applyTrackUpdate(devsBoth)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "a743e1df" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0002" || np.ConnType != "usb" {
 		t.Fatalf("USB 插线应弹（USB）: %+v", np)
 	}
 	// 30s 防重复窗口内不重复弹（插线事件只触发一次）
@@ -88,9 +88,9 @@ func TestPopupProfiledUSBPlugPops(t *testing.T) {
 func TestPopupProfiledUSBWirelessReadyFirstPollNoPop(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
-	devs := []adb.Device{usbDev("a743e1df", "Xiaomi Pad 8 Pro", "192.168.31.162:5555")}
+	devs := []adb.Device{usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555")}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs) // 首轮：无插线事件（基线）→ 不弹
 	if a.Snapshot().NewDevice != nil {
@@ -100,7 +100,7 @@ func TestPopupProfiledUSBWirelessReadyFirstPollNoPop(t *testing.T) {
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "a743e1df" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0002" || np.ConnType != "usb" {
 		t.Fatalf("拔线再插应弹（USB）: %+v", np)
 	}
 }
@@ -109,9 +109,9 @@ func TestPopupProfiledUSBWirelessReadyFirstPollNoPop(t *testing.T) {
 func TestPopupProfiledUSBReplugPops(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Redmi K80": mkEntry("Redmi K80", "24117RK2CC", []string{"601c9f08"}, nil),
+		"Redmi K80": mkEntry("Redmi K80", "24117RK2CC", []string{"TEST0001"}, nil),
 	})
-	devs := []adb.Device{usbDev("601c9f08", "Redmi K80", "")}
+	devs := []adb.Device{usbDev("TEST0001", "Redmi K80", "")}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs)
 	if a.Snapshot().NewDevice != nil {
@@ -122,7 +122,7 @@ func TestPopupProfiledUSBReplugPops(t *testing.T) {
 	// 再插 = 新插线事件 → 弹
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0001" || np.ConnType != "usb" {
 		t.Fatalf("拔线再插应弹（USB）: %+v", np)
 	}
 }
@@ -132,10 +132,10 @@ func TestPopupProfiledUSBReplugPops(t *testing.T) {
 func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"601c9f08"}, []string{"192.168.31.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	// K80 USB+无线合并卡（线一直插着、无线也在线——v2 曾因"无线就绪未投屏"误弹）
-	devs := []adb.Device{usbDev("601c9f08", "REDMI K80", "192.168.31.197:5555")}
+	devs := []adb.Device{usbDev("TEST0001", "REDMI K80", "192.0.2.197:5555")}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs) // 启动基线：已插 → 不弹
 	if a.Snapshot().NewDevice != nil {
@@ -143,7 +143,7 @@ func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 	}
 
 	// 投屏中（事件驱动弹窗已取代快照 diff）
-	if err := a.StartCast("601c9f08"); err != nil {
+	if err := a.StartCast("TEST0001"); err != nil {
 		t.Fatal(err)
 	}
 	a.applyTrackUpdate(devs)
@@ -152,15 +152,15 @@ func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 	}
 
 	// 停止投屏：线仍插着（无拔插事件）→ 不弹
-	a.OnBatExit("601c9f08", 0)
+	a.OnBatExit("TEST0001", 0)
 	a.applyTrackUpdate(devs)
-	if np := a.Snapshot().NewDevice; np != nil && np.Serial == "601c9f08" {
+	if np := a.Snapshot().NewDevice; np != nil && np.Serial == "TEST0001" {
 		t.Fatalf("停止投屏后线仍插着不应弹（实况回归）: %+v", np)
 	}
 	// 结束态 GC 后（会话移除）：线仍插着 → 仍不弹（从未拔除）
-	a.ForgetSession("601c9f08")
+	a.ForgetSession("TEST0001")
 	a.applyTrackUpdate(devs)
-	if np := a.Snapshot().NewDevice; np != nil && np.Serial == "601c9f08" {
+	if np := a.Snapshot().NewDevice; np != nil && np.Serial == "TEST0001" {
 		t.Fatalf("会话移除后线仍插着也不应弹: %+v", np)
 	}
 
@@ -168,7 +168,7 @@ func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0001" || np.ConnType != "usb" {
 		t.Fatalf("拔掉再插应弹（USB）: %+v", np)
 	}
 }
@@ -177,16 +177,16 @@ func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 func TestPopupDismissReplugNewCycle(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Redmi K80": mkEntry("Redmi K80", "24117RK2CC", []string{"601c9f08"}, nil),
+		"Redmi K80": mkEntry("Redmi K80", "24117RK2CC", []string{"TEST0001"}, nil),
 	})
-	devs := []adb.Device{usbDev("601c9f08", "Redmi K80", "")}
+	devs := []adb.Device{usbDev("TEST0001", "Redmi K80", "")}
 	setDevices(a, devs)
 	a.applyTrackUpdate(nil)  // 基线（无设备）
 	a.applyTrackUpdate(devs) // 插线 → 弹
 	if a.Snapshot().NewDevice == nil {
 		t.Fatal("插线应弹")
 	}
-	a.DismissNewDevice("601c9f08")
+	a.DismissNewDevice("TEST0001")
 	a.applyTrackUpdate(devs)
 	if a.Snapshot().NewDevice != nil {
 		t.Fatal("暂不后同插线周期不应弹")
@@ -194,7 +194,7 @@ func TestPopupDismissReplugNewCycle(t *testing.T) {
 	// 拔线再插 → 新周期可弹
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
-	if np := a.Snapshot().NewDevice; np == nil || np.Serial != "601c9f08" {
+	if np := a.Snapshot().NewDevice; np == nil || np.Serial != "TEST0001" {
 		t.Fatalf("拔线再插应重新弹: %+v", np)
 	}
 }
@@ -203,29 +203,29 @@ func TestPopupDismissReplugNewCycle(t *testing.T) {
 func TestPopupCastingDeviceNeverPops(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"a743e1df"}, []string{"192.168.31.162:5555"}),
-		"Redmi K80":        mkEntry("Redmi K80", "24117RK2CC", []string{"601c9f08"}, nil),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"Redmi K80":        mkEntry("Redmi K80", "24117RK2CC", []string{"TEST0001"}, nil),
 	})
-	setDevices(a, []adb.Device{usbDev("a743e1df", "Xiaomi Pad 8 Pro", "192.168.31.162:5555")})
-	if err := a.StartCast("a743e1df"); err != nil {
+	setDevices(a, []adb.Device{usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555")})
+	if err := a.StartCast("TEST0002"); err != nil {
 		t.Fatal(err)
 	}
 	// 基线轮询：仅平板（已开会话）
-	a.applyTrackUpdate([]adb.Device{usbDev("a743e1df", "Xiaomi Pad 8 Pro", "192.168.31.162:5555")})
+	a.applyTrackUpdate([]adb.Device{usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555")})
 	// 平板投屏中：插 K80 USB → K80 弹（无会话），平板绝不弹
 	devs := []adb.Device{
-		usbDev("a743e1df", "Xiaomi Pad 8 Pro", "192.168.31.162:5555"),
-		usbDev("601c9f08", "Redmi K80", ""),
+		usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555"),
+		usbDev("TEST0001", "Redmi K80", ""),
 	}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs)
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "601c9f08" {
+	if np == nil || np.Serial != "TEST0001" {
 		t.Fatalf("应弹 K80（平板投屏中绝不弹）: %+v", np)
 	}
 	// K80 也开会话后：都不弹
-	a.DismissNewDevice("601c9f08")
-	if err := a.StartCast("601c9f08"); err != nil {
+	a.DismissNewDevice("TEST0001")
+	if err := a.StartCast("TEST0001"); err != nil {
 		t.Fatal(err)
 	}
 	a.applyTrackUpdate(devs)
@@ -253,21 +253,21 @@ func TestPollOnceProfiledUSBPlugPops(t *testing.T) {
 
 	a := New(Config{AdbPath: fake, ConfigPath: "", ProfilesPath: filepath.Join(dir, "profiles.json"), Version: "test"})
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"a743e1df"}, []string{"192.168.31.162:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 
 	// 轮询 1：已建档设备仅无线出现 → 不弹
-	os.Setenv("FAKE_DEV", "192.168.31.162:5555")
+	os.Setenv("FAKE_DEV", "192.0.2.162:5555")
 	defer os.Unsetenv("FAKE_DEV")
 	a.pollOnce(context.Background())
 	if a.Snapshot().NewDevice != nil {
 		t.Fatalf("已建档仅无线出现不应弹: %+v", a.Snapshot().NewDevice)
 	}
 	// 轮询 2：USB 插线（本轮新增 USB 条目）→ 弹（USB）
-	os.Setenv("FAKE_DEV", "a743e1df")
+	os.Setenv("FAKE_DEV", "TEST0002")
 	a.pollOnce(context.Background())
 	np := a.Snapshot().NewDevice
-	if np == nil || np.Serial != "a743e1df" || np.ConnType != "usb" {
+	if np == nil || np.Serial != "TEST0002" || np.ConnType != "usb" {
 		t.Fatalf("USB 插线应弹（USB）: %+v", np)
 	}
 }

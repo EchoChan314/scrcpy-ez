@@ -51,8 +51,8 @@ func seedPending(t *testing.T, a *App, svcs []discovery.MdnsService) PendingDevi
 
 func pairConnectSvcs() []discovery.MdnsService {
 	return []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:33895", Mode: discovery.MdnsModeTls},
-		{Type: "_adb-tls-pairing._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:37033", Mode: discovery.MdnsModePairing},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:33895", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-pairing._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:37033", Mode: discovery.MdnsModePairing},
 	}
 }
 
@@ -73,7 +73,7 @@ func TestPairConnectSuccessTlsArchive(t *testing.T) {
 		pairCalls = append(pairCalls, ip+":"+port)
 		pairCode = code
 		mu.Unlock()
-		return "Successfully paired to 192.168.31.99:37033 [guid=adb-a743e1df-Ab12Cd]", nil
+		return "Successfully paired to 192.0.2.99:37033 [guid=adb-TEST0002-Ab12Cd]", nil
 	}
 	a.pairOps.connectFn = func(ctx context.Context, addr string) (string, error) {
 		mu.Lock()
@@ -100,7 +100,7 @@ func TestPairConnectSuccessTlsArchive(t *testing.T) {
 
 	// pair 参数：配对端口自动从 _adb-tls-pairing 同 GUID 服务取
 	mu.Lock()
-	pairOK := len(pairCalls) == 1 && pairCalls[0] == "192.168.31.99:37033" && pairCode == "123456"
+	pairOK := len(pairCalls) == 1 && pairCalls[0] == "192.0.2.99:37033" && pairCode == "123456"
 	mu.Unlock()
 	if !pairOK {
 		t.Fatalf("pair 调用参数错误: %v code=%q", pairCalls, pairCode)
@@ -116,7 +116,7 @@ func TestPairConnectSuccessTlsArchive(t *testing.T) {
 	mu.Lock()
 	gotCalls := append([]string{}, connCalls...)
 	mu.Unlock()
-	if !contains(gotCalls, "192.168.31.99:33895") {
+	if !contains(gotCalls, "192.0.2.99:33895") {
 		t.Fatalf("正式 connect 应走 tls 端口: %v", gotCalls)
 	}
 	// 步骤：① 配对 ✓ ② 连接 ✓ ③ 完成 ✓
@@ -124,23 +124,23 @@ func TestPairConnectSuccessTlsArchive(t *testing.T) {
 		t.Fatalf("步骤状态错误: %+v", st.Steps)
 	}
 	if st.Device == nil || st.Device.Marketname != "Xiaomi Pad 8 Pro" ||
-		st.Device.Serial != "192.168.31.99:33895" || !st.Device.Tls || st.Device.WirelessForm != ModeTls {
+		st.Device.Serial != "192.0.2.99:33895" || !st.Device.Tls || st.Device.WirelessForm != ModeTls {
 		t.Fatalf("成功设备卡错误: %+v", st.Device)
 	}
 	// 档案 write-back：mode=tls + wireless=tls + serial + tlsGuid
 	waitFor(t, 2*time.Second, func() bool {
 		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
-		return ok && gui50Fix45EntryHasAddr(e, "192.168.31.99:33895", ModeTls)
+		return ok && gui50Fix45EntryHasAddr(e, "192.0.2.99:33895", ModeTls)
 	}, "TLS 应入档")
 	e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	if !ok || e.Wireless != ModeTls || e.TlsGuid != "adb-a743e1df-Ab12Cd" {
+	if !ok || e.Wireless != ModeTls || e.TlsGuid != "adb-TEST0002-Ab12Cd" {
 		t.Fatalf("档案形态未写回: %+v", e)
 	}
-	if !contains(e.Serials, "a743e1df") {
+	if !contains(e.Serials, "TEST0002") {
 		t.Fatalf("真 serial 未入档: %+v", e.Serials)
 	}
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.99:33895" && e.Addrs[i].State != AddrStateActive {
+		if e.Addrs[i].Addr == "192.0.2.99:33895" && e.Addrs[i].State != AddrStateActive {
 			t.Fatalf("配对返回 TLS 地址应 active: %+v", e.Addrs[i])
 		}
 	}
@@ -149,7 +149,7 @@ func TestPairConnectSuccessTlsArchive(t *testing.T) {
 		t.Fatalf("配对成功后待配对卡应移除: %+v", a.Snapshot().Pending)
 	}
 	// 形态标注可用（AddrMode 查询）
-	if a.profiles.AddrMode("192.168.31.99:33895") != ModeTls {
+	if a.profiles.AddrMode("192.0.2.99:33895") != ModeTls {
 		t.Fatal("AddrMode 应返回 tls")
 	}
 }
@@ -174,7 +174,7 @@ func TestPairConnectWrongCodeClassified(t *testing.T) {
 func TestPairConnectPairPortMissing(t *testing.T) {
 	a, _ := newWirelessApp()
 	p := seedPending(t, a, []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:33895", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:33895", Mode: discovery.MdnsModeTls},
 	})
 	called := false
 	a.pairOps.pairFn = func(ctx context.Context, ip, port, code string) (string, error) {
@@ -198,7 +198,7 @@ func TestPairConnectPairPortMissing(t *testing.T) {
 func TestPairConnectConnPortMissing(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.pairOps.mdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) { return nil, nil }
-	if err := a.PairConnect("", "192.168.31.9", "37033", "", "123456"); err != nil {
+	if err := a.PairConnect("", "192.0.2.9", "37033", "", "123456"); err != nil {
 		t.Fatal(err)
 	}
 	st := waitPairPhase(t, a, PairPhaseFailed)
@@ -289,7 +289,7 @@ func TestPairConnectInvalidCodeRejected(t *testing.T) {
 		called = true
 		return "", nil
 	}
-	if err := a.PairConnect("", "192.168.31.9", "37033", "41234", "12ab"); err != nil {
+	if err := a.PairConnect("", "192.0.2.9", "37033", "41234", "12ab"); err != nil {
 		t.Fatal(err)
 	}
 	st := waitPairPhase(t, a, PairPhaseFailed)
@@ -328,10 +328,10 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 	a, _ := newWirelessApp()
 	// 档案：serial + 档案 tls 地址 + 5555 地址（打 stale 后成为离线候选）
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.99:5555"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 	if !a.profiles.MarkAllAddrsStale("Xiaomi Pad 8 Pro") {
 		t.Fatal("MarkAllAddrsStale 应有改动")
 	}
@@ -342,13 +342,13 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 	gate := make(chan struct{})
 	var once sync.Once
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error {
-		if addr == "192.168.31.99:33895" {
+		if addr == "192.0.2.99:33895" {
 			<-gate
 		}
 		mu.Lock()
 		calls = append(calls, addr)
 		mu.Unlock()
-		if addr == "192.168.31.99:41234" {
+		if addr == "192.0.2.99:41234" {
 			once.Do(func() { close(gate) })
 		}
 		if strings.HasSuffix(addr, ":5555") {
@@ -358,8 +358,8 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 	}
 	a.disc.MdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
 		return []discovery.MdnsService{
-			{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:41234", Mode: discovery.MdnsModeTls},
-			{Type: "_adb._tcp", Name: "adb-a743e1df", Addr: "192.168.31.99:5555", Mode: discovery.MdnsModeTcpip},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:41234", Mode: discovery.MdnsModeTls},
+			{Type: "_adb._tcp", Name: "adb-TEST0002", Addr: "192.0.2.99:5555", Mode: discovery.MdnsModeTcpip},
 		}, nil
 	}
 
@@ -368,7 +368,7 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		st := a.Snapshot().Discovery
-		if st.Status == "found" && st.Found == "192.168.31.99:5555" {
+		if st.Status == "found" && st.Found == "192.0.2.99:5555" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -382,20 +382,20 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 		t.Fatalf("应尝试 3 个地址（tls 层：广播 41234 + 档案 33895；5555 层：广播 5555）: %v", calls)
 	}
 	// tls 层内：广播 41234 排前先试，健康档案 tls 33895 兜底其后
-	if calls[0] != "192.168.31.99:41234" {
+	if calls[0] != "192.0.2.99:41234" {
 		t.Fatalf("首个尝试应为 tls 广播地址: %v", calls)
 	}
-	if calls[1] != "192.168.31.99:33895" {
+	if calls[1] != "192.0.2.99:33895" {
 		t.Fatalf("tls 层内档案兜底地址应随后尝试: %v", calls)
 	}
 	// 层间串行：tls 层全败才回退 5555 层
-	if calls[2] != "192.168.31.99:5555" {
+	if calls[2] != "192.0.2.99:5555" {
 		t.Fatalf("5555 应最后回退: %v", calls)
 	}
 	// 回退成功：tls 广播地址不判失败（未配对/端口过期 ≠ 离线），fail 不变
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
 	for i := range e.Addrs {
-		if (e.Addrs[i].Addr == "192.168.31.99:33895" || e.Addrs[i].Addr == "192.168.31.99:41234") &&
+		if (e.Addrs[i].Addr == "192.0.2.99:33895" || e.Addrs[i].Addr == "192.0.2.99:41234") &&
 			e.Addrs[i].Fail != 0 {
 			t.Fatalf("回退成功时 tls 地址不应记失败: %+v", e.Addrs[i])
 		}
@@ -404,7 +404,7 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 	e, _ = a.profiles.Entry("Xiaomi Pad 8 Pro")
 	foundTls := false
 	for i := range e.Addrs {
-		if e.Addrs[i].Addr == "192.168.31.99:41234" && e.Addrs[i].Mode == ModeTls {
+		if e.Addrs[i].Addr == "192.0.2.99:41234" && e.Addrs[i].Mode == ModeTls {
 			foundTls = true
 		}
 	}
@@ -417,10 +417,10 @@ func TestRunDiscoveryTlsPriorityFallback(t *testing.T) {
 func TestRunDiscoveryAllFailMarksTls(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.99:5555"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 	// gui52：先翻 stale 才成为离线候选（active=在线证据不会触发探测）。
 	if !a.profiles.MarkAllAddrsStale("Xiaomi Pad 8 Pro") {
 		t.Fatal("MarkAllAddrsStale 应有改动")
@@ -459,27 +459,27 @@ func TestRunDiscoveryAllFailMarksTls(t *testing.T) {
 func TestStartCastInjectsTlsAddrFirst(t *testing.T) {
 	a, f := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.99:5555"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 	a.mu.Lock()
 	a.devices = []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.mu.Unlock()
 	startVerifyAlwaysOK(a)
 
-	if err := a.StartCast("192.168.31.99:5555"); err != nil {
+	if err := a.StartCast("192.0.2.99:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.99:33895" {
+	if p.Addr != "192.0.2.99:33895" {
 		t.Fatalf("SCEZ_ADDR 应注入 tls 地址: %+v", p)
 	}
 	s := a.Snapshot()
-	if !s.Cast.Tls || s.Cast.Serial != "192.168.31.99:5555" {
+	if !s.Cast.Tls || s.Cast.Serial != "192.0.2.99:5555" {
 		t.Fatalf("CastState.Tls 应为 true: %+v", s.Cast)
 	}
 }
@@ -488,22 +488,22 @@ func TestStartCastInjectsTlsAddrFirst(t *testing.T) {
 func TestStartCastTcpipAddrNoTlsFlag(t *testing.T) {
 	a, f := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.99:5555"},
 	})
 	a.mu.Lock()
 	a.devices = []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.mu.Unlock()
 	startVerifyAlwaysOK(a) // gui32 验证链：候选 5555 验证通过才选用
 
-	if err := a.StartCast("192.168.31.99:5555"); err != nil {
+	if err := a.StartCast("192.0.2.99:5555"); err != nil {
 		t.Fatal(err)
 	}
 	p := f.waitParams(t, 1)
-	if p.Addr != "192.168.31.99:5555" {
+	if p.Addr != "192.0.2.99:5555" {
 		t.Fatalf("无 tls 地址时应注入 5555: %+v", p)
 	}
 	if s := a.Snapshot(); s.Cast.Tls {
@@ -518,23 +518,23 @@ func TestStartCastTcpipAddrNoTlsFlag(t *testing.T) {
 func TestDecorateTlsAndBuildPending(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "a743e1df", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Wireless: "192.168.31.99:5555"},
+		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
+			Wireless: "192.0.2.99:5555"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
 	svcs := []discovery.MdnsService{
 		// 已知设备（serial 匹配）的 tls 服务（事件已写入档案 active）→ TLS 标识
-		{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-Ab12Cd", Addr: "192.168.31.99:33895", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.99:33895", Mode: discovery.MdnsModeTls},
 		// 未知设备 → 待配对卡（配对服务同 GUID）
-		{Type: "_adb-tls-connect._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.168.31.77:41234", Mode: discovery.MdnsModeTls},
-		{Type: "_adb-tls-pairing._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.168.31.77:37033", Mode: discovery.MdnsModePairing},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.0.2.77:41234", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-pairing._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.0.2.77:37033", Mode: discovery.MdnsModePairing},
 	}
 	a.mdnsMu.Lock()
 	a.mdns = svcs
 	a.mdnsMu.Unlock()
 
 	devs := []adb.Device{
-		{Serial: "192.168.31.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
+		{Serial: "192.0.2.99:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro",
 			Marketname: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.decorateTls(devs)
@@ -546,14 +546,14 @@ func TestDecorateTlsAndBuildPending(t *testing.T) {
 	if len(pend) != 1 {
 		t.Fatalf("应只有 1 张待配对卡（已知设备跳过）: %+v", pend)
 	}
-	if pend[0].Key != "192.168.31.77:41234" || pend[0].Name != "R58T00WA0YM" ||
-		pend[0].IP != "192.168.31.77" || pend[0].PairPort != "37033" ||
+	if pend[0].Key != "192.0.2.77:41234" || pend[0].Name != "R58T00WA0YM" ||
+		pend[0].IP != "192.0.2.77" || pend[0].PairPort != "37033" ||
 		pend[0].Serial != "R58T00WA0YM" {
 		t.Fatalf("待配对卡字段错误: %+v", pend[0])
 	}
 	// 已在线（tls addr）→ 不建待配对卡
 	devs2 := []adb.Device{
-		{Serial: "192.168.31.77:41234", State: "device", ConnType: "wifi"},
+		{Serial: "192.0.2.77:41234", State: "device", ConnType: "wifi"},
 	}
 	a.buildPending(devs2)
 	if len(a.Snapshot().Pending) != 0 {
@@ -564,10 +564,10 @@ func TestDecorateTlsAndBuildPending(t *testing.T) {
 // 配对成功后 tlsGuid 入档 → 换端口重播同一 guid 不再出待配对卡（端口变化场景）。
 func TestBuildPendingSkipsKnownTlsGuid(t *testing.T) {
 	a, _ := newWirelessApp()
-	a.profiles.PairArchive("", "R58T00WA0YM", "192.168.31.77:41234",
+	a.profiles.PairArchive("", "R58T00WA0YM", "192.0.2.77:41234",
 		"adb-R58T00WA0YM-Xy9zQ2", "", "")
 	svcs := []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.168.31.77:55534", Mode: discovery.MdnsModeTls},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.0.2.77:55534", Mode: discovery.MdnsModeTls},
 	}
 	a.mdnsMu.Lock()
 	a.mdns = svcs

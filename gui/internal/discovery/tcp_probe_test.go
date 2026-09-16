@@ -43,16 +43,16 @@ func TestTcpProbeFnInjection(t *testing.T) {
 	called := false
 	c.TcpProbeFn = func(ctx context.Context, addr string) bool {
 		called = true
-		return addr == "192.168.31.1:5555"
+		return addr == "192.0.2.1:5555"
 	}
-	if !c.TcpProbe(context.Background(), "192.168.31.1:5555") {
+	if !c.TcpProbe(context.Background(), "192.0.2.1:5555") {
 		t.Fatal("注入函数应直接返回 true")
 	}
 	if !called {
 		t.Fatal("注入函数应被调用")
 	}
 	c.TcpProbeFn = func(ctx context.Context, addr string) bool { return false }
-	if c.TcpProbe(context.Background(), "192.168.31.1:5555") {
+	if c.TcpProbe(context.Background(), "192.0.2.1:5555") {
 		t.Fatal("注入函数应直接返回 false")
 	}
 }
@@ -62,7 +62,7 @@ func TestTcpProbeCanceledContext(t *testing.T) {
 	c := New("")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if c.TcpProbe(ctx, "192.168.31.1:5555") {
+	if c.TcpProbe(ctx, "192.0.2.1:5555") {
 		t.Fatal("已取消 ctx 应返回 false")
 	}
 }

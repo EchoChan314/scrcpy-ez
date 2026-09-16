@@ -28,33 +28,33 @@ function eq(name, got, want) {
 // --- 双设备两会话：各卡绑各自会话（不串） ---
 (function () {
   const castMap = M.activeSessionMap([
-    { serial: '601c9f08', active: true, identity: 'REDMI K80' },
-    { serial: 'a743e1df', active: true, identity: 'Xiaomi Pad 8 Pro' },
+    { serial: 'TEST0001', active: true, identity: 'REDMI K80' },
+    { serial: 'TEST0002', active: true, identity: 'Xiaomi Pad 8 Pro' },
   ]);
-  const k80 = M.matchSession({ serial: '601c9f08', identity: 'REDMI K80' }, castMap);
-  const pad = M.matchSession({ serial: 'a743e1df', identity: 'Xiaomi Pad 8 Pro' }, castMap);
-  ok('K80 卡绑 K80 会话', k80 && k80.serial === '601c9f08');
-  ok('平板卡绑平板会话', pad && pad.serial === 'a743e1df');
+  const k80 = M.matchSession({ serial: 'TEST0001', identity: 'REDMI K80' }, castMap);
+  const pad = M.matchSession({ serial: 'TEST0002', identity: 'Xiaomi Pad 8 Pro' }, castMap);
+  ok('K80 卡绑 K80 会话', k80 && k80.serial === 'TEST0001');
+  ok('平板卡绑平板会话', pad && pad.serial === 'TEST0002');
   ok('两卡不串会话', k80 !== pad);
 })();
 
 // --- 同身份双键：会话键=无线地址、卡 serial=USB（卡片重键），仍命中唯一会话 ---
 (function () {
   const castMap = M.activeSessionMap([
-    { serial: '192.168.31.197:5555', active: true, identity: 'REDMI K80' },
+    { serial: '192.0.2.1:5555', active: true, identity: 'REDMI K80' },
   ]);
-  const byWireless = M.matchSession({ serial: '601c9f08', wireless: '192.168.31.197:5555', identity: '' }, castMap);
-  ok('同身份双键经 wireless 命中', byWireless && byWireless.serial === '192.168.31.197:5555');
-  const byIdentity = M.matchSession({ serial: '601c9f08', wireless: '', identity: 'REDMI K80' }, castMap);
-  ok('同身份双键经 identity 命中', byIdentity && byIdentity.serial === '192.168.31.197:5555');
+  const byWireless = M.matchSession({ serial: 'TEST0001', wireless: '192.0.2.1:5555', identity: '' }, castMap);
+  ok('同身份双键经 wireless 命中', byWireless && byWireless.serial === '192.0.2.1:5555');
+  const byIdentity = M.matchSession({ serial: 'TEST0001', wireless: '', identity: 'REDMI K80' }, castMap);
+  ok('同身份双键经 identity 命中', byIdentity && byIdentity.serial === '192.0.2.1:5555');
 })();
 
 // --- identity 空安全：卡片 identity 读不到 → 不误配（显示为无会话） ---
 (function () {
   const castMap = M.activeSessionMap([
-    { serial: 'a743e1df', active: true, identity: 'Xiaomi Pad 8 Pro' },
+    { serial: 'TEST0002', active: true, identity: 'Xiaomi Pad 8 Pro' },
   ]);
-  const hit = M.matchSession({ serial: '601c9f08', wireless: '', identity: '' }, castMap);
+  const hit = M.matchSession({ serial: 'TEST0001', wireless: '', identity: '' }, castMap);
   ok('identity 空不误配', hit === null);
   // 会话 identity 空 + 卡 identity 非空：也不配（后端不变量=会话必有档案身份）
   const castMap2 = M.activeSessionMap([{ serial: 'x', active: true, identity: '' }]);

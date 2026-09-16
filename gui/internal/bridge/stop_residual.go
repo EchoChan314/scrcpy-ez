@@ -54,7 +54,7 @@ func parseScrcpyProcs(output string) []scrcpyProc {
 
 // scrcpyCmdlineMatches 判定 scrcpy 命令行是否属于本会话：命令行含
 // "--serial <serial>"（bat 启动 scrcpy 的固定参数形式，serial 后必须是空格或
-// 行尾——防前缀误匹配，如本会话 "601c9f08" 不得命中别台 "--serial 601c9f081"）。
+// 行尾——防前缀误匹配，如本会话 "TEST0001" 不得命中别台 "--serial TEST00011"）。
 // serial 为本会话的候选目标（会话键 serial / SCEZ_SERIAL / SCEZ_ADDR 并集，
 // 均属同一设备身份）。
 func scrcpyCmdlineMatches(cmdline string, serials []string) bool {

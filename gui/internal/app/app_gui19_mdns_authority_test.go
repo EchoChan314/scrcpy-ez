@@ -44,13 +44,13 @@ func seedGui19TabletArchive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
 	for i := 0; i < 28; i++ {
-		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.168.31.183:5555")
+		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.183:5555")
 	}
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
 	for i := 0; i < 3; i++ {
-		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.168.31.162:5555")
+		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.162:5555")
 	}
 }
 
@@ -60,7 +60,7 @@ func gui19TabletCands() map[string][]AddrEntry {
 	// gui41 单记忆：旧 183 已退役，档案只剩 162 一条（每形态一条）。
 	return map[string][]AddrEntry{
 		"Xiaomi Pad 8 Pro": {
-			{Addr: "192.168.31.162:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 3, LastOk: 200},
+			{Addr: "192.0.2.162:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 3, LastOk: 200},
 		},
 	}
 }
@@ -68,7 +68,7 @@ func gui19TabletCands() map[string][]AddrEntry {
 // gui19TabletMdns 平板当前广播：经典 _adb._tcp 162:5555（183→162 跳变后的当前地址）。
 func gui19TabletMdns() []discovery.MdnsService {
 	return []discovery.MdnsService{
-		{Type: "_adb._tcp", Name: "adb-T7000PAD", Addr: "192.168.31.162:5555", Mode: discovery.MdnsModeTcpip},
+		{Type: "_adb._tcp", Name: "adb-T7000PAD", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	}
 }
 
@@ -86,7 +86,7 @@ func TestGui19MdnsBroadcastAuthoritative(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, addr)
 		mu.Unlock()
-		if addr == "192.168.31.162:5555" {
+		if addr == "192.0.2.162:5555" {
 			return nil
 		}
 		return context.DeadlineExceeded
@@ -98,24 +98,24 @@ func TestGui19MdnsBroadcastAuthoritative(t *testing.T) {
 	a.runDiscovery(context.Background(), gui19TabletCands())
 
 	st := waitDiscStatus(t, a, "found")
-	if st.Found != "192.168.31.162:5555" {
+	if st.Found != "192.0.2.162:5555" {
 		t.Fatalf("应找到广播地址 162: %+v", st)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	// 核心断言：tiers 只含 162——183(fail28) 被 gui15 健康过滤剔除，不参与兜底
-	if len(calls) != 1 || calls[0] != "192.168.31.162:5555" {
+	if len(calls) != 1 || calls[0] != "192.0.2.162:5555" {
 		t.Fatalf("应只尝试广播地址 162: %v", calls)
 	}
-	if addrIn(st.Tried, "192.168.31.183:5555") {
+	if addrIn(st.Tried, "192.0.2.183:5555") {
 		t.Fatalf("Tried 不应含档案死地址 183: %+v", st)
 	}
 	// 档案：gui41 单记忆下 183 已彻底退役；162 成功复位 active+fail=0
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	if gui24FindAddr(e, "192.168.31.183:5555") != nil {
+	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 应已按单记忆删除: %+v", e.Addrs)
 	}
-	a162 := gui24FindAddr(e, "192.168.31.162:5555")
+	a162 := gui24FindAddr(e, "192.0.2.162:5555")
 	if a162 == nil || a162.Fail != 0 || a162.State != AddrStateActive {
 		t.Fatalf("162 成功应复位 active+fail=0: %+v", e.Addrs)
 	}
@@ -131,9 +131,9 @@ func TestGui19NoBroadcastArchiveFallback(t *testing.T) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.183:5555", ModeTcpip)
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.168.31.162:5555", ModeTcpip)
-	if !a.profiles.MarkAddrStale("Xiaomi Pad 8 Pro", "192.168.31.162:5555") {
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	if !a.profiles.MarkAddrStale("Xiaomi Pad 8 Pro", "192.0.2.162:5555") {
 		t.Fatal("MarkAddrStale 应有改动")
 	}
 
@@ -143,7 +143,7 @@ func TestGui19NoBroadcastArchiveFallback(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, addr)
 		mu.Unlock()
-		if addr == "192.168.31.162:5555" {
+		if addr == "192.0.2.162:5555" {
 			return nil
 		}
 		return context.DeadlineExceeded
@@ -155,20 +155,20 @@ func TestGui19NoBroadcastArchiveFallback(t *testing.T) {
 	a.runDiscovery(context.Background(), a.profiles.OfflineCandidateAddrs(nil))
 
 	st := waitDiscStatus(t, a, "found")
-	if st.Found != "192.168.31.162:5555" {
+	if st.Found != "192.0.2.162:5555" {
 		t.Fatalf("stale 档案兜底应找到 162: %+v", st)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(calls) != 1 || calls[0] != "192.168.31.162:5555" {
+	if len(calls) != 1 || calls[0] != "192.0.2.162:5555" {
 		t.Fatalf("无广播时档案兜底应只试 stale 162: %v", calls)
 	}
 	// 探测成功 → 162 翻回 active；183 已被单记忆删除
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	if gui24FindAddr(e, "192.168.31.183:5555") != nil {
+	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 应已被单记忆删除: %+v", e.Addrs)
 	}
-	a162 := gui24FindAddr(e, "192.168.31.162:5555")
+	a162 := gui24FindAddr(e, "192.0.2.162:5555")
 	if a162 == nil || a162.State != AddrStateActive {
 		t.Fatalf("探测成功应翻回 active: %+v", e.Addrs)
 	}
@@ -201,18 +201,18 @@ func TestGui23BroadcastFailNoHealthyArchiveNotfound(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	// 只试广播 162：档案 183(fail28)/162(fail3) 均被健康过滤剔除，无兜底地址
-	if len(calls) != 1 || calls[0] != "192.168.31.162:5555" {
+	if len(calls) != 1 || calls[0] != "192.0.2.162:5555" {
 		t.Fatalf("广播失败时应只试 162、不试档案 183: %v", calls)
 	}
-	if addrIn(st.Tried, "192.168.31.183:5555") {
+	if addrIn(st.Tried, "192.0.2.183:5555") {
 		t.Fatalf("Tried 不应含档案死地址 183: %+v", st)
 	}
 	// fail 记到广播地址：162 fail++（3→4）；183 已按单记忆删除
 	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
-	if gui24FindAddr(e, "192.168.31.183:5555") != nil {
+	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 应已删除: %+v", e.Addrs)
 	}
-	a162 := gui24FindAddr(e, "192.168.31.162:5555")
+	a162 := gui24FindAddr(e, "192.0.2.162:5555")
 	if a162 == nil || a162.Fail != 4 {
 		t.Fatalf("广播失败 fail++ 应记到 162（3→4）: %+v", e.Addrs)
 	}

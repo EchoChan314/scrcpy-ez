@@ -30,24 +30,24 @@ func TestGui47FixPlugFirstSeenOfflineShields(t *testing.T) {
 	gui31K80Profiles(a)
 
 	a.applyTrackUpdate([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "REDMI K80"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "REDMI K80"},
 	})
 	out := a.Snapshot().Devices
 	if len(out) != 1 {
 		t.Fatalf("插线首见应合成 1 张 USB 连接中卡: %+v", out)
 	}
 	d := out[0]
-	if d.Serial != "601c9f08" || d.State != "device" || d.ConnType != "usb" ||
+	if d.Serial != "TEST0001" || d.State != "device" || d.ConnType != "usb" ||
 		d.Name != "REDMI K80" || d.Identity != "REDMI K80" || !d.Connecting {
 		t.Fatalf("合成卡形态错误: %+v", d)
 	}
 
 	// 已有离线卡进 devs 也应让位（不出现离线卡）
 	a.applyTrackUpdate([]adb.Device{{
-		Serial: "192.168.31.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80",
+		Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80",
 	}})
 	out = a.Snapshot().Devices
-	if len(out) != 1 || !out[0].Connecting || out[0].Serial != "601c9f08" {
+	if len(out) != 1 || !out[0].Connecting || out[0].Serial != "TEST0001" {
 		t.Fatalf("离线卡应让位给 USB 连接中卡: %+v", out)
 	}
 }
@@ -59,7 +59,7 @@ func TestGui47FixPlugAdbdRestartKeepsShield(t *testing.T) {
 	gui31K80Profiles(a)
 
 	a.applyTrackUpdate([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb"},
 	})
 	// adbd 重启窗口：设备从列表干净消失
 	a.applyTrackUpdate(nil)
@@ -70,10 +70,10 @@ func TestGui47FixPlugAdbdRestartKeepsShield(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("应 1 张遮罩卡: %+v", out)
 	}
-	if out[0].Serial != "601c9f08" || !out[0].Connecting || out[0].State != "device" {
+	if out[0].Serial != "TEST0001" || !out[0].Connecting || out[0].State != "device" {
 		t.Fatalf("遮罩卡应维持 USB 连接中: %+v", out)
 	}
-	if gui34Find(out, "192.168.31.197:5555") != nil && out[0].Serial == "192.168.31.197:5555" {
+	if gui34Find(out, "192.0.2.197:5555") != nil && out[0].Serial == "192.0.2.197:5555" {
 		t.Fatalf("离线卡不应独立保留: %+v", out)
 	}
 }
@@ -85,9 +85,9 @@ func TestGui47FixPlugUsbDeviceEnds(t *testing.T) {
 	gui49fix6FastStable(t)
 
 	a.applyTrackUpdate([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb"},
 	})
-	real := adb.Device{Serial: "601c9f08", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
+	real := adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{real})
 	gui49fix6WaitPlugClear(t, a) // USB 连续 device 满稳定窗口 → 清遮罩
 	waitForMdns(t, "真实 USB 卡应原样接管", func() bool {
@@ -105,9 +105,9 @@ func TestGui47FixPlugWifiUnplugEnds(t *testing.T) {
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error { return nil } // 10s 兜底 connect 成功
 
 	a.applyTrackUpdate([]adb.Device{
-		{Serial: "601c9f08", State: "offline", ConnType: "usb"},
+		{Serial: "TEST0001", State: "offline", ConnType: "usb"},
 	})
-	wifi := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	wifi := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{wifi})
 	if !teachfix3PlugActive(a) {
 		t.Fatal("在线无线卡 + 无 USB 不得清遮罩（终点二已删除；可能只是 adbd 重启窗口）")
@@ -145,7 +145,7 @@ func TestGui47FixPlugTimeoutFallsBack(t *testing.T) {
 	gui31K80Profiles(a)
 	gui47fixPlug(a, "REDMI K80", time.Now().Add(-(plugShieldTimeout + time.Second)))
 
-	offline := adb.Device{Serial: "601c9f08", State: "offline", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
+	offline := adb.Device{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{offline})
 	out := a.Snapshot().Devices
 	// gui49-fix5：USB 条目在列的 offline 瞬态渲染为「连接中…」，不显示离线。
@@ -163,8 +163,8 @@ func TestGui47FixPlugWifiMergedIntoShield(t *testing.T) {
 	a, _ := newTestApp()
 	gui31K80Profiles(a)
 
-	usbNotReady := adb.Device{Serial: "601c9f08", State: "unauthorized", ConnType: "usb", Name: "REDMI K80"}
-	wifi := adb.Device{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
+	usbNotReady := adb.Device{Serial: "TEST0001", State: "unauthorized", ConnType: "usb", Name: "REDMI K80"}
+	wifi := adb.Device{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"}
 	a.applyTrackUpdate([]adb.Device{usbNotReady, wifi})
 	if _, ok := a.plugging["REDMI K80"]; !ok {
 		t.Fatal("有 USB 条目时在线无线卡不应结束插线状态")
@@ -174,10 +174,10 @@ func TestGui47FixPlugWifiMergedIntoShield(t *testing.T) {
 		t.Fatalf("应 1 张遮罩卡（无线并入副行）: %+v", out)
 	}
 	d := out[0]
-	if d.Serial != "601c9f08" || d.ConnType != "usb" || !d.Connecting || d.Wireless != "192.168.31.197:5555" {
+	if d.Serial != "TEST0001" || d.ConnType != "usb" || !d.Connecting || d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("遮罩卡应含无线副行: %+v", d)
 	}
-	if gui34Find(out, "192.168.31.197:5555") != nil {
+	if gui34Find(out, "192.0.2.197:5555") != nil {
 		t.Fatalf("无线卡不应独立成卡: %+v", out)
 	}
 }

@@ -29,7 +29,7 @@ func TestGui52Fix10PairArchiveUsesMdnsAuthorityPort(t *testing.T) {
 	// mdns 权威：设备实际广播 35195（配对界面/pair 返回的 33895 已过时）
 	a.pairOps.mdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
 		return []discovery.MdnsService{
-			{Type: "_adb-tls-connect._tcp", Name: "adb-a743e1df-newport", Addr: "192.168.1.2:35195", Mode: discovery.MdnsModeTls},
+			{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-newport", Addr: "192.168.1.2:35195", Mode: discovery.MdnsModeTls},
 		}, nil
 	}
 	a.pairOps.tcpipFn = func(ctx context.Context, serial, port string) error { return nil }
@@ -52,7 +52,7 @@ func TestGui52Fix10PairArchiveUsesMdnsAuthorityPort(t *testing.T) {
 	if gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls) {
 		t.Fatalf("过时的 pair 返回端口不应入档: %+v", e.Addrs)
 	}
-	if !contains(e.Serials, "a743e1df") {
+	if !contains(e.Serials, "TEST0002") {
 		t.Fatalf("权威服务名应解析短号: %+v", e.Serials)
 	}
 	if e.TlsGuid == "" {
@@ -93,7 +93,7 @@ func TestGui52Fix10NoMdnsServiceFallbackPairPort(t *testing.T) {
 	if !ok {
 		t.Fatal("配对应建档")
 	}
-	if !contains(e.Serials, "a743e1df") {
+	if !contains(e.Serials, "TEST0002") {
 		t.Fatalf("应仍解析短号: %+v", e.Serials)
 	}
 }

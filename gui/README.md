@@ -22,7 +22,7 @@ gui/
 │   ├── build_win.sh       # Windows exe 构建（WSL 互操作 + msys64 工具链）
 │   ├── test_linux.sh      # WSL 单元测试
 │   └── make_icon.py
-└── dist/                  # 构建产物（scrcpy-ez-gui.exe + WebView2Loader.dll）
+└── dist/                  # 构建产物（scrcpy-ez-gui.exe；单文件即可运行）
 ```
 
 ## 构建
@@ -41,12 +41,13 @@ bash scripts/build_win.sh
 > 首次构建还会把模块缓存等配置写入 `C:\Users\<user>\AppData\Roaming\go\env`
 > 与 `toolchain/win/`（缓存目录），属构建工具链的正常占用。
 
-产出 `dist/scrcpy-ez-gui.exe`（需与 `dist/WebView2Loader.dll` 同目录运行；
-Win10/11 自带 WebView2 Runtime，win7 需另装）。
+产出 `dist/scrcpy-ez-gui.exe`（单文件即可运行）。界面依赖系统 WebView2 Runtime——
+Win11 内置、Win10 多数已随系统更新安装，缺失时可从微软官网安装 Evergreen 版；
+无需附带 WebView2Loader.dll（webview 库内置 Loader 实现，直接从 WebView2 Runtime 加载）。
 
 ## 配置（开发期常量 + 环境变量覆盖）
 
-- `SCEZ_BAT_PATH`：bat 路径，默认 `D:\Hermes save\yinmo\scrcpy\build\dist\投屏启动.bat`
+- `SCEZ_BAT_PATH`：bat 路径（默认取软件目录下的 `投屏支持.bat`，可用环境变量覆盖）
 - `SCEZ_ADB_PATH`：adb.exe 路径，默认 bat 同目录 `adb.exe`
 
 ## 桥接要点
@@ -71,5 +72,5 @@ Win10/11 自带 WebView2 Runtime，win7 需另装）。
 
 - StartCast 传目标设备（bat 支持 `%*` 透传或壳内选路参数）
 - 设置页（开机自启 HKCU Run、日志导出、bat 路径可配置化）
-- WebView2Loader 静态链接或嵌入、单 exe 发行
+- ~~WebView2Loader 静态链接或嵌入、单 exe 发行~~（已完成：webview 库内置 Loader，无需外置 DLL）
 - Inno Setup 安装器（壳稳定后配套）
