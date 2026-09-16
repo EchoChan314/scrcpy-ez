@@ -121,7 +121,7 @@ While mirroring, a persistent "scrcpy-ez is mirroring" notification appears on t
 
 | Version | Features |
 |---|---|
-| **v2.1.0** | Device-side "Now mirroring" notification (tap to stop mirroring); lower resource usage; Settings panel (on-screen controls toggle, minimize to tray on close) |
+| **v2.1.0** | Device-side "Now mirroring" notification (tap to stop mirroring); lower resource usage; new "Settings" panel: adjust default on-screen controls visibility; minimize to tray on window close (mirroring keeps running) |
 | **v2.0** | New GUI: device cards, multi-device parallel mirroring, batch management, wireless QR/pairing-code pairing, independent wired/wireless specs, TLS indicator |
 | **v1.0.1** | Ctrl+T always-on-top toggle, glowing indicator on the left of overlay controls (orange when pinned / grey when not; hold Alt and click it to toggle) |
 | **v1.0** | Initial release: keyboard friendly (UHID), image clipboard (PR #6676 + Ctrl+G to gallery), responsive mirroring (adaptive ABR), TSF input method, legacy device support, mirroring loop + USB/WiFi auto-switch |
