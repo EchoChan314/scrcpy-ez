@@ -121,6 +121,7 @@ While mirroring, a persistent "scrcpy-ez is mirroring" notification appears on t
 
 | Version | Features |
 |---|---|
+| **v2.2.1** | In-app updates with automatic GitHub / Gitee source selection, resumable downloads, restart installation and rollback; improved USB learning, wireless address synchronization, app-list refresh and UI layout |
 | **v2.2.0** | New "App windows": run a single phone app in its own desktop window (multi-open / window-follow / UI density / per-app settings memory); selectable A/V codecs — H.264/H.265/AV1/VP8/VP9 × Opus/AAC/FLAC/RAW; fixed pairing/startup "operation failed" caused by old adb servers |
 | **v2.1.0** | Device-side "Now mirroring" notification (tap to stop mirroring); lower resource usage; new "Settings" panel: adjust default on-screen controls visibility; minimize to tray on window close (mirroring keeps running) |
 | **v2.0** | New GUI: device cards, multi-device parallel mirroring, batch management, wireless QR/pairing-code pairing, independent wired/wireless specs, TLS indicator |
