@@ -7,4 +7,4 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/dist"
 
-cmd.exe /c "D:\\dsh_work\\gui\\scripts\\build_win.cmd"
+cmd.exe /c "$(wslpath -w "$ROOT/scripts/build_win.cmd")"
