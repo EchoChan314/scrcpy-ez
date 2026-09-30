@@ -121,7 +121,8 @@ func TestGui48Mdns8GoodbyeProbeSuccessActiveAndLog(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Goodbye 应发起 TCP 探测")
 	}
-	mdns8LogContains(t, logPath, "[app] mdns Goodbye（TCP 探测通，active）：REDMI K80/"+addr)
+	// gui55：探测通后先验身（直读设备序列号比对档案）才写 active。
+	mdns8LogContains(t, logPath, "mdns Goodbye 探测：REDMI K80/"+addr+" 验身通过")
 }
 
 // Goodbye 探测不通 → 打 stale（原降级语义保留）。
@@ -284,7 +285,7 @@ func TestGui48Mdns8InterleavedProbeLastWins(t *testing.T) {
 func TestGui48Mdns8ProfileOfflineCardIdentityHave(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := a.appendProfileOfflineCards([]adb.Device{
 		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"},

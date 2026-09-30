@@ -51,7 +51,7 @@ func gui47Setup(t *testing.T, addrs ...string) (*App, *int, *string) {
 	a, _ := newTestApp()
 	if len(addrs) > 0 {
 		seedProfiles(a, map[string]*DeviceEntry{
-			"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, addrs),
+			"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, addrs),
 		})
 	}
 	connects := 0

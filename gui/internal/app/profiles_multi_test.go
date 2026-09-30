@@ -96,7 +96,7 @@ func TestSyncDevicesMergeByMarketname(t *testing.T) {
 	// 第一次轮询：仅无线在线（marketname 已知）
 	changed := s.SyncDevices([]adb.Device{
 		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "25091RP04C"},
+			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789"},
 	})
 	if !changed {
 		t.Fatal("归并应有改动")
@@ -120,7 +120,7 @@ func TestSyncDevicesMergeByMarketname(t *testing.T) {
 	// 第二次轮询：USB 在线（同 marketname）→ 归并进同一档案（不分裂）
 	changed = s.SyncDevices([]adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb",
-			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "25091RP04C",
+			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789",
 			Wireless: "192.0.2.162:5555"},
 	})
 	if !changed {
@@ -378,7 +378,7 @@ func TestProfileStorePersistedShape(t *testing.T) {
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Model: "25091RP04C", Wireless: "192.0.2.162:5555"},
+			Model: "MODEL789", Wireless: "192.0.2.162:5555"},
 	})
 	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.163:5555")
 
@@ -389,7 +389,7 @@ func TestProfileStorePersistedShape(t *testing.T) {
 	raw := string(b)
 	if !strings.Contains(raw, `"devices"`) ||
 		!strings.Contains(raw, `"marketname": "Xiaomi Pad 8 Pro"`) ||
-		!strings.Contains(raw, `"model": "25091RP04C"`) ||
+		!strings.Contains(raw, `"model": "MODEL789"`) ||
 		!strings.Contains(raw, `"TEST0002"`) ||
 		!strings.Contains(raw, `"state": "active"`) ||
 		!strings.Contains(raw, `"state": "stale"`) ||
@@ -418,7 +418,7 @@ func TestSyncDevicesKeepsExistingEntryOnUnknownWifiSerial(t *testing.T) {
 	s.mu.Lock()
 	s.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "25091RP04C",
+		Model:      "MODEL789",
 		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{{
 			Addr: "192.0.2.162:5555", State: AddrStateHistory, Fail: 3, LastOk: 1750000000,
@@ -430,7 +430,7 @@ func TestSyncDevicesKeepsExistingEntryOnUnknownWifiSerial(t *testing.T) {
 	// 无线设备换 IP 上线（新 IP 不在档案）：按新 IP 解析失败 → else 分支
 	changed := s.SyncDevices([]adb.Device{
 		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "25091RP04C"},
+			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789"},
 	})
 	if !changed {
 		t.Fatal("新地址入档应有改动")

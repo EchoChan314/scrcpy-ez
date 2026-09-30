@@ -12,7 +12,7 @@ func mdns10Seed(a *App, native string, usb, wifi ModeProfile) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Model:      "24117RK2CC",
+			Model:      "MODEL123",
 			Serials:    []string{"TEST0001"},
 			Res:        native,
 			Addrs: []AddrEntry{
@@ -31,7 +31,7 @@ func mdns10Commit(t *testing.T, a *App, devs []adb.Device) []adb.Device {
 }
 
 // 用例 1：档案补齐卡（设备流无）→ 无线规格 = 档案 wifi 默认档
-// （1920 → 按原生宽高比 2560x1708 换算为 1920x1281，fps 60）。
+// （1920 → 按原生宽高比 2560x1708 换算为 1920x1280，fps 60）。
 func TestGui48Mdns10FallbackCardWifiDefaultSpec(t *testing.T) {
 	a, _ := newWirelessApp()
 	p := DefaultProfile()
@@ -45,8 +45,8 @@ func TestGui48Mdns10FallbackCardWifiDefaultSpec(t *testing.T) {
 	if d.State != "device" || d.ConnType != "wifi" {
 		t.Fatalf("补齐卡应为无线状态: %+v", d)
 	}
-	if d.WirelessRes != "1920x1281" || d.FPS != 60 {
-		t.Fatalf("无线规格应为档案 wifi 默认档 1920x1281@60: %+v", d)
+	if d.WirelessRes != "1920x1280" || d.FPS != 60 {
+		t.Fatalf("无线规格应为档案 wifi 默认档 1920x1280@60: %+v", d)
 	}
 	if d.Serial != "192.0.2.197:45005" || d.WirelessIP != "192.0.2.197:45005" {
 		t.Fatalf("补齐卡 IP 应为档案 active TLS 优先: %+v", d)
@@ -116,8 +116,8 @@ func TestGui48Mdns10UsbCardCustomSpec(t *testing.T) {
 		t.Fatalf("应一张有线卡: %+v", out)
 	}
 	d := out[0]
-	if d.Res != "1080x607" || d.FPS != 90 {
-		t.Fatalf("USB 副行规格应为自定义档 1080x607@90: %+v", d)
+	if d.Res != "1080x606" || d.FPS != 90 {
+		t.Fatalf("USB 副行规格应为自定义档 1080x606@90: %+v", d)
 	}
 	if d.Serial != "TEST0001" {
 		t.Fatalf("USB 序列号应保留: %+v", d)
@@ -139,8 +139,8 @@ func TestGui48Mdns10OnlineCardProfileSpecWins(t *testing.T) {
 		t.Fatalf("应一张在线无线卡: %+v", out)
 	}
 	d := out[0]
-	// adb 富化值 1920x1080@120 应被档案默认档 1920x1281@60 覆盖（档案权威）。
-	if d.WirelessRes != "1920x1281" || d.FPS != 60 {
+	// adb 富化值 1920x1080@120 应被档案默认档 1920x1280@60 覆盖（档案权威）。
+	if d.WirelessRes != "1920x1280" || d.FPS != 60 {
 		t.Fatalf("在线卡规格应与档案 wifi 档一致: %+v", d)
 	}
 }
@@ -168,10 +168,10 @@ func TestGui48Mdns10OfflineCardNoSpecNoError(t *testing.T) {
 
 // mdns10ProfileRes 纯函数：宽高比换算 + 16:9 兜底。
 func TestGui48Mdns10ProfileRes(t *testing.T) {
-	if got := mdns10ProfileRes("2560x1708", 1920); got != "1920x1281" {
+	if got := mdns10ProfileRes("2560x1708", 1920); got != "1920x1280" {
 		t.Fatalf("2560x1708 @1920 = %q", got)
 	}
-	if got := mdns10ProfileRes("2560x1440", 1080); got != "1080x607" {
+	if got := mdns10ProfileRes("2560x1440", 1080); got != "1080x606" {
 		t.Fatalf("2560x1440 @1080 = %q", got)
 	}
 	if got := mdns10ProfileRes("", 1920); got != "1920x1080" {

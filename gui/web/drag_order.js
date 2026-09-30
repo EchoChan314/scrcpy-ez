@@ -195,10 +195,18 @@
     // 落位：清除拖动态 + 过渡到最终位置（从当前 transform 平滑滑入新 slot）
     function settle() {
       if (!activeEl) return;
-      activeEl.style.transition = 'transform ' + ANIM_MS + 'ms ease';
-      activeEl.style.transform = '';
-      clearAnim(activeEl);
-      activeEl.classList.remove('dragging');
+      var el = activeEl;
+      el.style.transition = 'transform ' + ANIM_MS + 'ms ease';
+      el.style.transform = '';
+      clearAnim(el);
+      // v2.1.36：dragging 类等落位动画播完再摘（ANIM_MS+40ms）——即时摘会让
+      // 被拖卡片在回落途中失去 z-index，先从其他卡片下面穿过再重排（实测：
+      // "放手时卡片先跑到另一张卡下面"）。z-index 保持到落位结束为止。
+      // 条件：若该卡已被新一次拖拽接管（activeEl===el 且已越阈值 dragging）→
+      // 不摘（新拖拽需要继续置顶）；普通点击路径（未越阈值）照常摘。
+      setTimeout(function () {
+        if (!(activeEl === el && dragging)) el.classList.remove('dragging');
+      }, ANIM_MS + 40);
       if (activePointer >= 0) {
         try { container.releasePointerCapture(activePointer); } catch (e) { /* 忽略 */ }
       }

@@ -144,7 +144,7 @@ func TestStartCastInjectsParamOverlaySetting(t *testing.T) {
 			if err := a.SetSettings(tc.setting, false); err != nil {
 				t.Fatal(err)
 			}
-			if err := a.StartCast("24117RK2CC"); err != nil {
+			if err := a.StartCast("MODEL123"); err != nil {
 				t.Fatal(err)
 			}
 			p := f.waitParams(t, 1)

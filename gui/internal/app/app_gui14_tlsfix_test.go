@@ -62,7 +62,7 @@ func TestIsTlsFormAddr(t *testing.T) {
 func TestFoldGhostMdnsTokenMergesIntoIdentityCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555", "192.0.2.197:33895"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
@@ -105,7 +105,7 @@ func TestFoldGhostMdnsTokenUnknownFiltered(t *testing.T) {
 func TestFoldGhostMdnsTokenDeviceStateFolded(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
@@ -146,7 +146,7 @@ func TestNormalizeArchivedMode(t *testing.T) {
   "devices": {
     "REDMI K80": {
       "marketname": "REDMI K80",
-      "model": "24117RK2CC",
+      "model": "MODEL123",
       "serials": ["TEST0001"],
       "addrs": [
         {"addr": "192.0.2.197:33895", "state": "active", "fail": 0, "lastOk": 1750000001},

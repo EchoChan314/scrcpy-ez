@@ -26,8 +26,28 @@ type fakeRunner struct {
 
 	canKill func() bool // StopCast 兜底 kill-server 判定回调（SetCanKillServer 注入）
 
+	// skipNotifWaitRec 是 SetSkipNotifWait 注入的最近值（v2.1.75 设备级单通知配套；
+	// 测试断言"是否本设备最后会话"判定的注入结果）。
+	skipNotifWaitRec bool
+	skipNotifSetN    int
+
 	mu        sync.Mutex
 	paramsLog []bridge.CastParams // 每次 Start 的参数顺序记录（诊断注入链）
+}
+
+// SetSkipNotifWait 记录 App 注入的"跳过等通知撤下"标志（测试断言用）。
+func (f *fakeRunner) SetSkipNotifWait(v bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.skipNotifWaitRec = v
+	f.skipNotifSetN++
+}
+
+// lastSkipNotifWait 返回最近一次 SetSkipNotifWait 的值（互斥访问，race 安全）。
+func (f *fakeRunner) lastSkipNotifWait() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.skipNotifWaitRec
 }
 
 // SetCanKillServer 记录 App 注入的兜底 kill-server 判定回调（测试断言用）。
@@ -168,18 +188,54 @@ func (f *fakeRunner) ExitCode() int { return f.exitCode }
 func newTestApp() (*App, *fakeRunner) {
 	f := &fakeRunner{exitCode: -1}
 	a := New(Config{BatPath: "C:\\x\\投屏启动.bat", AdbPath: "C:\\x\\adb.exe", Version: "test"})
+	a.teachOps.getpropFn = func(context.Context, string, string) (string, error) { return "5555", nil }
+	a.teachOps.tcpipFn = func(context.Context, string, string) error { return nil }
+	a.teachOps.shellFn = func(_ context.Context, serial string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "settings" {
+			return "1", nil
+		}
+		return testUSBIPOutput(a, serial), nil
+	}
 	a.SetRunnerFactory(func(string, func(string), func(int)) (Runner, error) { return f, nil })
+	// gui55：测试 App 默认注入"设备序列号直读"double——生产是 `adb get-serialno`。
+	// 语义：能查到档案就报档案短号（=设备自报与档案一致），否则报占位短号
+	// （配对新设备场景）。验身/学习相关用例自行覆盖 serialFn 造不一致。
+	a.pairOps.serialFn = func(ctx context.Context, addr string) (string, error) {
+		if k := a.profiles.ResolveKey(addr); k != "" {
+			if e, ok := a.profiles.Entry(k); ok && len(e.Serials) > 0 {
+				return e.Serials[0], nil
+			}
+		}
+		// 地址可能已被"每形态单记忆"折叠/退档：回落到唯一档案的短号
+		// （测试世界通常只有一台设备；多档案用例显式覆盖 serialFn）。
+		if entries := a.profiles.Entries(); len(entries) == 1 {
+			for _, e := range entries {
+				if len(e.Serials) > 0 {
+					return e.Serials[0], nil
+				}
+			}
+		}
+		return "TEST0001", nil
+	}
 	return a, f
+}
+
+func testUSBIPOutput(a *App, serial string) string {
+	ip := "192.0.2.197"
+	if e, ok := a.profiles.Entry(serial); ok && len(e.Addrs) > 0 {
+		ip = ipOfAddr(e.Addrs[0].Addr)
+	}
+	return "2: wlan0: <UP>\n    inet " + ip + "/24 scope global wlan0\n"
 }
 
 func TestCastFlow(t *testing.T) {
 	a, f := newTestApp()
-	if err := a.StartCast("24117RK2CC"); err != nil {
+	if err := a.StartCast("MODEL123"); err != nil {
 		t.Fatal(err)
 	}
 	// Start 在独立 goroutine 调用：等待异步传递完成
 	f.waitStarts(t, 1)
-	if got := f.startedSerial(); got != "24117RK2CC" {
+	if got := f.startedSerial(); got != "MODEL123" {
 		t.Fatalf("serial 未传递: %q", got)
 	}
 
@@ -187,13 +243,13 @@ func TestCastFlow(t *testing.T) {
 	lines := []string{
 		"[1] 重置 adb 服务...",
 		"[2] 检测 USB 设备...",
-		"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（24117RK2CC）",
-		"===== 开始投屏：Xiaomi Pad 8 Pro（24117RK2CC） =====",
+		"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（MODEL123）",
+		"===== 开始投屏：Xiaomi Pad 8 Pro（MODEL123） =====",
 		"[高清] 有线模式：检测到设备 2560x1708@120Hz，有线规格 h264/50M/2560/120fps（低延迟优化）",
 		"[键盘模式] Android SDK=34 -> uhid legacy=",
 	}
 	for _, l := range lines {
-		a.NotifyLine("24117RK2CC", l)
+		a.NotifyLine("MODEL123", l)
 	}
 
 	s := a.Snapshot().Cast
@@ -211,7 +267,7 @@ func TestCastFlow(t *testing.T) {
 	}
 
 	// 无线规格行 → 模式切换 wifi（参数浮窗自动定位依据）
-	a.NotifyLine("24117RK2CC", "[流畅] 无线模式：带宽有限，已启用低延迟串流（h264/15M/1920/60fps）")
+	a.NotifyLine("MODEL123", "[流畅] 无线模式：带宽有限，已启用低延迟串流（h264/15M/1920/60fps）")
 	s = a.Snapshot().Cast
 	if s.Mode != "wifi" {
 		t.Fatalf("无线规格行未切换模式: %q", s.Mode)
@@ -774,14 +830,16 @@ func TestSaveProfileAndRestartInjectsParams(t *testing.T) {
 	a.SetRunnerFactory(func(string, func(string), func(int)) (Runner, error) { return f, nil })
 	_ = a.StartCast("X")
 
-	if err := a.SaveProfileAndRestart("X", "usb", 2400, 75, 55, true); err != nil {
+	if err := a.SaveProfileAndRestart("X", "usb", 2400, 75, 55, true, "pc", false, false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	a.OnBatExit("X", 1) // 模拟 waitLoop 回调 → restartAfterExit 重跑
 	f.waitStarts(t, 2)
 	f.waitParams(t, 2)
 	want := bridge.CastParams{
-		Usb: bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true},
+		Usb: bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
+		// v2.1.78：声音档位无条件注入（空档 → 主屏默认 pc）
+		Wifi: bridge.ModeParams{Audio: "pc", VCodec: "h264", ACodec: "opus"},
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 	}
@@ -802,7 +860,7 @@ func TestSaveProfileAndRestartInjectsParams(t *testing.T) {
 	}
 
 	// 非法参数拒绝
-	if err := a.SaveProfileAndRestart("X", "usb", 0, 60, 60, true); err == nil {
+	if err := a.SaveProfileAndRestart("X", "usb", 0, 60, 60, true, "pc", false, false, "", ""); err == nil {
 		t.Fatal("非法参数应拒绝")
 	}
 }
@@ -826,8 +884,8 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	_ = a.StartCast("X")
 	got := f.waitParams(t, 1)
 	want := bridge.CastParams{
-		Usb:  bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true},
-		Wifi: bridge.ModeParams{Res: 1280, FPS: 30, Bitrate: 15, Set: true},
+		Usb:  bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
+		Wifi: bridge.ModeParams{Res: 1280, FPS: 30, Bitrate: 15, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 	}
@@ -847,7 +905,8 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	_ = a2.StartCast("W")
 	got2 := f2.waitParams(t, 1)
 	want2 := bridge.CastParams{
-		Wifi: bridge.ModeParams{Res: 720, FPS: 30, Bitrate: 15, Set: true},
+		Usb:  bridge.ModeParams{Audio: "pc", VCodec: "h264", ACodec: "opus"},
+		Wifi: bridge.ModeParams{Res: 720, FPS: 30, Bitrate: 15, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 	}
@@ -925,20 +984,21 @@ func TestBaselineFromSpecLine(t *testing.T) {
 	}
 }
 
-// 未投屏过：baseline 由 adb 检测值推导（res 长边/Hz + 默认码率；无线固定档）。
+// 未投屏过：baseline 由 adb 检测值推导（v2.1.51：res 长边对齐档位表——与 bat 有线
+// 档分配同口径（3200→2560）；Hz + 默认码率；无线固定档）。
 func TestBaselineFallbackFromDevice(t *testing.T) {
 	a, _ := newTestApp()
 	a.mu.Lock()
 	a.devices = []adb.Device{{Serial: "X", Res: "3200x2136", FPS: 120}}
 	a.mu.Unlock()
 	p := a.GetProfile("X")
-	if p.Usb.Baseline != (Baseline{Res: 3200, FPS: 120, Bitrate: 60}) {
+	if p.Usb.Baseline != (Baseline{Res: 2560, FPS: 120, Bitrate: 60}) {
 		t.Fatalf("有线推导 baseline 错误: %+v", p.Usb.Baseline)
 	}
 	if p.Wifi.Baseline != (Baseline{Res: 1920, FPS: 60, Bitrate: 15}) {
 		t.Fatalf("无线固定 baseline 错误: %+v", p.Wifi.Baseline)
 	}
-	if p.Usb.Res != 3200 || p.Usb.FPS != 120 || p.Usb.Bitrate != 60 {
+	if p.Usb.Res != 2560 || p.Usb.FPS != 120 || p.Usb.Bitrate != 60 {
 		t.Fatalf("默认值未跟随推导 baseline: %+v", p.Usb)
 	}
 	p2 := a.GetProfile("Y")

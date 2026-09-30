@@ -178,7 +178,7 @@ func TestPairArchiveWritesBackTls(t *testing.T) {
 	_ = s.Load()
 
 	s.PairArchive("Xiaomi Pad 8 Pro", "TEST0002", "192.0.2.99:33895",
-		"adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
+		"adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "MODEL789")
 
 	e, ok := s.Entry("Xiaomi Pad 8 Pro")
 	if !ok {
@@ -230,7 +230,7 @@ func TestPairArchiveMergesIntoExistingEntry(t *testing.T) {
 			Wireless: "192.0.2.162:5555"},
 	})
 
-	s.PairArchive("", "TEST0002", "192.0.2.99:33895", "adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
+	s.PairArchive("", "TEST0002", "192.0.2.99:33895", "adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "MODEL789")
 	entries := s.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("配对接入不应分裂档案: %v", entries)

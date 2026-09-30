@@ -20,7 +20,7 @@ func gui50Fix67InstallGetpropFakes(a *App) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "24117RK2CC", nil
+			return "MODEL123", nil
 		}
 		return "", nil
 	}

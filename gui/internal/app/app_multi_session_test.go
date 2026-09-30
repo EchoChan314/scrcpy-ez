@@ -206,7 +206,7 @@ func TestMultiSessionParamsPerSerial(t *testing.T) {
 	rec.serial("A")[0].waitParams(t, 1)
 	rec.serial("B")[0].waitParams(t, 1)
 
-	if err := a.SaveProfileAndRestart("A", "usb", 2400, 75, 55, true); err != nil {
+	if err := a.SaveProfileAndRestart("A", "usb", 2400, 75, 55, true, "pc", false, false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	a.OnBatExit("A", 1)

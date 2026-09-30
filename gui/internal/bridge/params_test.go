@@ -61,11 +61,11 @@ func TestCastEnvParamOverlay(t *testing.T) {
 func TestCastEnvLegacyFieldsUnchanged(t *testing.T) {
 	params := CastParams{
 		Usb:    ModeParams{Res: 1920, FPS: 60, Bitrate: 8, Set: true},
-		Serial: "24117RK2CC",
+		Serial: "MODEL123",
 		Addr:   "192.0.2.197:5555",
 		Addr2:  "192.0.2.197:45005",
 		Market: "Redmi K80",
-		Model:  "24117RK2CC",
+		Model:  "MODEL123",
 	}
 	env := envMap(castEnv(params, "tag-1"))
 	want := map[string]string{
@@ -73,11 +73,11 @@ func TestCastEnvLegacyFieldsUnchanged(t *testing.T) {
 		"SCEZ_RES_USB":      "1920",
 		"SCEZ_FPS_USB":      "60",
 		"SCEZ_BITRATE_USB":  "8",
-		"SCEZ_SERIAL":       "24117RK2CC",
+		"SCEZ_SERIAL":       "MODEL123",
 		"SCEZ_ADDR":         "192.0.2.197:5555",
 		"SCEZ_ADDR2":        "192.0.2.197:45005",
 		"SCEZ_MARKET":       "Redmi K80",
-		"SCEZ_MODEL":        "24117RK2CC",
+		"SCEZ_MODEL":        "MODEL123",
 		"SCEZ_WATCH_TAG":    "tag-1",
 	}
 	for k, v := range want {
@@ -109,5 +109,96 @@ func TestCastEnvParamOverlayCoexists(t *testing.T) {
 	}
 	if env["SCEZ_RES_WIFI"] != "1920" || env["SCEZ_ADDR"] != "192.0.2.197:5555" {
 		t.Fatalf("与开关 A 共存的既有注入项丢失: %v", env)
+	}
+}
+
+// 虚拟屏参数注入（应用窗口走 bat，v2.1.27）：SCEZ_VD_* 整组"未设置=不注入"
+// （零回归）；设置后逐项注入；开关类仅 true 才注入 "1"；dpi=0 不注入（交给 scrcpy）。
+func TestCastEnvVirtualDisplay(t *testing.T) {
+	vdKeys := []string{"SCEZ_VD_SIZE", "SCEZ_VD_DPI", "SCEZ_VD_FLEX", "SCEZ_VD_IME",
+		"SCEZ_VD_NO_DECOR", "SCEZ_VD_KEEP_CONTENT", "SCEZ_VD_AUDIO",
+		"SCEZ_START_APP", "SCEZ_WIN_TITLE"}
+
+	// ① 未设置：整组不注入（普通投屏 bat 行为与历史完全一致）。
+	env := envMap(castEnv(CastParams{}, "tag-vd"))
+	for _, k := range vdKeys {
+		if _, ok := env[k]; ok {
+			t.Fatalf("未设置虚拟屏参数时不应注入 %s（env=%v）", k, env)
+		}
+	}
+
+	// ② 默认档设置：逐项注入（含 "+" 前缀原样透传、中文标题）。
+	params := CastParams{
+		VdSize: "1280x720", VdDpi: 240, VdFlex: true, VdIme: "local",
+		StartApp: "+com.android.browser", WinTitle: "浏览器",
+	}
+	env = envMap(castEnv(params, "tag-vd"))
+	want := map[string]string{
+		"SCEZ_VD_SIZE":  "1280x720",
+		"SCEZ_VD_DPI":   "240",
+		"SCEZ_VD_FLEX":  "1",
+		"SCEZ_VD_IME":   "local",
+		"SCEZ_START_APP": "+com.android.browser",
+		"SCEZ_WIN_TITLE": "浏览器",
+	}
+	for k, w := range want {
+		if got := env[k]; got != w {
+			t.Fatalf("%s = %q，期望 %q（env=%v）", k, got, w, env)
+		}
+	}
+	// 开关类默认关：不注入（音频档位空=不注入）
+	for _, k := range []string{"SCEZ_VD_NO_DECOR", "SCEZ_VD_KEEP_CONTENT", "SCEZ_VD_AUDIO"} {
+		if _, ok := env[k]; ok {
+			t.Fatalf("开关未开时不应注入 %s（env=%v）", k, env)
+		}
+	}
+
+	// ③ 开关开：注入 "1"（v2.1.78：音频档位注入值=档名，非 "1"）
+	env = envMap(castEnv(CastParams{VdSize: "1280x720", VdNoDecor: true, VdKeepContent: true, VdAudio: "phone"}, "tag-vd"))
+	for _, k := range []string{"SCEZ_VD_NO_DECOR", "SCEZ_VD_KEEP_CONTENT"} {
+		if env[k] != "1" {
+			t.Fatalf("开关开时应注入 %s=1（got %q，env=%v）", k, env[k], env)
+		}
+	}
+	if env["SCEZ_VD_AUDIO"] != "phone" {
+		t.Fatalf("音频档位应注入 SCEZ_VD_AUDIO=phone（got %q，env=%v）", env["SCEZ_VD_AUDIO"], env)
+	}
+
+	// ④ dpi=0：不注入（scrcpy 自动算；调用方查询失败时的路径）。
+	env = envMap(castEnv(CastParams{VdSize: "1280x720"}, "tag-vd"))
+	if _, ok := env["SCEZ_VD_DPI"]; ok {
+		t.Fatalf("VdDpi=0 时不应注入 SCEZ_VD_DPI（env=%v）", env)
+	}
+}
+
+// v2.1.78 声音档位注入：主屏 SCEZ_AUDIO_*（独立于 Set）+ 虚拟屏两套 SCEZ_VD_AUDIO_*。
+func TestAudioModeInjection(t *testing.T) {
+	params := CastParams{
+		Usb:    ModeParams{Res: 2560, FPS: 120, Bitrate: 60, Set: true, Audio: "both"},
+		Wifi:   ModeParams{Audio: "phone"},
+		VdUsb:  VdModeParams{Size: "1280x720", Audio: "pc"},
+		VdWifi: VdModeParams{Size: "1920x864", Audio: "both"},
+	}
+	env := envMap(castEnv(params, "tag-a"))
+	want := map[string]string{
+		"SCEZ_AUDIO_USB":     "both",
+		"SCEZ_AUDIO_WIFI":    "phone",
+		"SCEZ_VD_AUDIO_USB":  "pc",
+		"SCEZ_VD_AUDIO_WIFI": "both",
+	}
+	for k, w := range want {
+		if got := env[k]; got != w {
+			t.Fatalf("%s = %q，期望 %q（env=%v）", k, got, w, env)
+		}
+	}
+	// 空档位：不注入（bat 走默认行为——主屏 pc / 应用屏默认由 GUI 显式注入）
+	env2 := envMap(castEnv(CastParams{}, "tag-b"))
+	for _, k := range []string{"SCEZ_AUDIO_USB", "SCEZ_AUDIO_WIFI", "SCEZ_VD_AUDIO_USB", "SCEZ_VD_AUDIO_WIFI", "SCEZ_VD_AUDIO"} {
+		if _, ok := env2[k]; ok {
+			t.Fatalf("空档位不应注入 %s（env=%v）", k, env2)
+		}
+	}
+	if env2["SCEZ_WATCH_TAG"] != "tag-b" {
+		t.Fatalf("WATCH_TAG 应恒注入（env=%v）", env2)
 	}
 }

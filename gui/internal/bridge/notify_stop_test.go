@@ -36,16 +36,30 @@ func TestShellNotificationKeysIgnoresNoise(t *testing.T) {
 	}
 }
 
-func TestNotificationsGone(t *testing.T) {
-	baseline := []string{"0|com.android.shell|5456730|null|2000"}
-	if notificationsGone("0|com.android.shell|5456730|null|2000\n0|other|1|null|1", baseline) {
+// v2.1.30：判据从"基线全部消失"改为"至少一条消失"（多会话并行区分）。
+func TestNotificationsReduced(t *testing.T) {
+	m := "0|com.android.shell|5456730|null|2000" // 主投屏会话
+	v := "0|com.android.shell|9900001|null|2000" // 虚拟屏会话（唯一 id）
+
+	// 单会话：通知仍在 → 未撤下
+	if notificationsReduced(m+"\n0|other|1|null|1", []string{m}) {
 		t.Fatal("通知仍在，应判未撤下")
 	}
-	if !notificationsGone("0|other|1|null|1\n", baseline) {
+	// 单会话：消失 → 撤下
+	if !notificationsReduced("0|other|1|null|1\n", []string{m}) {
 		t.Fatal("基线通知已消失，应判撤下")
 	}
-	if !notificationsGone("", nil) {
-		t.Fatal("空基线应判撤下")
+	// 空基线 → 无需等待（达成）
+	if !notificationsReduced("", nil) {
+		t.Fatal("空基线应判达成")
+	}
+	// 多会话：本会话通知撤下、他会话仍在线 → 达成（不再等他会话）
+	if !notificationsReduced(v, []string{m, v}) {
+		t.Fatal("多会话：本会话通知撤下即应达成")
+	}
+	// 多会话：两条都在 → 未达成
+	if notificationsReduced(m+"\n"+v, []string{m, v}) {
+		t.Fatal("两条都在，应判未撤下")
 	}
 }
 

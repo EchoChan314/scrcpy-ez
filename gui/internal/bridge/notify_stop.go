@@ -46,17 +46,26 @@ func shellNotificationKeys(out string) []string {
 	return keys
 }
 
-// notificationsGone 判定基线里的通知 key 是否已全部从当前列表中消失。
-func notificationsGone(current string, baseline []string) bool {
+// notificationsReduced 判定基线中至少一条通知已从当前列表消失（v2.1.30 多会话并行）。
+//
+// 多会话并行（主投屏 + 应用窗口虚拟屏）时各会话通知互不干扰（server 侧通知 id
+// 会话唯一）：Stop 只等"本会话的通知撤下"——本会话 server 经数据 socket EOF 优雅
+// 退出会撤下它那一份，列表出现减少即达成。原判据"基线全部消失"在多会话下必然
+// 超时（等到的是别的会话的通知；实测停止主投屏被虚拟屏的通知拖满 4.3 秒）。
+// 单会话场景语义不变（唯一一条消失=全部消失）。
+func notificationsReduced(current string, baseline []string) bool {
+	if len(baseline) == 0 {
+		return true // 无基线=无需等待（与旧判据一致；调用方通常已在外部判空）
+	}
 	for _, k := range baseline {
 		if k == "" {
 			continue
 		}
-		if strings.Contains(current, k) {
-			return false
+		if !strings.Contains(current, k) {
+			return true // 至少一条消失 → 本会话 server 已撤下（正常路径）
 		}
 	}
-	return true
+	return false
 }
 
 // closedFlagName 是本会话 bat「复活门」标记的文件名。

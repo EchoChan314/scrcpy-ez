@@ -3,7 +3,9 @@
 package adb
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,6 +50,10 @@ type Device struct {
 	// 的「连接中…」遮罩卡为 true；前端据此区分拔线遮罩（wifi+connecting→断开中…）
 	// 与配对遮罩（wifi+connecting+pairing→连接中…）。
 	Pairing bool `json:"pairing,omitempty"`
+	// AppBusy = 应用列表枚举进行中（二期）：前端「应用」按钮显示「读取中…」遮罩态
+	// （禁用+半透明）。由快照生成时按设备 identity 填充；最长显示 10s（兜底：
+	// 即使枚举仍在重试，遮罩到时自动清）。
+	AppBusy bool `json:"appBusy,omitempty"`
 }
 
 type cachedSpec struct {
@@ -77,6 +83,13 @@ type Manager struct {
 	pairFn      func(ctx context.Context, ip, port, code string) (string, error) // 测试注入
 	getpropFn   func(ctx context.Context, serial, prop string) (string, error)   // 测试注入
 	tcpipFn     func(ctx context.Context, serial, port string) error             // 测试注入
+	getSerialFn func(ctx context.Context, serial string) (string, error)         // 测试注入
+
+	// v2.1.77 抢庄三件套注入点（nil=真实命令；测试注入 fake 覆盖编排——
+	// 缺省路径与生产完全一致）。
+	srvKillFn  func(ctx context.Context) error
+	srvStartFn func(ctx context.Context) error
+	srvCheckFn func(ctx context.Context) string
 }
 
 const (
@@ -132,6 +145,25 @@ func (m *Manager) Getprop(ctx context.Context, serial, prop string) (string, err
 	return strings.TrimSpace(out), nil
 }
 
+// GetSerialNo 读设备序列号（`adb -s <serial> get-serialno`，host 侧命令）。
+// 这是"设备是谁"的最硬来源（gui55 配对学习/探测验身）：不依赖设备端 mDNS
+// 广播、不依赖 shell 属性可读性，只要 transport 通就能拿到。未知时 adb 输出
+// "unknown" → 归一为空串。serial 参数可以是 USB 序列号，也可以是 ip:port。
+func (m *Manager) GetSerialNo(ctx context.Context, serial string) (string, error) {
+	if m.getSerialFn != nil {
+		return m.getSerialFn(ctx, serial)
+	}
+	out, err := m.run(ctx, "-s", serial, "get-serialno")
+	if err != nil {
+		return "", err
+	}
+	s := strings.TrimSpace(out)
+	if s == "unknown" {
+		return "", nil
+	}
+	return s, nil
+}
+
 // Tcpip 在设备上开启 TCP/IP 调试端口（`adb -s <serial> tcpip <port>`）。
 // gui30「插线即学习」用：设备 adbd 重启后 service.adb.tcp.port 重置，
 // 插 USB 时补学一次 5555，拔线后无线立即可用。注意 adb tcpip 会重启
@@ -168,6 +200,118 @@ func PairErrKind(out string) string {
 	default:
 		return "other"
 	}
+}
+
+// --- v2.1.77：5037 抢庄（旧版 adb server 抢占时夺回，确保 37 坐庄） ---
+//
+// 背景：别的软件自带的旧版 adb（≤30.x，如 Iriun Webcam 29.0.1）开机自启抢占 5037
+// 后，37 client 的 mdns/pair 等新服务被应答 "unknown host service"——原生 TLS
+// （无线调试）永远开不上来。方案（主人拍板）：检测归属 → 不完整才抢庄。
+// 先例：flect 的 "Restart ADB" 按钮（kill-server），生态已证明该动作正当；
+// ez 只是自动化 + 条件化 + 带快速重试保护（压空窗、循环重试、抢后天然保庄）。
+
+var (
+	// takeoverRounds：抢庄最大轮数（拍板：3 轮——单轮失败率 <1%，3 轮全败 ≈ 百万分之一）。
+	takeoverRounds = 3
+	// takeoverTriesPerRound：每轮内快速重试次数（把空窗压缩至百毫秒级）。
+	takeoverTriesPerRound = 6
+	// takeoverRetryGap：轮内两次重试的间隔（拍板常数：~150ms）。
+	takeoverRetryGap = 150 * time.Millisecond
+)
+
+// runCombined 执行 adb 命令并返回 stdout+stderr 合并输出。
+// stderr 文本是检测判据（unknown host service）的关键来源（旧实现只捕 stdout 会丢）。
+func (m *Manager) runCombined(ctx context.Context, args ...string) (string, error) {
+	c := exec.CommandContext(ctx, m.adbPath, args...)
+	HideConsole(c)
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	err := c.Run()
+	return buf.String(), err
+}
+
+// CheckServer 执行 `adb mdns check`（默认 5037）并返回合并输出，供归属判据使用。
+// 该命令是 server 的"版本指纹"探针：5037 无 server 时命令会自动 fork 一个本版（37）
+// server → 输出正常版本串 → 自动判"完整"（交给 37 坐庄）。
+func (m *Manager) CheckServer(ctx context.Context) string {
+	if m.srvCheckFn != nil {
+		return m.srvCheckFn(ctx)
+	}
+	out, _ := m.runCombined(ctx, "mdns", "check")
+	return out
+}
+
+// ServerHealthy 是 5037 归属判据（纯函数）：输出含 "unknown host service" → false，
+// 即 5037 上坐着 ≤30.x 的旧版 server（37 client 的 mdns 服务名它不认识）；
+// 其它任何应答（37 版本串 [adb discovery 0.0.0] / 31–36 的 mdns daemon unavailable /
+// mdns discovery disabled）= true——pair/TLS 不依赖 mDNS 功能，31–36 算"完整"；
+// 空输出（命令没跑起来）判 true：保守不动。
+func ServerHealthy(out string) bool {
+	return !strings.Contains(out, "unknown host service")
+}
+
+// ServerIs37 是"37 坐庄"判据（纯函数，抢庄验证的唯一判据）：
+// mdns check 输出含 "adb discovery" → true（实测 37 输出
+// "mdns daemon version [adb discovery 0.0.0]"，只有 37 的 mdns daemon 报这个版本串）。
+func ServerIs37(out string) bool {
+	return strings.Contains(out, "adb discovery")
+}
+
+// KillServer 执行 `adb kill-server`（抢庄动作：清掉当前坐庄者，含旧版）。
+func (m *Manager) KillServer(ctx context.Context) error {
+	if m.srvKillFn != nil {
+		return m.srvKillFn(ctx)
+	}
+	_, err := m.runCombined(ctx, "kill-server")
+	return err
+}
+
+// StartServer 执行 `adb start-server`（抢庄动作：fork 本版 37；5037 已有 server
+// 时只复用——被抢回的判定交给随后的 CheckServer 验证）。
+func (m *Manager) StartServer(ctx context.Context) error {
+	if m.srvStartFn != nil {
+		return m.srvStartFn(ctx)
+	}
+	_, err := m.runCombined(ctx, "start-server")
+	return err
+}
+
+// TakeoverServer 抢庄（v2.1.77 核心算法）：把 5037 从"不完整 server（≤29）"手中
+// 夺回并确保 37 坐庄。算法（拍板）：kill-server → 快速重试 start-server（~150ms/次）
+// → 验证 37 指纹（mdns check 含 "adb discovery"）→ 最多 3 轮。
+// 返回最后一次 mdns check 输出与错误（成功=nil；全败/超时=非 nil，调用方记日志）。
+// 只在"归属检测判不完整"时调用——完整（≥30）环境零动作、绝不走到这里。
+// 投屏在场也不跳过（跳过 = 原生 TLS 永远开不上来；投屏短暂断流由 bat 自愈重连兜底）。
+func (m *Manager) TakeoverServer(ctx context.Context) (string, error) {
+	var last string
+	for round := 0; round < takeoverRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return last, err
+		}
+		// 清庄：踢掉当前坐庄者（含旧版）。失败不阻断（server 可能已空/半死）。
+		_ = m.KillServer(ctx)
+		for i := 0; i < takeoverTriesPerRound; i++ {
+			if err := ctx.Err(); err != nil {
+				return last, err
+			}
+			// 抢跑：fork 我们的 37（若 5037 已有对手坐庄，start 只是复用——由验证判出）。
+			_ = m.StartServer(ctx)
+			last = m.CheckServer(ctx)
+			if ServerIs37(last) {
+				return last, nil
+			}
+			// 被对手抢回（unknown host service）→ 本轮放弃，下一轮重 kill 再抢。
+			if !ServerHealthy(last) {
+				break
+			}
+			select {
+			case <-time.After(takeoverRetryGap):
+			case <-ctx.Done():
+				return last, ctx.Err()
+			}
+		}
+	}
+	return last, errors.New("抢庄失败：未能在 5037 上取得 37 坐庄")
 }
 
 // RecoverIfEmpty 在设备列表为空时尝试按 config.txt 记忆地址 connect 一次。
@@ -342,7 +486,7 @@ func (m *Manager) enrich(ctx context.Context, d *Device) {
 	if c.name != "" {
 		// 市场名补采（多会话竞态自愈）：首次 getprop 失败用 man+model 兜底缓存后，
 		// 周期性重试 marketname——不重试则 identity 永久停在回退值（如 "Xiaomi
-		// 24117RK2CC" 而非 "REDMI K80"），档案分裂、弹窗误判"新设备"随之而来。
+		// MODEL123" 而非 "REDMI K80"），档案分裂、弹窗误判"新设备"随之而来。
 		if c.marketname == "" && now.Sub(c.at) >= specTTL {
 			if v, err := m.run(ctx, "-s", d.Serial, "shell", "getprop", "ro.product.marketname"); err == nil {
 				if n := strings.TrimSpace(v); n != "" {
@@ -442,8 +586,9 @@ func SortWideFirst(res string) string {
 }
 
 // ScaleForWireless 按 bat 无线档（WIFI_ARGS 的 --max-size 1920）换算无线投屏分辨率：
-// 先归一化为宽≥高，长边（宽）>1920 时等比缩到 1920（短边整数截断，与 scrcpy 的
-// 等比缩放一致），输出始终宽≥高（大数字在前）。解析失败返回 ""。
+// 先归一化为宽≥高，长边（宽）>1920 时等比缩到 1920（短边整数截断 **后向下取偶**——
+// 编码尺寸偶对齐，与 scrcpy 实际输出一致：2136x3200 长边 1920 实得 1920x1280），
+// 输出始终宽≥高（大数字在前）。解析失败返回 ""。
 func ScaleForWireless(res string) string {
 	wStr, hStr, ok := strings.Cut(res, "x")
 	if !ok {
@@ -460,6 +605,10 @@ func ScaleForWireless(res string) string {
 	if w > 1920 {
 		h = h * 1920 / w
 		w = 1920
+	}
+	// 短边向下取偶（编码尺寸偶对齐；scrcpy 实得 1280 而非截断值 1281）。
+	if h > 2 {
+		h &^= 1
 	}
 	return strconv.Itoa(w) + "x" + strconv.Itoa(h)
 }

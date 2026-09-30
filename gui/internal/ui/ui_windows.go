@@ -4,7 +4,9 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"log"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,7 @@ import (
 
 	"scrcpy-ez/gui/internal/app"
 	"scrcpy-ez/gui/internal/bridge"
+	"scrcpy-ez/gui/internal/updater"
 )
 
 // setWindowIcon gui53：把 exe 资源里嵌入的图标（ID=1，像素风）设为窗口图标，
@@ -47,6 +50,7 @@ func setWindowIcon(hwnd uintptr) {
 //   - 开关 B=开：ShowWindow(SW_HIDE) 隐藏窗口并吞掉消息 —— 进程存活、正在进行的
 //     投屏会话不中断；托盘「显示主窗口」用 SW_RESTORE 恢复；
 //   - 开关 B=关：原样交还原窗口过程（默认销毁）→ 完整退出，与旧行为一致。
+//
 // 托盘「退出」与 JS ExitApp 走 Quit()：置强制退出位后向主窗口投递 WM_CLOSE，
 // 由窗口过程在 UI 线程绕过"最小化到托盘"，交还原窗口过程销毁窗口（完整退出）。
 const (
@@ -155,7 +159,8 @@ func Run(a *app.App, html string) error {
 	defer w.Destroy()
 
 	w.SetTitle("scrcpy-ez")
-	w.SetSize(520, 760, webview.HintNone)
+	// v2.1.95：高度 760→900——应用窗口设置弹窗加编码两行后，最长形态全高可见。
+	w.SetSize(520, 900, webview.HintNone)
 
 	// gui53：主窗口图标（任务栏 / Alt+Tab 显示）——WebView2 默认不设置窗口图标，
 	// 任务栏会显示通用蓝窗图标；这里把 exe 资源里嵌入的像素图标（ID=1）发给窗口。
@@ -212,20 +217,90 @@ func Run(a *app.App, html string) error {
 			bridge.DebugLog("[js] BringCastToFront serial=%q", serial)
 			return a.BringCastToFront(serial)
 		}},
+		{"BringAppWinToFront", func(serial, pkg string) error {
+			bridge.DebugLog("[js] BringAppWinToFront serial=%q pkg=%q", serial, pkg)
+			return a.BringAppWinToFront(serial, pkg)
+		}},
+		// ---------- 应用窗口（二期）· Step 1：应用列表 ----------
+		{"GetAppList", func(serial string) (interface{}, error) {
+			items, err := a.GetAppList(serial)
+			if err != nil {
+				bridge.DebugLog("[js] GetAppList serial=%q 失败: %v", serial, err)
+				return nil, err
+			}
+			bridge.DebugLog("[js] GetAppList serial=%q n=%d", serial, len(items))
+			return items, nil
+		}},
+		{"CheckAppList", func(serial string) (interface{}, error) {
+			bridge.DebugLog("[js] CheckAppList serial=%q", serial)
+			return a.CheckAppList(serial)
+		}},
+		{"IsAppListCheckBusy", func(serial string) (interface{}, error) {
+			return a.IsAppListCheckBusy(serial)
+		}},
+		{"RefreshAppList", func(serial string) error {
+			bridge.DebugLog("[js] RefreshAppList serial=%q", serial)
+			return a.RefreshAppList(serial)
+		}},
+		{"GetAppIcon", func(serial, pkg string) (interface{}, error) {
+			// 高频调用（每个卡片一次）——不记日志，避免刷屏。
+			return a.GetAppIcon(serial, pkg)
+		}},
+		// ---------- 应用窗口（二期）· Step 3：启动/停止（虚拟屏会话）----------
+		{"StartAppWin", func(serial, pkg, name string) error {
+			bridge.DebugLog("[js] StartAppWin serial=%q pkg=%q", serial, pkg)
+			return a.StartAppWin(serial, pkg, name)
+		}},
+		{"StopAppWin", func(serial, pkg string) error {
+			bridge.DebugLog("[js] StopAppWin serial=%q pkg=%q", serial, pkg)
+			return a.StopAppWin(serial, pkg)
+		}},
+		// ---------- 应用窗口（二期）· Step 4/5：窗口设置（虚拟屏参数面板） ----------
+		{"GetAppWinParams", func(serial, pkg string) (interface{}, error) {
+			bridge.DebugLog("[js] GetAppWinParams serial=%q pkg=%q", serial, pkg)
+			return a.GetAppWinParams(serial, pkg)
+		}},
+		{"SaveAppWinParams", func(serial, pkg, payload string) error {
+			bridge.DebugLog("[js] SaveAppWinParams serial=%q pkg=%q", serial, pkg)
+			return a.SaveAppWinParams(serial, pkg, payload)
+		}},
+
+		// ---------- 版本检查（v2.1.22）：查公开仓库 latest release ----------
+		{"CheckUpdate", func() (interface{}, error) {
+			bridge.DebugLog("[js] CheckUpdate")
+			return a.CheckUpdate(), nil
+		}},
+		{"GetUpdateState", a.GetUpdateState},
+		{"BeginUpdateCheck", a.BeginUpdateCheck},
+		{"DownloadUpdate", a.DownloadUpdate},
+		{"CancelUpdate", a.CancelUpdate},
+		{"DismissUpdateResult", a.DismissUpdateResult},
+		{"InstallUpdate", func(confirmed bool) (interface{}, error) { return a.InstallUpdate(confirmed, Quit) }},
+		{"OpenURL", func(rawURL string) error {
+			// Fixed public repositories and release pages; download CDN URLs stay internal.
+			if !updater.AllowedPageURL(rawURL) {
+				return errors.New("链接不允许")
+			}
+			bridge.DebugLog("[js] OpenURL %q", rawURL)
+			cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+			return cmd.Start()
+		}},
+
 		{"GetProfile", func(serial string) (interface{}, error) {
 			bridge.DebugLog("[js] GetProfile serial=%q", serial)
 			return a.GetProfile(serial), nil
 		}},
-		{"SaveProfileAndRestart", func(serial, mode string, res, fps, bitrate int, custom bool) error {
-			bridge.DebugLog("[js] SaveProfileAndRestart serial=%q mode=%s res=%d fps=%d bitrate=%d custom=%v",
-				serial, mode, res, fps, bitrate, custom)
-			return a.SaveProfileAndRestart(serial, mode, res, fps, bitrate, custom)
+		{"SaveProfileAndRestart", func(serial, mode string, res, fps, bitrate int, custom bool, audio string, lockFps, lockBitrate bool, vcodec, acodec string) error {
+			bridge.DebugLog("[js] SaveProfileAndRestart serial=%q mode=%s res=%d fps=%d bitrate=%d custom=%v audio=%s lockFps=%v lockBitrate=%v vcodec=%s acodec=%s",
+				serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec)
+			return a.SaveProfileAndRestart(serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec)
 		}},
 		// 设备参数管理页：仅保存 profiles.json（不重投）
-		{"SaveProfile", func(serial, mode string, res, fps, bitrate int, custom bool) error {
-			bridge.DebugLog("[js] SaveProfile serial=%q mode=%s res=%d fps=%d bitrate=%d custom=%v",
-				serial, mode, res, fps, bitrate, custom)
-			return a.SaveProfile(serial, mode, res, fps, bitrate, custom)
+		{"SaveProfile", func(serial, mode string, res, fps, bitrate int, custom bool, audio string, lockFps, lockBitrate bool, vcodec, acodec string) error {
+			bridge.DebugLog("[js] SaveProfile serial=%q mode=%s res=%d fps=%d bitrate=%d custom=%v audio=%s lockFps=%v lockBitrate=%v vcodec=%s acodec=%s",
+				serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec)
+			return a.SaveProfile(serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec)
 		}},
 		// 无线调试配对向导（gui12）：受理即返回，过程/结果经快照 pairStatus 轮询。
 		// devKey=待配对卡键（自动发现场景）；手动场景 ip/pairPort/connPort 直接给值。
@@ -277,6 +352,7 @@ func Run(a *app.App, html string) error {
 			bridge.DebugLog("[js] UiReady")
 			if hwnd := w.Window(); hwnd != nil {
 				SetHWND(hwnd)
+				updater.NotifyHealthy(os.Args[1:], a.Version())
 			}
 		}},
 	}

@@ -75,7 +75,7 @@ func (o *teachfix2Ops) probes() []string {
 
 func teachfix2SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 }
@@ -242,7 +242,7 @@ func TestTeachfix2PlugTimeoutFallbackStillWorks(t *testing.T) {
 func TestTeachfix2MaskLifecycleBindsTcpipReady(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix2SeedK80(a)
-	ops := &teachfix2Ops{port: "0"}
+	ops := &teachfix2Ops{port: "0", addrOut: testUSBIPOutput(a, "TEST0001"), probeOK: map[string]bool{"192.0.2.197:5555": true}}
 	ops.install(a)
 	gui49fix6FastStable(t)
 	logPath := mdns8StartLogCapture(t)

@@ -195,7 +195,7 @@ var ErrMdnsDaemonDown = errors.New("adb mdns daemon down: unknown host service")
 // mdnsDaemonDownOut 按输出文本判定宿主 mDNS daemon 挂死。
 // 已知文本变体（Windows/macOS/Linux 的 adb mdnsresponder client 报错）：
 //
-//	"error: unknown host service"    —— 主判据（音墨本机实测，exit code 仍为 0）
+//	"error: unknown host service"    —— 主判据（实测，exit code 仍为 0）
 //	"error: cannot resolve service"  —— 其他平台/版本的同类报错，一并识别
 //
 // 只按文本判定：超时（context deadline）与进程失败是瞬态网络/环境问题，

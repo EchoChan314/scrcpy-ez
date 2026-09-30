@@ -101,7 +101,7 @@ func TestGui48MdnsGoneProbeFailStaleAndReappearActive(t *testing.T) {
 func TestGui48OfflineJointRequiresMdnsGone(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 	a.applyTrackUpdate(nil)
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: true})
@@ -131,7 +131,7 @@ func TestGui48OfflineJointRequiresMdnsGone(t *testing.T) {
 func TestGui48OfflineJointUsbExempt(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 
 	usb := adb.Device{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"}
@@ -148,7 +148,7 @@ func TestGui48OfflineJointUsbExempt(t *testing.T) {
 func TestGui48StartupBaselineMarksAbsentStale(t *testing.T) {
 	a, _ := newTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 	a.applyTrackUpdate(nil)                                                                    // 设备流首块（空）
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: nil, First: true}) // mdns 首块（空）

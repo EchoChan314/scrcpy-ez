@@ -43,6 +43,11 @@ type Runner interface {
 	Stop() error
 	// ExitCode 返回 bat 最终退出码（未结束返回 -1）。
 	ExitCode() int
+	// SetSkipNotifWait 设置"跳过等设备端通知撤下"（v2.1.75 设备级单通知配套）：
+	// 设备级单通知（固定 id）下，非"本设备最后一个会话"停止时通知不会撤下
+	//（幸存者 server 自动重发），等待必然超时——跳过它；最后一个会话保持
+	// 等待（server 优雅退出撤下通知 = 防滞留观测点）。默认 false=等待。
+	SetSkipNotifWait(v bool)
 }
 
 // RunnerFactory 创建指定会话的 Runner。onLine/onExit 是**会话级**回调：
@@ -166,16 +171,18 @@ type PairStatus struct {
 
 // 配对失败分类码（前端按码映射用户文案）。
 const (
-	PairModeAuto     = "auto"
-	PairModeManual   = "manual"
-	PairModeQR       = "qr"
-	PairErrCode      = "pair-code"
-	PairErrPort      = "pair-port"
-	PairErrConnPort  = "conn-port"
-	PairErrConnect   = "connect-failed"
-	PairErrTimeout   = "timeout"
-	PairErrAddr      = "addr-invalid"
-	PairErrInternal  = "internal"
+	PairModeAuto    = "auto"
+	PairModeManual  = "manual"
+	PairModeQR      = "qr"
+	PairErrCode     = "pair-code"
+	PairErrPort     = "pair-port"
+	PairErrConnPort = "conn-port"
+	PairErrConnect  = "connect-failed"
+	PairErrTimeout  = "timeout"
+	PairErrAddr     = "addr-invalid"
+	PairErrInternal = "internal"
+	// PairErrSerial：配对已连接但读不到设备序列号（gui55"不得静默残缺入档"的可见报错）。
+	PairErrSerial    = "serial"
 	PairPhaseIdle    = "idle"
 	PairPhasePairing = "pairing"
 	PairPhaseConn    = "connecting"
@@ -194,6 +201,10 @@ var (
 	verifyTimeout     = 4 * time.Second  // getprop 验证超时（单属性）
 	pairQrTTL         = 2 * time.Minute  // gui50：二维码 2 分钟失效
 	pairQrServiceName = "ADBQR-connectPhoneOverWifi"
+
+	// v2.1.77：5037 抢庄预算——检测（~0.3s）+ 最多 3 轮抢庄（每轮 kill ~0.5s +
+	// 冷 fork ~2.15s + 验证 ~0.3s）的总预算；全败/超时必须收敛（判失败记日志）。
+	srvTakeoverTimeout = 30 * time.Second
 
 	// gui30「插线即学习」：getprop 端口检查 / adb tcpip 各自的单次超时
 	// （tcpip 会重启设备端 adbd，给足 5s；pollOnce 的 8s qctx 是总兜底）。
@@ -217,6 +228,8 @@ type Snapshot struct {
 	DevOrder   []string        `json:"devOrder"`   // 设备卡顺序（gui45 后端持久化；空=未初始化，前端 merge 后写回）
 	NewDevice  *NewDeviceInfo  `json:"newDevice"`  // 新设备弹窗（非 nil = 需要弹）
 	PairStatus *PairStatus     `json:"pairStatus"` // 无线调试配对向导状态（非 idle = 前端弹窗展示步骤/结果）
+	// AppWins 应用窗口列表（二期 Step 3；后端=真相源，前端据此校准卡片）。
+	AppWins []AppWinItem `json:"appWins"`
 	// Settings 全局设置（设置面板两个开关；独立 settings.json 持久化）。
 	// 前端每次快照刷新拿到当前值，设置面板按它渲染开关状态。
 	Settings Settings `json:"settings"`
@@ -256,7 +269,8 @@ type popupState struct {
 }
 
 type App struct {
-	cfg Config
+	cfg    Config
+	update appUpdater
 
 	adb  *adb.Manager
 	newR RunnerFactory
@@ -272,6 +286,11 @@ type App struct {
 	// （gui49-fix3）；成功后清零。a.mu 保护。
 	adbHealTried bool
 	cancel       context.CancelFunc
+	// v2.1.84：adb 服务就绪闸——"读取类"操作（设备富化/应用枚举/图标/dpi 预热）
+	// 等启动抢庄检测（5037 归属确定）完成后再开始，消除"读在服务重建窗口里"
+	// 的竞态（首读失败 → 回退名/枚举超时）。StartServerOwnershipCheck 创建；
+	// nil=闸未启用（测试/无检测入口）→ 等待直接放行（保持旧行为）。
+	srvReadyCh chan struct{}
 
 	// gui54：「假关 + 并行清理」用。closeOnce 保证清理只启动一次（幂等）；
 	// closeDone 在全部会话 runner.Stop() 返回后关闭——main 侧据此决定真正退出进程的时机
@@ -283,6 +302,22 @@ type App struct {
 	// nextParams=参数浮窗保存后的下一次 StartCast 注入覆盖（按 serial）。
 	sessions   map[string]*sessionState
 	nextParams map[string]bridge.CastParams
+
+	// 应用窗口（二期 Step 3）：key=serial#pkg 的虚拟屏会话（独立于主投屏）；
+	// physCache=设备物理参数（等比 dpi 输入，wm size/density 长 TTL）；
+	// physMu 独立小锁：查询 adb 时不占 a.mu。
+	appWins   map[string]*appWinState
+	physMu    sync.Mutex
+	physCache map[string]devPhys
+
+	// 应用列表（二期 Step 1）：按设备 identity 缓存（USB/无线切换不重枚举）；
+	// busy=在跑防重；lastReady=就绪边沿检测（commitDisplay 末尾触发）。
+	// 均为 a.mu 保护；持久层在档案（profiles.json 的 apps 字段）。
+	appListCache         map[string]appListEntry
+	appListBusy          map[string]time.Time // 值=枚举开始时刻（「应用」按钮遮罩 10s 兜底用）
+	appListSilent        map[string]bool      // 点击入口触发的静默检测/等待；禁止显示枚举遮罩
+	appListSilentChanged map[string]bool      // 最近一次点击检测是否发现列表变化（前端仅变化时替换）
+	appListLastReady     map[string]bool
 
 	// 只读展示架构（主人决策）：GUI 不写 stdin、不自动干预。
 	// profiles=设备档案（identity 唯一化，全局共享只读）；
@@ -316,6 +351,8 @@ type App struct {
 	pairQR          *pairQRState
 	pairOps         pairOps
 	pairFastConnect bool // fix6：生产开启 connect 先行快路径；测试默认关，新测试显式开
+	// v2.1.77：5037 归属检测 + 抢庄（启动钩子 + 配对流程第二道检测共用）。
+	srvOps srvOps
 
 	// 新设备弹窗状态机（轮 B）
 	popup *popupState
@@ -324,13 +361,16 @@ type App struct {
 	// teachOps=adb 操作注入点（测试注入 fake）；taughtTcpip=本插线周期已学的
 	// serial 集（teachMu 保护；track 回调 goroutine 与校准/RefreshNow 可能并发
 	// 调用——必须独立锁，不能用 a.mu 拿住整个 adb 调用段）。
-	// 设备从列表消失=插线周期结束（拔线/adbd 重启瞬态），下一轮重建。
-	teachOps    teachOps
-	teachMu     sync.Mutex
-	taughtTcpip map[string]bool
+	// 学习期的 adbd 暂时消失不结束周期；周期退出后再拔插才重建。
+	teachOps        teachOps
+	teachMu         sync.Mutex
+	taughtTcpip     map[string]bool
+	usbLearning     map[string]*usbLearningState // serial → 当前插线学习周期（teachMu）
+	plugLearned     map[string]bool
+	plugStableReady map[string]bool
 	// 「插线进行中」（gui47-fix F2'）：plugging[identity]=检测到插线的时刻。
 	// 事件驱动状态机：USB added（offline/unauthorized/device 均算）置位；
-	// device 事件或在线无线卡且无 USB 条目（拔线事实）或 15s 兜底超时清除。
+	// 无线已落盘且 USB 稳定 2s 提前清除，首次 device 后 10s 强制清除。
 	// 兜底超时由 plugTimers 的 time.AfterFunc 一次性 timer 执行（禁止轮询）。
 	plugging         map[string]time.Time
 	plugTimers       map[string]*time.Timer
@@ -403,6 +443,17 @@ type pairOps struct {
 	getpropFn  func(ctx context.Context, serial, prop string) (string, error)
 	mdnsScanFn func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error)
 	tcpipFn    func(ctx context.Context, serial, port string) error // gui52-fix8：无线配对开启 5555（幂等检测）
+	// serialFn 直读设备序列号（gui55：adb get-serialno）——配对学习保底来源，
+	// 也是"纯探测写档前验身"的判据来源。addr 可以是 USB serial 或 ip:port。
+	serialFn func(ctx context.Context, addr string) (string, error)
+}
+
+// srvOps 是 5037 归属检测 + 抢庄的 adb 操作注入点（v2.1.77）：
+// 生产挂 adb 实现；测试 App（Version=="test"）不挂（旧用例零影响），
+// 新测试显式注入 fake 验证"检测 → 条件抢庄"链路。
+type srvOps struct {
+	checkFn    func(ctx context.Context) string          // 5037 归属检测（`adb mdns check` 合并输出）
+	takeoverFn func(ctx context.Context) (string, error) // 完整抢庄（kill + 快速重试 + 验证 37）
 }
 
 // 无输出提示：非投屏中阶段 40s 无任何 bat 新输出行 → 状态区显示
@@ -502,19 +553,29 @@ type Config struct {
 
 func New(cfg Config) *App {
 	a := &App{
-		cfg:        cfg,
-		adb:        adb.New(cfg.AdbPath, cfg.ConfigPath),
-		adbOK:      true, // 真空期去抖：首轮轮询未回前视为"可用/刷新中"（不闪红条，前端显示扫描中空态）
-		profiles:   NewProfileStore(cfg.ProfilesPath),
-		settings:   NewSettingsStore(cfg.SettingsPath),
-		disc:       discovery.New(cfg.AdbPath),
-		sessions:   map[string]*sessionState{},
-		nextParams: map[string]bridge.CastParams{},
+		cfg:                  cfg,
+		adb:                  adb.New(cfg.AdbPath, cfg.ConfigPath),
+		adbOK:                true, // 真空期去抖：首轮轮询未回前视为"可用/刷新中"（不闪红条，前端显示扫描中空态）
+		profiles:             NewProfileStore(cfg.ProfilesPath),
+		settings:             NewSettingsStore(cfg.SettingsPath),
+		disc:                 discovery.New(cfg.AdbPath),
+		sessions:             map[string]*sessionState{},
+		nextParams:           map[string]bridge.CastParams{},
+		appWins:              map[string]*appWinState{},
+		physCache:            map[string]devPhys{},
+		appListCache:         map[string]appListEntry{},
+		appListBusy:          map[string]time.Time{},
+		appListSilent:        map[string]bool{},
+		appListSilentChanged: map[string]bool{},
+		appListLastReady:     map[string]bool{},
 		popup: &popupState{
 			lastShown: map[string]time.Time{},
 			dismissed: map[string]bool{},
 		},
 		taughtTcpip:       map[string]bool{},
+		usbLearning:       map[string]*usbLearningState{},
+		plugLearned:       map[string]bool{},
+		plugStableReady:   map[string]bool{},
 		plugging:          map[string]time.Time{},
 		plugTimers:        map[string]*time.Timer{},
 		plugStableTimers:  map[string]*time.Timer{},
@@ -538,6 +599,12 @@ func New(cfg Config) *App {
 		getpropFn:  a.adb.Getprop,
 		mdnsScanFn: a.disc.MdnsScan,
 	}
+	// gui55：设备序列号直读（`adb get-serialno`）——配对学习/探测验身的最硬来源。
+	// 测试 App（Version=="test"）不挂真实 adb（旧单测不触达真实命令），
+	// 需要它的用例显式注入 fake。
+	if cfg.Version != "test" {
+		a.pairOps.serialFn = a.adb.GetSerialNo
+	}
 	// gui52-fix7：配对成功后的 tcpip 5555 开启/connect 学习已整体移除（mdns 权威）。
 	// fix6：生产开启 connect 先行快路径；旧单测默认保持 pair-first 语义，
 	// 新 fix6 单测显式开启验证快路径。
@@ -547,9 +614,16 @@ func New(cfg Config) *App {
 	if cfg.Version != "test" {
 		a.pairOps.tcpipFn = a.adb.Tcpip
 	}
+	// v2.1.77：5037 抢庄（启动检测 + 配对第二道检测）——生产才挂真实 adb；
+	// 测试 App 不挂（旧单测不触达真实命令），新测试显式注入 fake。
+	if cfg.Version != "test" {
+		a.srvOps.checkFn = a.adb.CheckServer
+		a.srvOps.takeoverFn = a.adb.TakeoverServer
+	}
 	// 插线即学习操作真实实现（测试可注入替换）
 	a.teachOps = teachOps{
 		getpropFn: a.adb.Getprop,
+		tcpipFn:   a.adb.Tcpip,
 		shellFn:   a.adb.Shell,
 	}
 	// gui48-teachfix：生产才挂真实 TCP 探测（5555 就绪验证）；测试 App 通过
@@ -654,7 +728,12 @@ func (a *App) StartDevicePolling(ctx context.Context) {
 	})
 
 	// 启动立即拉一次全量作为首块基线（track 首块到达前 UI 也能尽快有数据）。
-	go a.guard("device-poll-once", func() { a.pollOnce(ctx) })
+	// v2.1.84：先等 adb 服务就绪（抢庄检测完成）再拉——首轮富化（getprop
+	// marketname 等）不得落在服务重建窗口里（此前首读必败 → 显示回退名）。
+	go a.guard("device-poll-once", func() {
+		a.waitSrvReady(ctx)
+		a.pollOnce(ctx)
+	})
 
 	// 2s tick 只保留与设备状态无关的会话 UI tick（无输出提示/结束态 GC）。
 	go a.guard("device-ui-tick", func() {
@@ -725,6 +804,8 @@ func (a *App) onMdnsTrackEvents(ctx context.Context, ev adb.MdnsTrackEvents) {
 	a.mdnsMu.Unlock()
 
 	added, removed := a.applyMdnsSnapshot(ev.Snapshot, ev.First, ev.Added, ev.Removed)
+	bridge.DebugLog("[app] mdns 事件：snapshot=%d first=%v added=%d removed=%d",
+		len(ev.Snapshot), ev.First, len(added), len(removed))
 	for i := range added {
 		a.applyMdnsServiceAdded(&added[i])
 	}
@@ -797,6 +878,12 @@ func (a *App) mdnsServiceIdentity(s *discovery.MdnsService) string {
 	}
 	if s.Addr != "" {
 		if k := a.profiles.ResolveKey(s.Addr); k != "" {
+			return k
+		}
+		// gui55：短号与地址都不中 → IP 级兜底认领候选（同 IP 的残缺档案：
+		// 短号为空或与广播短号一致才认领；冲突则返回空 = 真新设备 → 待配对卡）。
+		if k := a.profiles.ResolveClaimableByIP(ipOfAddr(s.Addr), SerialFromServiceName(s.Name)); k != "" {
+			bridge.DebugLog("[app] mDNS 服务按 IP 认领候选：%s %s → %s", s.Name, s.Addr, k)
 			return k
 		}
 	}
@@ -882,18 +969,18 @@ func (a *App) startMdnsProbe(id, addr string, kind mdnsProbeKind) {
 		if !a.mdnsProbeLatest(addr, seq) {
 			return // 已有更新的探测发起：本结果过期，不写状态
 		}
+		// gui55：探测通 ≠ 档案所属设备在线（只有 IP 可达）——写 active 前先验身
+		// （直读设备自报序列号与档案身份比对）。
 		switch kind {
 		case mdnsProbeKindGoodbye:
 			if ok {
-				a.profiles.AddrSuccess(id, addr)
-				bridge.DebugLog("[app] mdns Goodbye（TCP 探测通，active）：%s/%s", id, addr)
+				a.probeMarkActiveCurrent(context.Background(), id, addr, "", "mdns Goodbye 探测", true)
 			} else if a.profiles.MarkAddrStale(id, addr) {
 				bridge.DebugLog("[app] mdns Goodbye：%s/%s → 对应形态打 stale", id, addr)
 			}
 		case mdnsProbeKindIdle:
 			if ok {
-				a.profiles.AddrSuccess(id, addr)
-				bridge.DebugLog("[app] mdns 静默问询（通，active）：%s/%s", id, addr)
+				a.probeMarkActiveCurrent(context.Background(), id, addr, "", "mdns 静默问询", true)
 			} else if a.profiles.MarkAddrStale(id, addr) {
 				bridge.DebugLog("[app] mdns 静默问询（不通，stale）：%s/%s", id, addr)
 			}
@@ -962,7 +1049,24 @@ func (a *App) reconcileMdnsSnapshot(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	a.applyMdnsSnapshot(svcs, false, nil, nil)
+	// gui55：对账不只更新快照——adb server 的 mDNS 扫描结果同样走事件管线
+	// （added → 写档/按 IP 认领；removed → 分形态打 stale）。
+	// 现场依据：自建监听在 Windows 防火墙下可能完全收不到组播（自检 limited），
+	// 此时"广播认不了亲"就必须由 60s 对账兜底——原来这里只刷新显示、不写档，
+	// 于是设备即使在广播，档案也永远补不上（K80 残缺档案的现场成因之一）。
+	added, removed := a.applyMdnsSnapshot(svcs, false, nil, nil)
+	bridge.DebugLog("[app] mdns 快照对账：services=%d added=%d removed=%d svcs=%v",
+		len(svcs), len(added), len(removed), mdnsBrief(svcs))
+	// gui55 现场实测：不能只按 diff 写档——事件链可能在"快照已更新、但 added 为空"
+	// 的情况下把新广播吞掉（K80 重启 adbd 后：23:49 对账 services=1 added=0，
+	// 档案因此永远补不上短号）。对账属于兜底通道，一律按全量快照补写；
+	// MatchMdnsModes 幂等，只有真变化才落盘。
+	for i := range svcs {
+		a.applyMdnsServiceAdded(&svcs[i])
+	}
+	for i := range removed {
+		a.onMdnsDropped(mdnsServiceDropKey(removed[i]), removed[i])
+	}
 	a.reapplyDisplay("mdns快照对账")
 }
 
@@ -1232,6 +1336,85 @@ func (a *App) healAdbServer(ctx context.Context) {
 	a.mu.Unlock()
 }
 
+// --- v2.1.77：5037 抢庄（启动检测 + 配对流程第二道检测） ---
+
+// srvWaitMax 是"服务就绪闸"等待的兜底上限（v2.1.84）：检测流程挂死/异常时
+// 也要放行读取（后续重试机制仍在），不让首屏读取被永久阻塞。
+const srvWaitMax = 12 * time.Second
+
+// StartServerOwnershipCheck 是 GUI 启动钩子（v2.1.77，异步、不阻塞首屏）：
+// 检测 5037 归属——完整（≥30，含"无 server 时自动 fork 37"）零动作；
+// 不完整（≤29 旧版坐庄）→ 抢庄夺回。投屏在场也不跳过（跳过 = 原生 TLS 永远
+// 开不上来；投屏短暂断流由 bat 自愈重连兜底）。失败静默（记日志，不影响启动）。
+// v2.1.84：本流程同时充当"读取闸门"——检测走完（含失败/异常路径）= adb 服务
+// 归属确定 → 开闸；waitSrvReady 保护的读取（富化/应用枚举/预热）此前一律等待。
+func (a *App) StartServerOwnershipCheck() {
+	a.mu.Lock()
+	if a.srvReadyCh == nil {
+		a.srvReadyCh = make(chan struct{})
+	}
+	ch := a.srvReadyCh
+	a.mu.Unlock()
+	go a.guard("srv-ownership-launch", func() {
+		defer func() {
+			// 开闸（幂等：已关闭则跳过——重复调用/二次检测安全）
+			select {
+			case <-ch:
+			default:
+				close(ch)
+			}
+		}()
+		a.ensureServerOwner("启动")
+	})
+}
+
+// waitSrvReady 等待 adb 服务就绪（v2.1.84："读取过程等服务建立完全之后才开始"）。
+// 未启用闸（srvReadyCh=nil：测试/无检测入口）→ 立即放行（保持旧行为）；
+// ctx 取消或超过 srvWaitMax 兜底也放行（既有重试机制兜底，不永久阻塞）。
+func (a *App) waitSrvReady(ctx context.Context) {
+	a.mu.RLock()
+	ch := a.srvReadyCh
+	a.mu.RUnlock()
+	if ch == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	t := time.NewTimer(srvWaitMax)
+	defer t.Stop()
+	select {
+	case <-ch:
+	case <-ctx.Done():
+	case <-t.C:
+		bridge.DebugLog("[app] 服务就绪闸等待超时（%v），放行读取（由既有重试兜底）", srvWaitMax)
+	}
+}
+
+// ensureServerOwner 检测 5037 归属并条件抢庄（v2.1.77 核心动作；调用点=启动钩子
+// 与配对流程第二道检测）。判据：mdns check 输出含 "unknown host service" = 不完整
+// （≤29 旧版坐庄）→ 抢庄；其它任何应答 = 完整（≥30）→ 零动作。
+// reason 进日志（"启动" / "配对"）；全程失败静默（只记日志，不阻断调用方）。
+func (a *App) ensureServerOwner(reason string) {
+	if a.srvOps.checkFn == nil || a.srvOps.takeoverFn == nil {
+		return // 测试 App 未挂真实 adb
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), srvTakeoverTimeout)
+	defer cancel()
+	out := a.srvOps.checkFn(ctx)
+	if adb.ServerHealthy(out) {
+		bridge.DebugLog("[app] 5037 归属检测（%s）：完整（≥30），零动作（%q）", reason, strings.TrimSpace(out))
+		return
+	}
+	bridge.DebugLog("[app] 5037 归属检测（%s）：旧版 server 坐庄（≤29）（%q）→ 抢庄", reason, strings.TrimSpace(out))
+	out2, err := a.srvOps.takeoverFn(ctx)
+	if err != nil {
+		bridge.DebugLog("[app] 抢庄失败（%s）：%v；最后输出 %q", reason, err, strings.TrimSpace(out2))
+		return
+	}
+	bridge.DebugLog("[app] 抢庄成功（%s）：37 已坐庄（%q）", reason, strings.TrimSpace(out2))
+}
+
 // refreshSessionTransports 刷新投屏会话的实际 transport/TLS 显示（gui43）。
 func (a *App) refreshSessionTransports(ctx context.Context) {
 	a.mu.RLock()
@@ -1382,6 +1565,23 @@ func (a *App) DeleteDevices(keys []string) error {
 			a.adbDisconnectAddr(addr)
 		}
 		a.markDeletedAll(key, e)
+		// v2.1.48：级联清理该设备名下全部数据——图标缓存目录（文件系统）+ 列表
+		// 内存缓存；档案条目（Apps 列表 + AppParams 虚拟屏参数）随 RemoveDevice
+		// 一并删除（AppParams 挂在 DeviceEntry 上）。
+		if dir := a.iconsDirFor(key); dir != "" {
+			if err := os.RemoveAll(dir); err != nil {
+				bridge.DebugLog("[app] 删除设备：图标目录清理失败 %s: %v", dir, err)
+			} else {
+				bridge.DebugLog("[app] 删除设备：图标目录已清理 %s", dir)
+			}
+		}
+		a.mu.Lock()
+		delete(a.appListCache, key)
+		delete(a.appListBusy, key)
+		delete(a.appListSilent, key)
+		delete(a.appListSilentChanged, key)
+		delete(a.appListLastReady, key)
+		a.mu.Unlock()
 		bridge.DebugLog("[app] 设备已删除：%s", key)
 		// gui52-fix16 诊断：删除后档案残留检查（离线卡幽灵根因定位）
 		if _, still := a.profiles.Entry(key); still {
@@ -1740,6 +1940,9 @@ func (a *App) commitDisplay(devs []adb.Device, src ...string) {
 	a.adbHealTried = false
 	a.devices = devs
 	a.mu.Unlock()
+
+	// 二期 Step 1：就绪边沿 → 应用列表枚举（覆盖"配对完成 / 离线→在线"两类稳定信号）。
+	a.kickAppListOnReadyChange(devs)
 }
 
 // dispatchPlugEvents 按事件序列推进 plugging 状态机（gui48-teachfix5）：
@@ -2392,7 +2595,7 @@ func (a *App) maybeTeachTcpip(ctx context.Context, devs []adb.Device) {
 	a.teachMu.Unlock()
 
 	for _, serial := range toCheck {
-		a.teachTcpipSerial(ctx, serial)
+		_ = a.teachTcpipSerial(ctx, serial)
 	}
 }
 
@@ -2401,7 +2604,7 @@ func (a *App) maybeTeachTcpip(ctx context.Context, devs []adb.Device) {
 // 只有当前 State==device 的 serial 才真正执行 teachTcpipSerial（device 就绪
 // 才能读 IP/查端口）。added 时未就绪（offline/unauthorized）不占 taughtTcpip
 // 名额，状态翻转为 device 的 changed 事件到达时补学；taughtTcpip 保证每个
-// 插线周期至多学习一次。在场 USB device 集合仍用于 taughtTcpip 周期清理。
+// 插线周期只创建一次学习任务，失败在首次 device 后的 10s 内重试。
 func (a *App) maybeTeachTcpipEvent(ctx context.Context, devs []adb.Device, added, changed []adb.Device) {
 	present := map[string]bool{}
 	for _, d := range devs {
@@ -2411,7 +2614,7 @@ func (a *App) maybeTeachTcpipEvent(ctx context.Context, devs []adb.Device, added
 	}
 	a.teachMu.Lock()
 	for k := range a.taughtTcpip {
-		if !present[k] {
+		if !present[k] && a.usbLearning[k] == nil {
 			delete(a.taughtTcpip, k)
 		}
 	}
@@ -2444,71 +2647,21 @@ func (a *App) maybeTeachTcpipEvent(ctx context.Context, devs []adb.Device, added
 		a.taughtTcpip[d.Serial] = true
 		toCheck = append(toCheck, d.Serial)
 	}
-	// gui49-fix6：不再用 getprop 补查清遮罩——遮罩清因①由 plugStabilityUpdate
-	// （USB 连续 device 满 2s）负责，学习与遮罩退出解耦。
+	// 遮罩提前退出要求无线学习已落盘且 USB 连续稳定 2s；失败在统一期限内重试。
 	a.teachMu.Unlock()
 
 	for _, serial := range toCheck {
 		bridge.DebugLog("[app] 插线学习开始：%s", serial)
-		a.teachTcpipSerial(ctx, serial)
+		a.startUsbLearning(ctx, serial)
 	}
 }
 
 // teachTcpipSerial 对单台 USB device 就绪设备执行一次插线学习（gui48-teachfix2）：
-// getprop 查端口（5555=遮罩退出判定）→ 先读 IP 候选（tcpip 会重启 adbd，
+// getprop 查端口（5555=已开启无线端口）→ 先读 IP 候选（tcpip 会重启 adbd，
 // 必须先读；物理接口过滤 + wlan>eth 优先级）→ 端口非 5555 则 tcpip 5555 →
 // 候选并行 TCP 探测（第一个通者胜）→ 通了才写档案（不通不写）。
-func (a *App) teachTcpipSerial(ctx context.Context, serial string) {
-	gctx, cancel := context.WithTimeout(ctx, teachGetpropTimeout)
-	port, err := a.teachOps.getpropFn(gctx, serial, "service.adb.tcp.port")
-	cancel()
-	if err != nil {
-		bridge.DebugLog("[app] 插线学习 getprop 失败：%s（%v），本周期放弃", serial, err)
-		return
-	}
-	port = strings.TrimSpace(port)
-	bridge.DebugLog("[app] 插线学习端口：%s = %q", serial, port)
-	// gui49-fix6：getprop 不再清插线遮罩——清因①改为「USB 连续 device 满 2s」
-	// （plugStabilityUpdate）；学习与遮罩退出解耦。
-	a.checkTlsSwitch(ctx, serial)
-	// gui47-fix F1'：读 IP 必须发生在 tcpip 之前（adbd 正常时读得到；
-	// tcpip 会重启设备端 adbd，之后读必失败）。候选=物理接口（排除蜂窝/隧道）。
-	cands := a.learnWirelessIPCandidates(ctx, serial)
-	if len(cands) == 0 {
-		bridge.DebugLog("[app] 插线学习 IP：%s 未取得", serial)
-	} else {
-		bridge.DebugLog("[app] 插线学习 IP 候选：%s -> %s", serial, strings.Join(cands, ","))
-	}
-
-	if port == "5555" {
-		// 端口本就 5555（幂等分支）：不再 tcpip；探测通过才对齐档案。
-		if len(cands) == 0 {
-			bridge.DebugLog("[app] 插线学习 IP：%s 未取得，无法验证 5555", serial)
-			return
-		}
-		if chosen := a.probeWirelessCandidates(ctx, serial, cands); chosen != "" {
-			a.alignWirelessIP(serial, chosen)
-		}
-		return
-	}
-
-	bridge.DebugLog("[app] 插线学习 tcpip：%s -> 5555", serial)
-	tctx, cancel := context.WithTimeout(ctx, teachTcpipTimeout)
-	err = a.teachOps.tcpipFn(tctx, serial, "5555")
-	cancel()
-	if err != nil {
-		bridge.DebugLog("[app] 插线学习 tcpip 失败：%s（%v）", serial, err)
-		return
-	}
-	// gui48-p1：学习成功即置位 plugging（幂等；盖住 adbd 重启窗口）。
-	a.plugStartBySerial(serial, time.Now(), "tcpip成功")
-	if len(cands) == 0 {
-		bridge.DebugLog("[app] 插线学习 IP：%s 未取得，tcpip 后无法验证 5555", serial)
-		return
-	}
-	if chosen := a.probeWirelessCandidates(ctx, serial, cands); chosen != "" {
-		a.alignWirelessIP(serial, chosen)
-	}
+func (a *App) teachTcpipSerial(ctx context.Context, serial string) error {
+	return a.teachTcpipAttempt(ctx, serial, &usbLearningState{})
 }
 
 // checkTlsSwitch 插线学习时的 TLS 开关感知（gui47）：读取全局
@@ -2684,19 +2837,20 @@ func (a *App) probeWirelessCandidates(ctx context.Context, serial string, cands 
 			ch <- probeResult{ip: ip, ok: a.teachOps.probeFn(pctx, ip+":5555")}
 		}()
 	}
-	var first string
 	for range cands {
-		r := <-ch
+		var r probeResult
+		select {
+		case r = <-ch:
+		case <-ctx.Done():
+			return ""
+		}
 		if r.ok {
 			bridge.DebugLog("[app] 插线学习 TCP 探测通：%s -> %s", serial, r.ip+":5555")
-			if first == "" {
-				first = r.ip
-			}
-			continue
+			return r.ip
 		}
 		bridge.DebugLog("[app] 插线学习 TCP 探测不通，不写档案：%s -> %s", serial, r.ip+":5555")
 	}
-	return first
+	return ""
 }
 
 // clearDeletedUsbForSerial 清该 serial 设备的所有删除标记键（序列号/身份/市场名/档案键）。
@@ -2814,21 +2968,23 @@ func (a *App) clearDeletedForProfile(ip, serial, tlsGuid string) {
 
 // alignWirelessIP 把读到的无线 IP 直接对齐进档案（gui47-fix F1'）：不再 connect
 // 验证——拔线后 justDropped 兜底探测/投屏 bat 自行 connect；写档案成功即打日志。
-func (a *App) alignWirelessIP(serial, ip string) {
+func (a *App) alignWirelessIP(serial, ip string) error {
 	id := a.profiles.ResolveKey(serial)
 	if id == "" {
 		// gui52-fix16d：档案键未就绪无法对齐，但仍要清标记——学习完成=重来。
 		a.clearDeletedUsbForSerial(serial)
 		bridge.DebugLog("[app] fix16d 学习完成清标记（档案未就绪）：%s", serial)
-		return
+		return errors.New("设备档案尚未就绪")
 	}
-	if a.profiles.AddrSuccess(id, ip+":5555", ModeTcpip) {
-		bridge.DebugLog("[app] 插线学习 IP：%s -> %s:5555（档案已对齐）", serial, ip)
+	if err := a.profiles.LearnWirelessAddr(id, ip+":5555"); err != nil {
+		return err
 	}
+	bridge.DebugLog("[app] 插线学习 IP：%s -> %s:5555（档案已对齐）", serial, ip)
 	// gui52-fix16d：学习完成 = 重来——清该设备全部删除标记（全键：serial/身份/
 	// 市场名/档案键），杜绝「插上再也找不回」的残留键幽灵过滤。
 	a.clearDeletedUsbForSerial(serial)
 	bridge.DebugLog("[app] fix16d 学习入档清标记：%s（键=%s）", serial, id)
+	return nil
 }
 
 // plugIDForSerial 把 USB serial 解析成遮罩状态机的 identity 键。
@@ -2957,7 +3113,7 @@ func (a *App) plugStart(id string, now time.Time, src ...string) {
 }
 
 // plugClear 清除插线遮罩状态并停止兜底/稳定 timer。src=触发源：
-// 稳定device2s / 兜底connect完成。
+// 稳定device2s且无线已入档 / 10s学习兜底 / 尚未device的兜底connect完成。
 func (a *App) plugClear(id string, src ...string) {
 	if id == "" {
 		return
@@ -2973,6 +3129,7 @@ func (a *App) plugClear(id string, src ...string) {
 		return
 	}
 	delete(a.plugging, id)
+	a.stopUsbLearningLocked(id)
 	if t := a.plugTimers[id]; t != nil {
 		t.Stop()
 		delete(a.plugTimers, id)
@@ -2986,9 +3143,8 @@ func (a *App) plugClear(id string, src ...string) {
 	a.refreshDisplayForPlug() // 清因任一通道 → 前端 ≤1s 看到档案态
 }
 
-// plugTimeout 是插线遮罩 10s 兜底回调（gui49-fix6）：超时 → 执行一次 connect
-// 确认（目标=档案无线记忆地址）→ 档案以 connect 结果为准 → 遮罩退出。
-// 稳定 device 2s 是主清因；此兜底覆盖真拔线/设备死机/折腾期 >10s。
+// plugTimeout 复用插线兜底 timer：首次 device 后 10s 强制退出并取消学习。
+// 尚未进入 device 的旧路径仍按档案地址做 connect 确认。
 func (a *App) plugTimeout(id string) {
 	a.teachMu.Lock()
 	at, ok := a.plugging[id]
@@ -3009,9 +3165,20 @@ func (a *App) plugTimeout(id string) {
 		t.Stop()
 		delete(a.plugStableTimers, id)
 	}
-	bridge.DebugLog("[app] 插线遮罩兜底超时：%s（起于 %s）→ connect 确认", id, at.Format("15:04:05.000"))
+	bridge.DebugLog("[app] 插线遮罩兜底超时：%s（起于 %s）→ 结束学习或确认旧地址", id, at.Format("15:04:05.000"))
+	learningStarted := false
+	for _, state := range a.usbLearning {
+		if state.id == id {
+			learningStarted = true
+			break
+		}
+	}
 	a.teachMu.Unlock()
-	a.plugTimeoutConnectConfirm(id)
+	if learningStarted {
+		a.plugClear(id, "10s学习兜底")
+	} else {
+		a.plugTimeoutConnectConfirm(id) // 尚未 device 的旧兜底路径
+	}
 }
 
 // plugExemptIDs 返回插线遮罩活跃 identity 集合（SyncDevices 离线观察豁免）。
@@ -3046,7 +3213,7 @@ func (a *App) plugUSBStable(devs []adb.Device, id string) bool {
 }
 
 // plugStabilityUpdate 插线遮罩清因①：USB 连续 device 满 plugStableDuration
-// 才清；期间非 device 波动 / removed → 取消稳定 timer（遮罩保持）。
+// 并且无线学习已落盘才清；期间非 device / removed 取消稳定 timer。
 func (a *App) plugStabilityUpdate(devs []adb.Device) {
 	a.teachMu.Lock()
 	ids := make([]string, 0, len(a.plugging))
@@ -3059,6 +3226,7 @@ func (a *App) plugStabilityUpdate(devs []adb.Device) {
 		stable := a.plugUSBStable(devs, id)
 		a.teachMu.Lock()
 		if !stable {
+			a.plugStableReady[id] = false
 			if t := a.plugStableTimers[id]; t != nil {
 				t.Stop()
 				delete(a.plugStableTimers, id)
@@ -3070,21 +3238,31 @@ func (a *App) plugStabilityUpdate(devs []adb.Device) {
 			a.teachMu.Unlock()
 			continue
 		}
-		a.plugStableTimers[id] = time.AfterFunc(plugStableDuration, func() {
+		var stableTimer *time.Timer
+		stableTimer = time.AfterFunc(plugStableDuration, func() {
 			a.guard("plug-stable", func() {
+				a.teachMu.Lock()
+				if a.plugStableTimers[id] != stableTimer {
+					a.teachMu.Unlock()
+					return
+				}
+				a.plugStableReady[id] = true
+				a.teachMu.Unlock()
 				a.plugStabilityCheck(id)
 			})
 		})
+		a.plugStableTimers[id] = stableTimer
 		a.teachMu.Unlock()
 	}
 }
 
-// plugStabilityCheck 稳定 timer 到点复查：仍稳定才清遮罩。
+// plugStabilityCheck 联合复查：无线学习已落盘且 USB 连续稳定才清遮罩。
 func (a *App) plugStabilityCheck(id string) {
 	a.teachMu.Lock()
 	_, active := a.plugging[id]
+	ready := a.plugLearned[id] && a.plugStableReady[id]
 	a.teachMu.Unlock()
-	if !active {
+	if !active || !ready {
 		return
 	}
 	a.mu.RLock()
@@ -3092,6 +3270,7 @@ func (a *App) plugStabilityCheck(id string) {
 	a.mu.RUnlock()
 	if !a.plugUSBStable(base, id) {
 		a.teachMu.Lock()
+		a.plugStableReady[id] = false
 		if t := a.plugStableTimers[id]; t != nil {
 			t.Stop()
 			delete(a.plugStableTimers, id)
@@ -3099,7 +3278,7 @@ func (a *App) plugStabilityCheck(id string) {
 		a.teachMu.Unlock()
 		return
 	}
-	a.plugClear(id, "稳定device2s")
+	a.plugClear(id, "稳定device2s且无线已入档")
 }
 
 // plugTimeoutConnectConfirm 是 10s 兜底的 connect 确认（gui49-fix6）：与拔线
@@ -3248,10 +3427,77 @@ func (a *App) pairStabilityCheck(id string) {
 		a.teachMu.Unlock()
 		return
 	}
-	a.pairClear(id, "稳定device2s")
+	// gui55 联合判据：放行 =「连续 device 满 2s」且「名称已入档」。
+	// 名称（设备短号）没学到就不放行——遮罩继续盖住过渡窗口，同时后台补学
+	// （mDNS 服务名/get-serialno），学到即入档、下一拍复查放行；10s 兜底是保险丝。
+	if !a.pairNameLearned(id) {
+		go a.guard("pair-learn-identity", func() { a.pairLearnIdentity(id) })
+		a.pairRearmStableCheck(id)
+		return
+	}
+	a.pairClear(id, "稳定device2s+名称已入档")
 }
 
-// pairTimeout 10s 兜底：遮罩直接退出（probe 刷状态显示真实状态）。
+// pairNameLearned 判定该 identity 的名称（设备短号）是否已入档（gui55 遮罩放行判据）。
+func (a *App) pairNameLearned(id string) bool {
+	e, ok := a.profiles.Entry(id)
+	if !ok {
+		return false
+	}
+	return len(e.Serials) > 0
+}
+
+// pairLearnIdentity 补学该 identity 的设备短号并写入档案（gui55 配对学习闭环的
+// 补学路径）：遮罩期内反复调用；学到即 LearnIdentity 入档，遮罩下一拍复查放行。
+// 同步阻塞（最多一次 mDNS 扫描 + 两次序列号直读），调用方放在 goroutine 里。
+func (a *App) pairLearnIdentity(id string) {
+	e, ok := a.profiles.Entry(id)
+	if !ok {
+		return
+	}
+	addr := recentOkAddr(e)
+	if addr == "" {
+		for i := range e.Addrs {
+			if e.Addrs[i].Addr != "" {
+				addr = e.Addrs[i].Addr
+				break
+			}
+		}
+	}
+	if addr == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), pairLearnBudget)
+	defer cancel()
+	serial, guid := a.learnSerialFor(ctx, addr, true)
+	if serial == "" && guid == "" {
+		bridge.DebugLog("[app] 配对遮罩补学：%s（%s）仍学不到短号", id, addr)
+		return
+	}
+	if a.profiles.LearnIdentity(id, serial, guid) {
+		bridge.DebugLog("[app] 配对遮罩补学成功：%s（%s）← 短号=%q guid=%q", id, addr, serial, guid)
+		a.reapplyDisplay("配对遮罩补学")
+	}
+}
+
+// pairRearmStableCheck 重排一次稳定复查 timer（等名称学到期间调用；
+// 覆盖旧 timer——pairStabilityUpdate 见到已有 timer 会跳过，正好保持单条链）。
+func (a *App) pairRearmStableCheck(id string) {
+	a.teachMu.Lock()
+	defer a.teachMu.Unlock()
+	if _, ok := a.pairing[id]; !ok {
+		return
+	}
+	if t := a.pairStableTimers[id]; t != nil {
+		t.Stop()
+	}
+	a.pairStableTimers[id] = time.AfterFunc(pairLearnTick, func() {
+		a.guard("pair-shield-stable", func() { a.pairStabilityCheck(id) })
+	})
+}
+
+// pairTimeout 10s 兜底（gui55）：兜底触发时走 get-serialno 保底补学；仍学不到
+// → 明确报错（可见：配对弹窗失败态），不静默留残缺档案；随后照常清遮罩。
 func (a *App) pairTimeout(id string) {
 	a.teachMu.Lock()
 	if _, ok := a.pairing[id]; !ok {
@@ -3259,6 +3505,15 @@ func (a *App) pairTimeout(id string) {
 		return
 	}
 	a.teachMu.Unlock()
+	if !a.pairNameLearned(id) {
+		a.pairLearnIdentity(id) // 兜底：get-serialno 直读（内部已含 mDNS 重扫）
+	}
+	if !a.pairNameLearned(id) {
+		bridge.DebugLog("[app] 配对遮罩 10s 兜底：%s 名称仍未学到 → 明确报错（不静默残缺）", id)
+		a.setPairFailed(PairErrSerial,
+			"配对已连接，但 10 秒内没能读到设备序列号（档案名称不完整）：请保持手机亮屏并停留在「无线调试」界面，然后重新配对",
+			id, "")
+	}
 	a.pairClear(id, "兜底超时10s")
 }
 
@@ -3326,8 +3581,8 @@ func (a *App) pairProbeAllAddrs(key string) {
 			_, err := a.pairOps.connectFn(cctx, t.addr)
 			cancel()
 			if err == nil {
-				a.profiles.AddrSuccessMode(key, t.addr, t.mode)
-				bridge.DebugLog("[app] 配对遮罩 probe：%s/%s 通 → active", key, t.addr)
+				// gui55：同"纯探测"口径——验身通过才写 active。
+				a.probeMarkActive(context.Background(), key, t.addr, t.mode, "配对遮罩 probe")
 			} else {
 				a.profiles.AddrFailMode(key, t.addr, t.mode)
 				bridge.DebugLog("[app] 配对遮罩 probe：%s/%s 不通 → stale（%v）", key, t.addr, err)
@@ -3626,10 +3881,6 @@ func (a *App) runDiscovery(ctx context.Context, cands map[string][]AddrEntry) {
 	for i := range results {
 		r := &results[i]
 		if r.ok {
-			if !anyOK {
-				anyOK = true
-				st.Found = r.addr
-			}
 			mode := ""
 			if modeOf := a.profiles.AddrMode(r.addr); modeOf == ModeTls {
 				mode = ModeTls
@@ -3647,8 +3898,14 @@ func (a *App) runDiscovery(ctx context.Context, cands map[string][]AddrEntry) {
 			}
 			// gui41 单记忆：成功/失败按 identity 写档案（广播/归档可能已把
 			// 同一形态旧地址删除，直接以 addr 为 key 会 no-op）。
-			a.profiles.AddrSuccessWithMode(r.plan.identity, r.addr, mode)
-			bridge.DebugLog("[app] 无线探测成功：%s（tls=%v）", r.addr, mode == ModeTls)
+			// gui55：纯探测写 active 前验身（直读设备序列号核对档案身份）——
+			// 只有 IP 可达不算"我们的设备在线"。
+			if a.probeMarkActive(ctx, r.plan.identity, r.addr, mode, "无线探测") {
+				if !anyOK {
+					anyOK = true
+					st.Found = r.addr
+				}
+			}
 		} else {
 			for _, ad := range r.plan.addrs {
 				a.profiles.AddrFail(r.plan.identity, ad)
@@ -3780,25 +4037,27 @@ func mdns10DecorateSpecs(d *adb.Device, e DeviceEntry) {
 }
 
 // mdns10ProfileRes 把档案档位长边换算成设备宽高比的分辨率字符串：
-// native 是 "WxH"（宽≥高），输出 "档位长边 x 按同比例换算短边"（整数截断，
-// 与 adb.ScaleForWireless 同口径）。native 不可用时按 16:9 兜底。
+// native 是 "WxH"（宽≥高），输出 "档位长边 x 按同比例换算短边"（整数截断 +
+// **短边向下取偶**——编码尺寸偶对齐，与 scrcpy 实际输出一致：2136x3200 长边 1920
+// 实得 1920x1280；与 adb.ScaleForWireless 同口径）。native 不可用时按 16:9 兜底。
 func mdns10ProfileRes(native string, longEdge int) string {
 	if longEdge <= 0 {
 		return ""
 	}
-	wStr, hStr, ok := strings.Cut(native, "x")
-	if !ok {
-		return fmt.Sprintf("%dx%d", longEdge, longEdge*9/16)
+	h := longEdge * 9 / 16 // 默认 16:9 兜底
+	if wStr, hStr, ok := strings.Cut(native, "x"); ok {
+		w, err1 := strconv.Atoi(wStr)
+		hh, err2 := strconv.Atoi(hStr)
+		if err1 == nil && err2 == nil && w > 0 && hh > 0 {
+			if hh > w {
+				w, hh = hh, w
+			}
+			h = hh * longEdge / w
+		}
 	}
-	w, err1 := strconv.Atoi(wStr)
-	h, err2 := strconv.Atoi(hStr)
-	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
-		return fmt.Sprintf("%dx%d", longEdge, longEdge*9/16)
+	if h > 2 {
+		h &^= 1
 	}
-	if h > w {
-		w, h = h, w
-	}
-	h = h * longEdge / w
 	return strconv.Itoa(longEdge) + "x" + strconv.Itoa(h)
 }
 
@@ -3851,6 +4110,11 @@ func (a *App) buildPending(devs []adb.Device) {
 		}
 		if !known {
 			known = a.profiles.TlsGuidKnown(s.Name)
+		}
+		// gui55：短号不中但同 IP 有档案（残缺档案换端口/换 IP 场景）→ 不是
+		// "真新设备"，不建待配对卡（档案侧由 MatchMdnsModes 的 IP 级认领写档）。
+		if !known {
+			known = a.profiles.ResolveClaimableByIP(ipOfAddr(s.Addr), serial) != ""
 		}
 		if known {
 			continue
@@ -4554,8 +4818,8 @@ func (a *App) mdns9ProfileFallbackCard(key string, e DeviceEntry) adb.Device {
 // 插线进行中（plugging）的身份，无论 devs 呈现 USB 消失（adbd 重启窗口）、
 // 离线卡、在线无线卡，一律合成/维持「USB 连接中」卡（State=device、ConnType=usb、
 // Serial=档案 USB serial、Name=市场名、Connecting=true——前端按钮「连接中…」禁点）；
-// 在线无线卡并入副行，离线卡让位。只有「USB 完全准备好（State=device）」或
-// 「拔线事实（在线无线卡且无 USB 条目）」或 15s 兜底超时（plugTimers）才能结束遮罩。
+// 在线无线卡并入副行，离线卡让位。USB 连续稳定 2s 且无线已落盘时提前结束；
+// 首次 device 后 10s 兜底结束，同周期再次 device 不续期。
 //
 // 并发：plugging/plugTimers 由 teachMu 保护；合成顺序按 key 排序
 // （map 迭代无序，卡片顺序必须确定——前端顺序敏感）。
@@ -4566,6 +4830,11 @@ func (a *App) shieldUsbLearning(devs []adb.Device) []adb.Device {
 	for id, at := range a.plugging {
 		if now.Sub(at) > plugShieldTimeout {
 			delete(a.plugging, id) // 兜底超时（timer 之外的防御性清理）
+			a.stopUsbLearningLocked(id)
+			if t := a.plugStableTimers[id]; t != nil {
+				t.Stop()
+				delete(a.plugStableTimers, id)
+			}
 			if t := a.plugTimers[id]; t != nil {
 				t.Stop()
 				delete(a.plugTimers, id)
@@ -4830,7 +5099,7 @@ func (a *App) identityOf(d *adb.Device) string {
 // displayNameOf 设备展示名（市场名优先）：档案 marketname → adb marketname →
 // Name（富化名，marketname 优先、man+model 兜底）→ serial。
 // 弹窗文本必须用市场名：档案有 "REDMI K80" 而本轮 getprop 失败时，
-// Name 会是 "Xiaomi 24117RK2CC"（厂商+型号），禁止拿它当弹窗文本。
+// Name 会是 "Xiaomi MODEL123"（厂商+型号），禁止拿它当弹窗文本。
 func (a *App) displayNameOf(d *adb.Device) string {
 	if e, ok := a.deviceEntry(d); ok {
 		if n := profileCardName(e, ""); n != "" {
@@ -5055,8 +5324,8 @@ func (a *App) snapshotRaw() Snapshot {
 		Version:    a.cfg.Version,
 		BatPath:    a.cfg.BatPath,
 		AdbOK:      a.adbOK,
-		AdbFailing: a.adbOK && a.adbFail > 0, // 真空期去抖：可用但正在连续失败 → 前端"刷新中"软提示
-		Devices:    append([]adb.Device{}, a.devices...),
+		AdbFailing: a.adbOK && a.adbFail > 0,     // 真空期去抖：可用但正在连续失败 → 前端"刷新中"软提示
+		Devices:    a.devicesWithAppBusyLocked(), // 二期：填充「应用」按钮枚举遮罩态（锁内）
 		Pending:    append([]PendingDevice{}, a.pending...),
 		Discovery:  disc,
 		Cast:       a.activeCastLocked(),
@@ -5065,6 +5334,7 @@ func (a *App) snapshotRaw() Snapshot {
 		DevOrder:   a.profiles.DeviceOrder(),
 		NewDevice:  a.popup.info,
 		PairStatus: pair,
+		AppWins:    a.appWinsListLocked(),
 		Settings:   a.settings.Get(), // 设置面板两个开关的当前值
 	}
 }
@@ -5147,6 +5417,11 @@ func (a *App) StartCastParallel(serial string) error {
 // 多会话规则：同 serial 已有活动会话 → "投屏已在运行"；同 identity 已有活动会话
 // （设备卡重键/双卡）→ 同样拒绝；同 serial 的结束态会话 → 原地替换（开新会话）。
 func (a *App) StartCast(serial string) error {
+	unlockUpdate, updateErr := a.guardUpdateStart()
+	if updateErr != nil {
+		return updateErr
+	}
+	defer unlockUpdate()
 	// 来源观测（21:29 关窗后 90s 自动重投的偶发问题）：入口即留痕——
 	// 调用链自动路径 vs JS 桥调用（配合 ui 层 [js] 日志定位前端触发者）
 	bridge.DebugLog("[app] StartCast 进入 serial=%q 调用链=%s", serial, callerChain(1))
@@ -5163,26 +5438,6 @@ func (a *App) StartCast(serial string) error {
 	a.mu.RUnlock()
 	if alreadyRunning {
 		return errors.New("投屏已在运行")
-	}
-
-	// gui36 投屏地址=档案直选不验证（无线卡；USB 卡走 USB serial，无线地址链
-	// 不涉及——锁内仍按原 gui21/gui15 链做无线分支提示）：
-	// ① mDNS 广播命中（设备正在公告的当前地址）→ 直接选，不验证（端口必活）；
-	// ② 无广播 → 档案 OrderedAddrs[0] 直选（不验证；验证与 IP 更新归 mDNS
-	//    15s 责任环——mDNS 广播=真相即替换、active 置位、失败只 60s 节流永不拉黑）；
-	// ③ 无线卡无候选 → 走原 target.Serial 兜底（不变）。
-	startAddr, addrVerified := "", false
-	a.mu.RLock()
-	t0 := findTargetDevice(serial, a.devices)
-	wifiTarget := t0 != nil && t0.ConnType == "wifi"
-	a.mu.RUnlock()
-	if wifiTarget {
-		if mdns := a.wirelessStartAddr(serial); mdns != "" {
-			startAddr = mdns
-		} else if cands := a.profiles.OrderedAddrs(serial); len(cands) > 0 {
-			addrVerified = true
-			startAddr = cands[0].Addr // gui36 档案直选不验证：活性由 mDNS/探测链每 15s 维护
-		}
 	}
 
 	a.mu.Lock()
@@ -5226,13 +5481,6 @@ func (a *App) StartCast(serial string) error {
 			}
 		}
 	}
-	// gui36 起该分支不再可达：addrVerified=true 时 startAddr 恒非空（有候选→
-	// 直选 OrderedAddrs[0]；无候选→addrVerified=false），保留代码仅作防御/注释。
-	// 旧 gui32 语义是候选全部验证失败 → 友好提示「未找到可用无线地址」，现已退役。
-	if target != nil && target.ConnType == "wifi" && startAddr == "" && addrVerified {
-		a.mu.Unlock()
-		return errors.New("未找到可用无线地址")
-	}
 	// 原生分辨率捕获（宽≥高，修复恢复期徽标"长边 X"）：
 	// ①目标卡 Res → ②同 identity 其他卡 Res → ③档案持久化 Res——
 	// 启动即定格进 CastState，投屏会话期间不随实时设备列表消失。
@@ -5264,12 +5512,24 @@ func (a *App) StartCast(serial string) error {
 	params := a.nextParams[serial]
 	delete(a.nextParams, serial)
 	p := a.profiles.Get(serial)
-	if !params.Usb.Set && p.Usb.Custom {
-		params.Usb = bridge.ModeParams{Res: p.Usb.Res, FPS: p.Usb.FPS, Bitrate: p.Usb.Bitrate, Set: true}
+	// v2.1.79：锁定态也需注入（锁定=固定当前生效值，值随注入传给 bat）。
+	if !params.Usb.Set && (p.Usb.Custom || p.Usb.LockFps || p.Usb.LockBitrate) {
+		params.Usb = bridge.ModeParams{Res: p.Usb.Res, FPS: p.Usb.FPS, Bitrate: p.Usb.Bitrate, Set: true,
+			LockFps: p.Usb.LockFps, LockBitrate: p.Usb.LockBitrate}
 	}
-	if !params.Wifi.Set && p.Wifi.Custom {
-		params.Wifi = bridge.ModeParams{Res: p.Wifi.Res, FPS: p.Wifi.FPS, Bitrate: p.Wifi.Bitrate, Set: true}
+	if !params.Wifi.Set && (p.Wifi.Custom || p.Wifi.LockFps || p.Wifi.LockBitrate) {
+		params.Wifi = bridge.ModeParams{Res: p.Wifi.Res, FPS: p.Wifi.FPS, Bitrate: p.Wifi.Bitrate, Set: true,
+			LockFps: p.Wifi.LockFps, LockBitrate: p.Wifi.LockBitrate}
 	}
+	// v2.1.78：声音档位注入（独立维度——无论画面参数是否自定义都注入；主屏默认
+	// pc=仅电脑出声，与不加参数的原行为一致；统一从档案取，覆盖 nextParams 路径）。
+	params.Usb.Audio = mainAudioMode(p.Usb.Audio)
+	params.Wifi.Audio = mainAudioMode(p.Wifi.Audio)
+	// v2.1.91：编码格式（照 Audio 模式从档案归一注入——两套独立；默认 h264/opus）。
+	params.Usb.VCodec = NormalizeVCodec(p.Usb.VCodec)
+	params.Usb.ACodec = NormalizeACodec(p.Usb.ACodec)
+	params.Wifi.VCodec = NormalizeVCodec(p.Wifi.VCodec)
+	params.Wifi.ACodec = NormalizeACodec(p.Wifi.ACodec)
 	// 开关 A（设置面板）：参数控件默认可见性——每次启动投屏按当前设置注入
 	// SCEZ_PARAM_OVERLAY（1=启动可见，0=启动隐藏），由 bat 转交 scrcpy.exe
 	// 客户端（环境变量随进程树继承），客户端在浮层初始化时读取。
@@ -5277,67 +5537,11 @@ func (a *App) StartCast(serial string) error {
 	ov := a.settings.Get().ShowParamOverlay
 	params.OverlayVisible = ov
 	params.OverlayVisibleSet = true
-	// 设备锁定注入（多设备 Phase 1 轮 A + 修复）：
-	//   USB 在线 → SCEZ_SERIAL=USB serial——判据 = "该 identity 存在在线 USB transport"
-	//   （无论目标卡显示的 ConnType；双卡场景下同 identity 的 USB 卡也算）→ bat 首轮即 USB 投屏
-	//   （修复"保存重投先无线后有线"：卡片重键后旧 serial 查不到目标 → 漏注 SERIAL）；
-	//   SCEZ_ADDR=无线地址（gui36 档案直选不验证：无线卡=广播/档案
-	//   OrderedAddrs[0]；USB 卡=广播/档案 BestAddr 提示——拔线后无线分支用它
-	//   直连兜底）；
-	//   两者都未命中（设备列表外）→ 不注入，bat 走原逻辑。
-	tlsFlag := false // 当次连接形态：注入的 addr 形态=tls 时前端显示"TLS加密"
-	if target != nil {
-		usbSerial := ""
-		if target.ConnType == "usb" {
-			usbSerial = target.Serial
-		} else {
-			// 目标卡是无线：同 identity 的其他卡/无其他卡时按 identity 找在线 USB transport
-			usbSerial = a.usbSerialByIdentity(a.identityOf(target), target.Serial, a.devices)
-		}
-		if usbSerial != "" {
-			params.Serial = usbSerial
-		}
-		// gui36 地址链（主人基准：mDNS 每 15s 维护档案活性，投屏不验证）：
-		//   无线卡 → 广播直接选 / 档案 OrderedAddrs[0] 直选（预检阶段已算好
-		//     startAddr；档案无候选（空档/全节流）→ 当前在线地址兜底，活连接
-		//     非死记忆）；投屏不再 adb connect 验证——0.5-2s 卡顿消除。
-		//   USB 卡 → 原 gui21/gui15 链（广播 → 档案 BestAddr 作无线分支提示，
-		//     不验证——USB serial 才是本次投屏通道）。
-		// K80 场景：45005 tls 广播尚未入档也直接选中；tlsFlag 三层判定对
-		// 注入的广播地址自然判 tls（AddrMode/isKnownTlsAddr/isTlsFormAddr），
-		// 判定本身不动。
-		addr := startAddr
-		if target.ConnType == "wifi" {
-			if addr == "" {
-				addr = target.Serial
-			}
-		} else {
-			addr = a.wirelessStartAddr(serial)
-			if addr == "" {
-				addr = a.profiles.BestAddr(serial)
-			}
-		}
-		if addr != "" {
-			params.Addr = addr
-			// gui42：同时注入备用异形态地址（bat 单次降级；无备用不注入）。
-			params.Addr2 = a.secondaryWirelessAddr(serial)
-			// 形态判定两层：档案记录（mode=tls）→ 环境事实启发式（port!=5555）。
-			tlsFlag = a.profiles.AddrMode(addr) == ModeTls || isTlsFormAddr(addr)
-		}
-	}
-	// 档案身份注入（防抢锁定的会话本尊）：锁定会话（Serial/Addr 已注）才带
-	// SCEZ_MARKET/SCEZ_MODEL——bat 无线回退时用它拒绝"共享 config.txt 被别的
-	// 会话改写"的异身份设备，watcher 市场名读不到时也用 SCEZ_MARKET 比对。
-	if params.Serial != "" || params.Addr != "" {
-		if e, ok := a.profiles.Entry(serial); ok {
-			if e.Marketname != "" {
-				params.Market = e.Marketname
-			}
-			if e.Model != "" {
-				params.Model = e.Model
-			}
-		}
-	}
+	// 主投屏与应用投屏使用相同的稳定身份与当前档案地址。
+	locked := a.deviceLockParams(serial, a.devices)
+	params.Serial, params.Addr, params.Addr2 = locked.Serial, locked.Addr, locked.Addr2
+	params.Market, params.Model = locked.Market, locked.Model
+	tlsFlag := params.Addr != "" && isTlsFormAddr(params.Addr)
 
 	// 创建会话级 runner：回调按 serial 绑定，App 侧再按 runner 身份防串
 	// （陈旧 runner 的迟到回调不污染重启/替换后的新会话）。
@@ -5405,6 +5609,16 @@ func (a *App) StartCast(serial string) error {
 				a.OnBatExitFor(serial, r, -1)
 			}
 		}()
+		// 异步启动排队期间可能已换 IP；与应用窗口一样在启动前重读档案。
+		locked := a.appWinLockParams(serial)
+		params.Serial, params.Addr, params.Addr2 = locked.Serial, locked.Addr, locked.Addr2
+		params.Market, params.Model = locked.Market, locked.Model
+		a.mu.Lock()
+		if st := a.sessions[serial]; st != nil && st.runner == r {
+			st.castAddr, st.castAddr2, st.usbSerial = params.Addr, params.Addr2, params.Serial
+			st.cast.Tls = params.Addr != "" && isTlsFormAddr(params.Addr)
+		}
+		a.mu.Unlock()
 		if err := r.Start(serial, params); err != nil {
 			a.pushErrorLocked(serial, r, "启动失败："+err.Error())
 			return
@@ -5449,6 +5663,9 @@ func (a *App) coldSearch5555(ctx context.Context) {
 	a.coldSearch5555Done = true
 	a.mu.Unlock()
 
+	// v2.1.84：等 adb 服务就绪（抢庄窗口内不发起 connect——失败即白跑一轮）
+	a.waitSrvReady(ctx)
+
 	type target struct {
 		id   string
 		addr string
@@ -5478,8 +5695,9 @@ func (a *App) coldSearch5555(ctx context.Context) {
 			_, err := a.disc.ConnectOut(cctx, t.addr)
 			cancel()
 			if err == nil {
-				a.profiles.AddrSuccessMode(t.id, t.addr, t.mode)
-				bridge.DebugLog("[app] 冷启动全量搜索成功：%s/%s → active", t.id, t.addr)
+				// gui55：connect 通只证明"这个 IP 上有台设备"——写 active 前验身
+				// （DHCP 回收复用会把 A 设备写活 B 档案：平板莫名在线）。
+				a.probeMarkActive(ctx, t.id, t.addr, t.mode, "冷启动全量搜索")
 			} else {
 				a.profiles.AddrFailMode(t.id, t.addr, t.mode)
 				bridge.DebugLog("[app] 冷启动全量搜索不通：%s/%s → stale（%v）", t.id, t.addr, err)
@@ -5528,11 +5746,13 @@ func (a *App) probeProfileActiveAddrs(ctx context.Context, key string) {
 			_, err := a.disc.ConnectOut(cctx, t.addr)
 			cancel()
 			if err == nil {
-				a.profiles.AddrSuccessMode(key, t.addr, t.mode)
-				aliveMu.Lock()
-				alive = true
-				aliveMu.Unlock()
-				bridge.DebugLog("[app] 缺席验尸：%s/%s 探测通 → 保持 active", key, t.addr)
+				// gui55：验身通过才算"这台设备还活着"（否则 IP 复用会把别的设备
+				// 当成该档案在线）。
+				if a.probeMarkActive(ctx, key, t.addr, t.mode, "缺席验尸") {
+					aliveMu.Lock()
+					alive = true
+					aliveMu.Unlock()
+				}
 			} else {
 				a.profiles.AddrFailMode(key, t.addr, t.mode)
 				bridge.DebugLog("[app] 缺席验尸：%s/%s 探测不通 → stale（%v）", key, t.addr, err)
@@ -5636,6 +5856,9 @@ func (a *App) pairQrOpen() error {
 	a.pair = &PairStatus{Phase: PairPhaseIdle, Mode: PairModeQR, QrText: q.qrText(), QrExpireAt: q.expireAt.Unix()}
 	a.mu.Unlock()
 	bridge.DebugLog("[app] 二维码配对已打开：%s（%s 过期）", q.qrText(), q.expireAt.Format("15:04:05"))
+	// v2.1.77：进配对流程第二道检测（防运行期中 5037 被旧版夺走）——
+	// 不完整才抢庄（只掀，不带私有兜底）；异步、不阻塞弹窗。
+	go a.guard("pair-srv-ownership", func() { a.ensureServerOwner("配对") })
 	return nil
 }
 
@@ -5940,27 +6163,47 @@ func (a *App) completePairFlowAfterConnect(ctx context.Context, p PendingDevice,
 	model, _ := a.pairOps.getpropFn(vctx, ip+":"+connPort, "ro.product.model")
 	vcancel()
 
-	// gui52：connect 服务实例名（adb-<短号>-XXXX）本身就是无线接入学习的
-	// serial 来源。手动/connect-first 路线可能没有 guid（无人给服务名）——
-	// connect 已成功后现场重扫一次同 IP 的 _adb-tls-connect 补齐 guid/短号，
-	// 纯无线设备不再 serials:[]。
-	if guid == "" || hintSerial == "" {
-		if _, svcName := a.resolveTlsServiceFresh(ip); svcName != "" {
-			if guid == "" {
-				guid = svcName
-			}
-			if hintSerial == "" && strings.HasPrefix(svcName, "adb-") {
-				if serial := TlsServiceIdentity(svcName); serial != "" {
-					hintSerial = serial
-				}
-			}
+	// ④b 身份学习（gui55 配对学习闭环）：短号/guid 多来源 + 重试。
+	// 旧实现只在配对成功瞬间"现场重扫一次 _adb-tls-connect"——设备此刻可能还没
+	// 开始广播（K80 只广播 _adb._tcp 经典服务），错过即以空 serial/tlsGuid 入档，
+	// 之后没有任何补学路径（残缺 → 广播短号认不了亲 → 永远补不上）。
+	// 现在的来源顺序：现场重扫 → 现有快照（含 _adb._tcp 经典服务）→ get-serialno
+	// 直读（最硬）→ getprop ro.serialno；仍未学到 → 明确报错，不入档。
+	learnAddr := ip + ":" + connPort
+	lctx, lcancel := context.WithTimeout(ctx, pairLearnBudget)
+	for attempt := 0; attempt < learnRetryAttempts; attempt++ {
+		ls, lg := a.learnSerialFor(lctx, learnAddr, true) // 每轮都重扫：设备可能刚开始广播
+		if hintSerial == "" && ls != "" {
+			hintSerial = ls
+		}
+		if guid == "" && lg != "" {
+			guid = lg
+		}
+		if hintSerial != "" && (guid != "" || attempt >= 1) {
+			break // 名称已到手：guid 至多多给一次机会（不拖慢成功态）
+		}
+		if lctx.Err() != nil {
+			break
+		}
+		select {
+		case <-lctx.Done():
+		case <-time.After(learnRetryInterval):
 		}
 	}
+	lcancel()
 	if hintSerial == "" && strings.HasPrefix(guid, "adb-") {
 		if serial := TlsServiceIdentity(guid); serial != "" {
 			hintSerial = serial
 		}
 	}
+	if hintSerial == "" {
+		bridge.DebugLog("[app] 配对身份学习失败：%s（get-serialno 与 mDNS 服务名都拿不到短号）→ 不入档", learnAddr)
+		a.setPairFailed(PairErrSerial,
+			"配对已连接，但读不到设备序列号（档案未写入）：请保持手机亮屏并停留在「无线调试」界面，然后重试配对",
+			devKey, ip)
+		return
+	}
+	bridge.DebugLog("[app] 配对身份学习完成：%s 短号=%q guid=%q", learnAddr, hintSerial, guid)
 
 	// ⑤ 入档：mode=tls + tls 地址 + tlsGuid + serial + wireless=tls
 	// （保持 TLS 形态，不切 5555）。
@@ -5980,10 +6223,20 @@ func (a *App) completePairFlowAfterConnect(ctx context.Context, p PendingDevice,
 			hintSerial = TlsServiceIdentity(freshName)
 		}
 	}
-	// gui52fix1：短号解析失败（hintSerial 空）或 identity 算不出时，先按 IP
-	// 找已有档案（active 优先）——配对已建档设备绝不新建 IP:port 键双卡；
-	// 仍无命中才保留旧兜底（新建 IP:port 键档案）。
+	// 身份归并（gui52fix1 + gui55）——配对已建档设备绝不新建 IP:port 键双卡：
+	//  ① 学到的短号已在某档案里 → 直接并入该档案（最硬身份）；
+	//  ② 短号查不到档案、但同 IP 有条"无短号或短号一致"的档案 → 认领并入
+	//   （残缺档案配对自愈：写新地址 + 补短号，不分裂成双卡）；
+	//  ③ 短号/identity 都定不下来 → 保留旧的按 IP 归并兜底。
+	// 短号与同 IP 档案冲突（DHCP 复用）→ 不认领，按新身份建档（各归各）。
 	identity := adb.IdentityKey(marketname, manufacturer, model, hintSerial)
+	if hintSerial != "" {
+		if bySerial := a.profiles.ResolveKey(hintSerial); bySerial != "" {
+			identity = bySerial
+		} else if byIP := a.profiles.ResolveClaimableByIP(ip, hintSerial); byIP != "" {
+			identity = byIP
+		}
+	}
 	if hintSerial == "" || identity == "" {
 		if byIP := a.profiles.ResolveKeyByIP(ip); byIP != "" {
 			identity = byIP
@@ -6109,6 +6362,210 @@ func (a *App) resolveTlsServiceFresh(ip string) (port, name string) {
 		}
 	}
 	return "", ""
+}
+
+// ---------------------------------------------------------------- gui55：设备身份学习
+
+// serialReadTimeout 是直读设备序列号的单次超时（get-serialno / getprop 各一次）。
+const serialReadTimeout = 3 * time.Second
+
+// 配对成功后的身份学习重试：设备刚配对完可能还没开始广播服务名，
+// 一次性扫描极易错过（K80 残缺档案即由此而来）。
+const (
+	learnRetryAttempts = 3
+	learnRetryInterval = 700 * time.Millisecond
+	pairLearnBudget    = 9 * time.Second
+	// pairLearnTick 是配对遮罩"名称未学到"时的复查间隔（等事件流把新广播推上来的同时
+	// 不断用扫到的快照/get-serialno 补学）。
+	pairLearnTick = 400 * time.Millisecond
+)
+
+// mdnsBrief 把 mDNS 服务压缩成一行日志（name@addr/mode），现场诊断用。
+func mdnsBrief(svcs []discovery.MdnsService) string {
+	if len(svcs) == 0 {
+		return "-"
+	}
+	var sb []string
+	for _, s := range svcs {
+		sb = append(sb, fmt.Sprintf("%s@%s/%s", s.Name, s.Addr, s.Mode))
+	}
+	return strings.Join(sb, " | ")
+}
+
+// serialFromMdnsServices 在 mDNS 服务集合里按地址找设备自报短号（gui55）：
+//   - _adb-tls-connect（实例名 adb-<短号>-XXXXXX）优先——同时给出 guid；
+//   - _adb._tcp 经典服务（实例名 adb-<短号>）兜底——K80 只广播这个。
+//
+// 地址匹配：完全相同优先，其次同 IP（端口轮换/换形态）；都不中返回空。
+func serialFromMdnsServices(svcs []discovery.MdnsService, addr string) (serial, guid string) {
+	if addr == "" {
+		return "", ""
+	}
+	ip := ipOfAddr(addr)
+	fallback := -1
+	for i := range svcs {
+		s := svcs[i]
+		if s.Addr == "" || s.Mode == discovery.MdnsModePairing {
+			continue
+		}
+		if s.Addr != addr && (ip == "" || ipOfAddr(s.Addr) != ip) {
+			continue
+		}
+		id := SerialFromServiceName(s.Name)
+		if id == "" {
+			continue
+		}
+		if s.Mode == discovery.MdnsModeTls {
+			return id, s.Name
+		}
+		if fallback < 0 || s.Addr == addr {
+			fallback = i
+		}
+	}
+	if fallback >= 0 {
+		return SerialFromServiceName(svcs[fallback].Name), ""
+	}
+	return "", ""
+}
+
+// readDeviceSerials 直读设备序列号候选值（gui55"最硬来源"），去重且过滤非身份值：
+//
+//	① getprop ro.serialno —— 设备自报的真序列号（mDNS 短号同源；任何 transport 都准）；
+//	② adb get-serialno（host 侧）——USB transport 直接给 USB 序列号；但无线 transport
+//	   只会返回地址串（实测 K80：`adb -s 192.0.2.159:5555 get-serialno` = 该地址），
+//	   这种值必须丢弃，否则"验身"会把地址当身份、把本机设备误判成陌生设备。
+//
+// 两条都拿不到返回 nil（调用方不得据此写档，只能报错/等待广播自举）。
+func (a *App) readDeviceSerials(ctx context.Context, addr string) []string {
+	if addr == "" {
+		return nil
+	}
+	var out []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || s == "unknown" || IsIPPort(s) || strings.EqualFold(s, addr) {
+			return
+		}
+		for _, x := range out {
+			if x == s {
+				return
+			}
+		}
+		out = append(out, s)
+	}
+	if a.pairOps.getpropFn != nil {
+		cctx, cancel := context.WithTimeout(ctx, serialReadTimeout)
+		s, err := a.pairOps.getpropFn(cctx, addr, "ro.serialno")
+		cancel()
+		if err == nil {
+			add(s)
+		}
+	}
+	if a.pairOps.serialFn != nil {
+		cctx, cancel := context.WithTimeout(ctx, serialReadTimeout)
+		s, err := a.pairOps.serialFn(cctx, addr)
+		cancel()
+		if err == nil {
+			add(s)
+		}
+	}
+	return out
+}
+
+// readDeviceSerial 取首选序列号（学习用：ro.serialno 优先，与 mDNS 短号同源）。
+func (a *App) readDeviceSerial(ctx context.Context, addr string) string {
+	if v := a.readDeviceSerials(ctx, addr); len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// learnSerialFor 学习某地址对应设备的短号/guid（gui55 配对学习闭环）：
+//
+//	① 现场重扫 mDNS（scan=true；设备刚配对完、快照还没更新的窗口）；
+//	② 现有 mDNS 快照（免扫描——事件流刚推上来的新广播）；
+//	③ adb get-serialno 直读（最硬：不依赖广播，transport 通就能拿到）；
+//	④ getprop ro.serialno（同一硬来源的 shell 路径）。
+//
+// 任一来源命中即返回；全失败返回空串（调用方决定报错，绝不静默以空值入档）。
+func (a *App) learnSerialFor(ctx context.Context, addr string, scan bool) (serial, guid string) {
+	if addr == "" {
+		return "", ""
+	}
+	if scan && a.pairOps.mdnsScanFn != nil {
+		if svcs, err := a.pairOps.mdnsScanFn(ctx, mdnsTimeout); err == nil {
+			if s, g := serialFromMdnsServices(svcs, addr); s != "" {
+				return s, g
+			}
+		}
+	}
+	if s, g := serialFromMdnsServices(a.mdnsSnapshot(), addr); s != "" {
+		return s, g
+	}
+	return a.readDeviceSerial(ctx, addr), ""
+}
+
+// probeOwnerOK 是"纯探测写档前验身"（gui55）：只有 IP 可达不足以认定档案所属设备在线——
+// 连接成功后直读设备自报序列号，与档案身份比对：
+//   - 档案有短号：读到的短号必须命中（DHCP 回收复用会把 A 设备写进 B 档案）；
+//   - 档案无短号：无据可比 → 不写（等 mDNS 广播自举补学，避免把陌生设备写进残缺档案）。
+//
+// 返回 (ok, serial)。ok=false 时调用方只记日志，不改档案状态。
+func (a *App) probeOwnerOK(ctx context.Context, key, addr string) (bool, string) {
+	e, ok := a.profiles.Entry(key)
+	if !ok {
+		return false, ""
+	}
+	serials := a.readDeviceSerials(ctx, addr)
+	if len(serials) == 0 {
+		return false, ""
+	}
+	for _, serial := range serials {
+		if serial == key || contains(e.Serials, serial) {
+			return true, serial
+		}
+	}
+	return false, serials[0]
+}
+
+// probeMarkActive 探测成功后的写档闸门（gui55）：验身通过才写 active。
+// src=调用点（日志用）。返回是否真的写活。
+func (a *App) probeMarkActive(ctx context.Context, key, addr, mode, src string) bool {
+	return a.probeMarkActiveCurrent(ctx, key, addr, mode, src, false)
+}
+
+func (a *App) probeMarkActiveCurrent(ctx context.Context, key, addr, mode, src string, currentOnly bool) bool {
+	if currentOnly && !a.profiles.addressEvidenceCurrent(key, addr) {
+		return false
+	}
+	ok, serial := a.probeOwnerOK(ctx, key, addr)
+	if !ok {
+		if serial == "" {
+			bridge.DebugLog("[app] %s：%s/%s 探测通但读不到序列号 → 不写 active（验身无据）", src, key, addr)
+		} else {
+			bridge.DebugLog("[app] %s：%s/%s 验身不符（设备自报短号=%s，档案短号=%v）→ 不写 active",
+				src, key, addr, serial, a.profileSerials(key))
+		}
+		return false
+	}
+	if currentOnly {
+		if !a.profiles.addrSuccessIfCurrent(key, addr, mode) {
+			return false
+		}
+	} else {
+		a.profiles.AddrSuccessMode(key, addr, mode)
+	}
+	bridge.DebugLog("[app] %s：%s/%s 验身通过（短号=%s）→ active", src, key, addr, serial)
+	return true
+}
+
+// profileSerials 取档案短号列表（日志用；档案不存在返回 nil）。
+func (a *App) profileSerials(key string) []string {
+	e, ok := a.profiles.Entry(key)
+	if !ok {
+		return nil
+	}
+	return e.Serials
 }
 
 // resolvePairPort 解析配对端口：按 tls 服务实例名（guid）/ IP 在 mDNS 配对服务里找。
@@ -6497,7 +6954,10 @@ func (a *App) StopCast(serial string) error {
 	st.stopping = true
 	r := st.runner
 	key := st.cast.Serial // 会话键（identity 兜底定位时 serial ≠ key）
+	// v2.1.75：设备级单通知——本设备还有其它会话时跳过"等通知撤下"（通知不会被撤）。
+	others := a.otherSessionIDsLocked(key, "")
 	a.mu.Unlock()
+	r.SetSkipNotifWait(a.anyOnSameDevice(key, others))
 
 	// 异步段：杀树 + 错误复位/超时兜底（同步段只做微秒级状态操作）
 	go a.guard("stop-cast", func() {
@@ -6515,6 +6975,59 @@ func (a *App) StopCast(serial string) error {
 		go a.guard("stop-cast-timeout", func() { a.resetStoppingTimeout(key, st) })
 	})
 	return nil
+}
+
+// otherSessionIDsLocked 锁内快照：除指定会话外、仍在运行的会话标识列表
+// （主投屏 sessions 的键 + 应用窗口 appWins 的设备 serial）。
+//
+// v2.1.75「设备级单通知」配套：App 在停止/重启会话前判断"是否本设备最后一个会话"
+// （决定是否等待设备端通知撤下）。appListKeyFor 自带锁（不可在持锁时调用）——
+// 本函数只做锁内快照，归一比较在 anyOnSameDevice（锁外）完成。
+// 调用方必须持有 a.mu。
+func (a *App) otherSessionIDsLocked(skipSessionKey, skipAppWinKey string) []string {
+	out := make([]string, 0, len(a.sessions)+len(a.appWins))
+	for k, st := range a.sessions {
+		if k == skipSessionKey || st == nil || st.runner == nil {
+			continue
+		}
+		// 已受理停止（且非重启中）的会话不算"持有者"：它马上要撤/被撤通知——
+		// 若把它算进去，会话先后停止时会互相"以为对方持有"→ 双双跳过等待 →
+		// 双双被整树强杀 → 无人撤通知（滞留回归）。重启中的会话保留
+		//（它马上拉起新 server 接管通知，是合法的下一任持有者）。
+		if st.stopping && !st.restarting {
+			continue
+		}
+		out = append(out, k)
+	}
+	for k, w := range a.appWins {
+		if k == skipAppWinKey || w == nil || w.runner == nil {
+			continue
+		}
+		if w.closing && !w.restarting {
+			continue
+		}
+		out = append(out, w.serial)
+	}
+	return out
+}
+
+// anyOnSameDevice 锁外判断：others 里有没有与本设备（identity 归一）相同的会话。
+// 归一失败（空）回退原值比较（保守：宁多判"同设备"→多等，不误跳过等待）。
+func (a *App) anyOnSameDevice(serial string, others []string) bool {
+	devKey := a.appListKeyFor(serial)
+	if devKey == "" {
+		devKey = serial
+	}
+	for _, s := range others {
+		k := a.appListKeyFor(s)
+		if k == "" {
+			k = s
+		}
+		if k == devKey {
+			return true
+		}
+	}
+	return false
 }
 
 // ShouldKillServerOnExit gui53：GUI 退出统一清理判定（gui46 起保留方法名/签名）。
@@ -6567,7 +7080,12 @@ func (a *App) RestartCast(serial string) error {
 	}
 	r := st.runner
 	st.restarting = true
+	// v2.1.75：重启同样按"是否本设备最后一个会话"设置跳过等待。
+	others := a.otherSessionIDsLocked(serial, "")
 	a.mu.Unlock()
+	if r != nil {
+		r.SetSkipNotifWait(a.anyOnSameDevice(serial, others))
+	}
 	if r == nil {
 		// 结束态重新投屏：无进程可杀，直接以同一设备开新会话
 		bridge.DebugLog("[app] 结束态重新投屏 serial=%s", serial)
@@ -6592,7 +7110,17 @@ func (a *App) RestartCast(serial string) error {
 // GetProfile 返回指定设备的参数记忆（有线/无线两套独立；未配置=默认档）。
 // 含动态 baseline：已投屏过用 [高清]/[流畅] 实际值；未投屏过用 adb 检测值推导。
 func (a *App) GetProfile(serial string) DeviceProfile {
-	return a.effectiveProfile(serial)
+	p := a.effectiveProfile(serial)
+	// v2.1.78：声音档位归一为最终值（空 → pc）——前端直接显示当前档，不再自行解释默认。
+	p.Usb.Audio = mainAudioMode(p.Usb.Audio)
+	p.Wifi.Audio = mainAudioMode(p.Wifi.Audio)
+	return p
+}
+
+// mainAudioMode 主屏声音档位最终值：显式值优先；空/非法 → pc（默认：仅电脑出声，
+// 与 bat 不加音频参数的原行为一致）。
+func mainAudioMode(a string) string {
+	return NormalizeAudioMode(a, "pc")
 }
 
 // effectiveProfile 计算设备参数（动态默认值）：
@@ -6619,6 +7147,10 @@ func (a *App) effectiveProfile(serial string) DeviceProfile {
 				break
 			}
 		}
+		// v2.1.51：长边对齐档位表——bat 有线 max-size 按档位分配（实测 Pad 2136x3200
+		// → [高清] 2560）；直接取设备全宽会得出超大虚拟屏默认（3200x2136 实撞过：
+		// 切有线后虚拟屏全屏尺寸、编码器只跑 ~10fps）。snap 与 bat 分配同口径。
+		long = snapLongEdge(long)
 		p.Usb.Baseline = Baseline{Res: long, FPS: fps, Bitrate: 60}
 	}
 	if p.Wifi.Baseline.Res == 0 {
@@ -6650,22 +7182,24 @@ func (a *App) updateBaseline(serial, mode string, b Baseline) {
 
 // SaveProfile 设备参数管理页保存：仅写入该设备该模式的参数档（profiles.json），
 // 不重启投屏（投屏前调参；下次投屏生效）。与 SaveProfileAndRestart 共用校验与写入。
-func (a *App) SaveProfile(serial, mode string, res, fps, bitrate int, custom bool) error {
-	if err := a.saveProfileOnly(serial, mode, res, fps, bitrate, custom); err != nil {
+func (a *App) SaveProfile(serial, mode string, res, fps, bitrate int, custom bool, audio string, lockFps, lockBitrate bool, vcodec, acodec string) error {
+	if err := a.saveProfileOnly(serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec); err != nil {
 		return err
 	}
-	bridge.DebugLog("[app] 保存参数（不重投） serial=%s mode=%s res=%d fps=%d bitrate=%d custom=%v",
-		serial, mode, res, fps, bitrate, custom)
+	bridge.DebugLog("[app] 保存参数（不重投） serial=%s mode=%s res=%d fps=%d bitrate=%d custom=%v audio=%s lockFps=%v lockBitrate=%v vcodec=%s acodec=%s",
+		serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec)
 	return nil
 }
 
 // saveProfileOnly 校验并写入参数档（基线随保存持久化）。
-func (a *App) saveProfileOnly(serial, mode string, res, fps, bitrate int, custom bool) error {
+func (a *App) saveProfileOnly(serial, mode string, res, fps, bitrate int, custom bool, audio string, lockFps, lockBitrate bool, vcodec, acodec string) error {
 	if err := validateProfileParams(res, fps, bitrate); err != nil {
 		return err
 	}
 	p := a.effectiveProfile(serial) // 保留/推导 baseline（动态默认值随保存持久化）
-	mp := ModeProfile{Res: res, FPS: fps, Bitrate: bitrate, Custom: custom}
+	mp := ModeProfile{Res: res, FPS: fps, Bitrate: bitrate, Custom: custom, Audio: mainAudioMode(audio),
+		LockFps: lockFps, LockBitrate: lockBitrate,
+		VCodec: NormalizeVCodec(vcodec), ACodec: NormalizeACodec(acodec)}
 	if mode == "wifi" {
 		mp.Baseline = p.Wifi.Baseline
 		p.Wifi = mp
@@ -6680,13 +7214,16 @@ func (a *App) saveProfileOnly(serial, mode string, res, fps, bitrate int, custom
 // custom=true 时以该模式覆盖参数（SCEZ_*_USB/SCEZ_*_WIFI 对应套）重启该会话；
 // false=自动档重启（另一模式仍按记忆独立注入）。参数覆盖按 serial 存放，
 // 多会话互不串（每个会话的下一次 StartCast 只消费自己的覆盖）。
-func (a *App) SaveProfileAndRestart(serial, mode string, res, fps, bitrate int, custom bool) error {
-	if err := a.saveProfileOnly(serial, mode, res, fps, bitrate, custom); err != nil {
+func (a *App) SaveProfileAndRestart(serial, mode string, res, fps, bitrate int, custom bool, audio string, lockFps, lockBitrate bool, vcodec, acodec string) error {
+	if err := a.saveProfileOnly(serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec); err != nil {
 		return err
 	}
 	a.mu.Lock()
-	if custom {
-		mp := bridge.ModeParams{Res: res, FPS: fps, Bitrate: bitrate, Set: true}
+	// 注入条件：自定义档 或 任一维度锁定（锁定=固定"当前生效值"，值也要显式传给 bat）；
+	// 全自动且未锁=不注入（bat 走自身检测逻辑）。
+	if custom || lockFps || lockBitrate {
+		mp := bridge.ModeParams{Res: res, FPS: fps, Bitrate: bitrate, Set: true,
+			LockFps: lockFps, LockBitrate: lockBitrate}
 		if mode == "wifi" {
 			a.nextParams[serial] = bridge.CastParams{Wifi: mp}
 		} else {
@@ -6696,8 +7233,8 @@ func (a *App) SaveProfileAndRestart(serial, mode string, res, fps, bitrate int, 
 		delete(a.nextParams, serial)
 	}
 	a.mu.Unlock()
-	bridge.DebugLog("[app] 保存参数并重新投屏 serial=%s mode=%s res=%d fps=%d bitrate=%d custom=%v",
-		serial, mode, res, fps, bitrate, custom)
+	bridge.DebugLog("[app] 保存参数并重新投屏 serial=%s mode=%s res=%d fps=%d bitrate=%d custom=%v audio=%s lockFps=%v lockBitrate=%v vcodec=%s acodec=%s",
+		serial, mode, res, fps, bitrate, custom, audio, lockFps, lockBitrate, vcodec, acodec)
 	return a.RestartCast(serial)
 }
 
@@ -6841,6 +7378,19 @@ func (a *App) BringCastToFront(serial string) error {
 	return bridge.BringCastToFront(cands)
 }
 
+// BringAppWinToFront 把指定应用窗口（虚拟屏）提到 z-order 前面（点击应用卡片，
+// v2.1.46）——候选地址链与主投屏浮前共用 frontCandidateSerials；浮前序列（二段式
+// 置顶 + ez 顶回最前）在 bridge 层与"点标签浮前主投屏"完全同款。
+// 非 Windows 平台空实现；失败不阻断前端（fire-and-forget）。
+func (a *App) BringAppWinToFront(serial, pkg string) error {
+	a.mu.RLock()
+	devs := append([]adb.Device{}, a.devices...)
+	a.mu.RUnlock()
+	cands := frontCandidateSerials(serial, devs, a.identityOf, a.profiles.Entry)
+	bridge.DebugLog("[app] appwin bring-to-front serial=%s pkg=%s（候选 %v）", serial, pkg, cands)
+	return bridge.BringAppWinToFront(cands, pkg)
+}
+
 // BeginClose 触发全部会话的并行清理，立即返回「全部 runner.Stop() 返回后关闭」的通道。
 //
 // 与 Close 的分工（gui54 退出体验优化）：
@@ -6854,10 +7404,21 @@ func (a *App) BringCastToFront(serial string) error {
 // 幂等：重复调用返回同一通道，不会重复停止（也不会重复 kill）。
 func (a *App) BeginClose() <-chan struct{} {
 	a.closeOnce.Do(func() {
+		a.updates().Close()
 		a.mu.Lock()
 		cancel := a.cancel
-		runners := make([]Runner, 0, len(a.sessions))
+		runners := make([]Runner, 0, len(a.sessions)+len(a.appWins))
 		for _, st := range a.sessions {
+			if st.runner != nil {
+				runners = append(runners, st.runner)
+			}
+		}
+		// v2.1.55：应用窗口（虚拟屏）会话一并停——此前只停主投屏：
+		// 虚拟屏 bat 未被通知（其防重连标记只有 Stop 链才会写），GUI 退出
+		// kill adb server 后 bat 检测断开→自动重连又把窗口重新拉起来
+		// （用户观感：GUI 都退了，虚拟屏窗口还在/又冒出来）。
+		// 两条退出路径（托盘退出 beginShutdown / JS ExitApp）都走本函数。
+		for _, st := range a.appWins {
 			if st.runner != nil {
 				runners = append(runners, st.runner)
 			}
@@ -6866,6 +7427,17 @@ func (a *App) BeginClose() <-chan struct{} {
 		if cancel != nil {
 			cancel()
 		}
+		a.teachMu.Lock()
+		for _, state := range a.usbLearning {
+			state.cancel()
+		}
+		for _, timer := range a.plugTimers {
+			timer.Stop()
+		}
+		for _, timer := range a.plugStableTimers {
+			timer.Stop()
+		}
+		a.teachMu.Unlock()
 		done := make(chan struct{})
 		a.closeDone = done
 		go func() {

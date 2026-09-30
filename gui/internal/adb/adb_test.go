@@ -12,9 +12,9 @@ import (
 
 func TestParseDevices(t *testing.T) {
 	out := `List of devices attached
-24117RK2CC	device
+MODEL123	device
 192.0.2.45:5555	device
-24117RK2CC._adb-tls._tcp.local.	device
+MODEL123._adb-tls._tcp.local.	device
 emulator-5554	offline
 ABCDEF0123456789	unauthorized
 
@@ -27,9 +27,9 @@ ABCDEF0123456789	unauthorized
 		state string
 		conn  string
 	}{
-		"24117RK2CC":                      {"device", "usb"},
-		"192.0.2.45:5555":              {"device", "wifi"},
-		"24117RK2CC._adb-tls._tcp.local.": {"device", "other"},
+		"MODEL123":                      {"device", "usb"},
+		"192.0.2.45:5555":                 {"device", "wifi"},
+		"MODEL123._adb-tls._tcp.local.": {"device", "other"},
 		"emulator-5554":                   {"offline", "other"},
 		"ABCDEF0123456789":                {"unauthorized", "usb"},
 	}
@@ -287,9 +287,10 @@ func TestScaleForWireless(t *testing.T) {
 		in   string
 		want string
 	}{
-		// 竖屏定义 2136x3200 → 归一化 3200x2136 → 长边 1920、短边 2136*1920/3200=1281
-		{"2136x3200", "1920x1281"},
-		{"2560x1708", "1920x1281"}, // 横屏定义：1708*1920/2560=1281
+		// 竖屏定义 2136x3200 → 归一化 3200x2136 → 长边 1920、短边 2136*1920/3200=1281.6
+		// → 截断 1281 → 向下取偶 1280（编码尺寸偶对齐，scrcpy 实得一致）
+		{"2136x3200", "1920x1280"},
+		{"2560x1708", "1920x1280"}, // 横屏定义：1708*1920/2560=1281 → 取偶 1280
 		{"3200x1440", "1920x864"},  // 超宽屏：1440*1920/3200=864
 		{"1920x1080", "1920x1080"}, // 长边 ≤ 1920 不缩放
 		{"1280x800", "1280x800"},
@@ -415,17 +416,180 @@ func TestIdentityKey(t *testing.T) {
 		ser  string
 		want string
 	}{
-		{"Xiaomi Pad 8 Pro", "Xiaomi", "25091RP04C", "TEST0002", "Xiaomi Pad 8 Pro"},
-		{"  ", "Xiaomi", "25091RP04C", "TEST0002", "Xiaomi 25091RP04C"},
-		{"", "Xiaomi", "", "TEST0002", "TEST0002"},                 // 只有厂商无型号 → serial
-		{"", "", "25091RP04C", "TEST0002", "TEST0002"},             // 只有型号无厂商 → serial
-		{"", "", "", "TEST0002", "TEST0002"},                       // 都无 → serial
+		{"Xiaomi Pad 8 Pro", "Xiaomi", "MODEL789", "TEST0002", "Xiaomi Pad 8 Pro"},
+		{"  ", "Xiaomi", "MODEL789", "TEST0002", "Xiaomi MODEL789"},
+		{"", "Xiaomi", "", "TEST0002", "TEST0002"},           // 只有厂商无型号 → serial
+		{"", "", "MODEL789", "TEST0002", "TEST0002"},       // 只有型号无厂商 → serial
+		{"", "", "", "TEST0002", "TEST0002"},                 // 都无 → serial
 		{"", "", "", "192.0.2.162:5555", "192.0.2.162:5555"}, // 无线设备回退到 IP:port
-		{" Mi 11 ", "", "", "abc", "Mi 11"},                        // marketname 去空白
+		{" Mi 11 ", "", "", "abc", "Mi 11"},                  // marketname 去空白
 	}
 	for _, c := range cases {
 		if got := IdentityKey(c.name, c.man, c.mod, c.ser); got != c.want {
 			t.Errorf("IdentityKey(%q,%q,%q,%q) = %q, want %q", c.name, c.man, c.mod, c.ser, got, c.want)
 		}
+	}
+}
+
+// --- v2.1.77：5037 抢庄（检测判据 + 编排） ---
+
+// ServerHealthy 判据：unknown host service → 坏（≤30.x 旧版坐庄）；
+// 37/31–36/空输出 → 好（保守不动——pair/TLS 不依赖 mDNS 功能）。
+func TestServerHealthy(t *testing.T) {
+	cases := []struct {
+		out  string
+		want bool
+	}{
+		{"mdns daemon version [adb discovery 0.0.0]\r\n", true},      // 37.x
+		{"ERROR: mdns daemon unavailable\r\n", true},                 // 31–36
+		{"ERROR: mdns discovery disabled\r\n", true},                 // ADB_MDNS=0
+		{"error: unknown host service\r\n", false},                   // ≤30.x（实测 stderr）
+		{"adb: error: unknown host service 'mdns:check'\r\n", false}, // 带服务名变体
+		{"", true}, // 空输出（命令没跑起来）保守判好
+	}
+	for _, c := range cases {
+		if got := ServerHealthy(c.out); got != c.want {
+			t.Errorf("ServerHealthy(%q) = %v, want %v", c.out, got, c.want)
+		}
+	}
+}
+
+// ServerIs37 判据（抢庄验证的唯一判据）：只有 37 的 mdns daemon 版本串判真。
+func TestServerIs37(t *testing.T) {
+	cases := []struct {
+		out  string
+		want bool
+	}{
+		{"mdns daemon version [adb discovery 0.0.0]\r\n", true}, // 37.x 实测输出
+		{"ERROR: mdns daemon unavailable\r\n", false},           // 31–36
+		{"error: unknown host service\r\n", false},              // ≤30.x
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := ServerIs37(c.out); got != c.want {
+			t.Errorf("ServerIs37(%q) = %v, want %v", c.out, got, c.want)
+		}
+	}
+}
+
+// takeoverScript 以脚本化输出驱动抢庄三件套 fake（测试内同步调用，无需锁）。
+// outs：check 依次返回的输出；超出长度后重复最后一个（模拟持续状态）。
+type takeoverScript struct {
+	calls []string // 调用序列（"kill" / "start" / "check"）
+	outs  []string
+}
+
+func (s *takeoverScript) bind(m *Manager) {
+	m.srvKillFn = func(ctx context.Context) error {
+		s.calls = append(s.calls, "kill")
+		return nil
+	}
+	m.srvStartFn = func(ctx context.Context) error {
+		s.calls = append(s.calls, "start")
+		return nil
+	}
+	m.srvCheckFn = func(ctx context.Context) string {
+		s.calls = append(s.calls, "check")
+		if len(s.outs) == 0 {
+			return ""
+		}
+		out := s.outs[0]
+		if len(s.outs) > 1 {
+			s.outs = s.outs[1:]
+		}
+		return out
+	}
+}
+
+const (
+	takeover37Out    = "mdns daemon version [adb discovery 0.0.0]\r\n"
+	takeoverStaleOut = "error: unknown host service\r\n"
+)
+
+// 首发成功：kill → start → check(37) → 成功；恰好一次 kill/start。
+func TestTakeoverServerFirstTry(t *testing.T) {
+	m := New("adb-noop", "")
+	sc := &takeoverScript{outs: []string{takeover37Out}}
+	sc.bind(m)
+	out, err := m.TakeoverServer(context.Background())
+	if err != nil {
+		t.Fatalf("首发应成功: %v", err)
+	}
+	if !ServerIs37(out) {
+		t.Fatalf("成功输出应为 37 指纹: %q", out)
+	}
+	if want := "kill,start,check"; strings.Join(sc.calls, ",") != want {
+		t.Fatalf("调用序列 %q, want %q", strings.Join(sc.calls, ","), want)
+	}
+}
+
+// 被抢后下一轮夺回：轮1 check=unknown（break 本轮），轮2 成功；每轮各一次 kill。
+func TestTakeoverServerRetryNextRound(t *testing.T) {
+	m := New("adb-noop", "")
+	sc := &takeoverScript{outs: []string{takeoverStaleOut, takeover37Out}}
+	sc.bind(m)
+	out, err := m.TakeoverServer(context.Background())
+	if err != nil {
+		t.Fatalf("第二轮应成功: %v", err)
+	}
+	if !ServerIs37(out) {
+		t.Fatalf("成功输出应为 37 指纹: %q", out)
+	}
+	if want := "kill,start,check,kill,start,check"; strings.Join(sc.calls, ",") != want {
+		t.Fatalf("调用序列 %q, want %q", strings.Join(sc.calls, ","), want)
+	}
+}
+
+// 轮内快速重试：首次 check 空输出（未就绪、非被抢）→ 间隔后重试成功（不重新 kill）。
+func TestTakeoverServerRetryWithinRound(t *testing.T) {
+	old := takeoverRetryGap
+	takeoverRetryGap = time.Millisecond
+	defer func() { takeoverRetryGap = old }()
+	m := New("adb-noop", "")
+	sc := &takeoverScript{outs: []string{"", takeover37Out}}
+	sc.bind(m)
+	out, err := m.TakeoverServer(context.Background())
+	if err != nil {
+		t.Fatalf("轮内重试应成功: %v", err)
+	}
+	if !ServerIs37(out) {
+		t.Fatalf("成功输出应为 37 指纹: %q", out)
+	}
+	if want := "kill,start,check,start,check"; strings.Join(sc.calls, ",") != want {
+		t.Fatalf("调用序列 %q, want %q", strings.Join(sc.calls, ","), want)
+	}
+}
+
+// 3 轮全败：一直被旧版抢回（unknown）→ 错误非 nil；kill/check 恰好各 3 次（轮数上限）。
+func TestTakeoverServerAllRoundsFail(t *testing.T) {
+	m := New("adb-noop", "")
+	sc := &takeoverScript{outs: []string{takeoverStaleOut}}
+	sc.bind(m)
+	if _, err := m.TakeoverServer(context.Background()); err == nil {
+		t.Fatal("3 轮全败应返回错误")
+	}
+	kills, checks := 0, 0
+	for _, c := range sc.calls {
+		switch c {
+		case "kill":
+			kills++
+		case "check":
+			checks++
+		}
+	}
+	if kills != takeoverRounds || checks != takeoverRounds {
+		t.Fatalf("全败序列应 kill/check 各 %d 次：kills=%d checks=%d", takeoverRounds, kills, checks)
+	}
+}
+
+// ctx 取消：抢庄循环尊重上下文（立即返回错误，不悬挂）。
+func TestTakeoverServerContextCancel(t *testing.T) {
+	m := New("adb-noop", "")
+	sc := &takeoverScript{outs: []string{takeoverStaleOut}}
+	sc.bind(m)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.TakeoverServer(ctx); err == nil {
+		t.Fatal("ctx 已取消应返回错误")
 	}
 }

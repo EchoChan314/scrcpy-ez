@@ -12,6 +12,17 @@ type ModeParams struct {
 	FPS     int
 	Bitrate int
 	Set     bool
+	// Audio 声音档位（v2.1.78 三档滑条；独立于 Set：无论是否自定义画面参数都注入）：
+	// phone→--no-audio / pc→默认不加参数 / both→--audio-dup。非空即注入 SCEZ_AUDIO_*。
+	Audio string
+	// LockFps/LockBitrate ABR 锁定（v2.1.79 参数浮窗「锁定」）：锁定维度不被
+	// ABR 自适应调整；独立于 Set——锁定=固定"当前生效值"，自动/自定义档均可锁。
+	LockFps     bool
+	LockBitrate bool
+	// VCodec/ACodec 编码格式（v2.1.91；独立于 Set 注入——照 Audio 模式：非空即注入，
+	// bat 默认视频 h264 / 音频 opus）。GUI 归一后总是给出值。
+	VCodec string
+	ACodec string
 }
 
 // CastParams 投屏参数覆盖（多设备 Phase 1 轮 A 起扩展为四类注入）：
@@ -42,6 +53,41 @@ type CastParams struct {
 	// OverlayVisibleSet=true 时注入（true→"1" 显示 / false→"0" 隐藏）。
 	OverlayVisible    bool
 	OverlayVisibleSet bool
+
+	// --- 虚拟屏（应用窗口会话；SCEZ_VD_* 整组"未设置=不注入"，零回归）---
+	// bat 侧据此组装 VD_ARGS（投屏支持.bat「gui56 虚拟屏参数」段）。
+	VdSize        string // SCEZ_VD_SIZE：虚拟屏尺寸 "WxH"（如 1280x720）
+	VdDpi         int    // SCEZ_VD_DPI：虚拟屏 dpi（GUI 按等比公式显式算；0=不注入）
+	VdFlex        bool   // SCEZ_VD_FLEX=1 → --flex-display（窗口拖动=虚拟屏跟随）
+	VdIme         string // SCEZ_VD_IME → --display-ime-policy=<v>（虚拟屏推荐 local）
+	VdNoDecor     bool   // SCEZ_VD_NO_DECOR=1 → --no-vd-system-decorations
+	VdKeepContent bool   // SCEZ_VD_KEEP_CONTENT=1 → --no-vd-destroy-content
+	VdAudio       string // SCEZ_VD_AUDIO：声音档位单套回退（v2.1.78；phone/pc/both，空=不注入）
+	StartApp      string // SCEZ_START_APP：启动应用包名（调用方带 "+" 前缀=先强停再启动）
+	WinTitle      string // SCEZ_WIN_TITLE：窗口标题（应用名；已安全化）
+
+	// --- 虚拟屏两套参数（v2.1.47 应用窗口参数面板；有线/无线分别记忆）---
+	// 注入 SCEZ_VD_*_USB / SCEZ_VD_*_WIFI，bat 按当前连接形态各取一套。
+	// 旧单套 VdSize/VdDpi/VdFlex/VdAudio 由调用方同步注入（启动形态那套）——
+	// 新旧 bat 组合兼容（旧 bat 只读旧变量）。
+	VdUsb  VdModeParams
+	VdWifi VdModeParams
+}
+
+// VdModeParams 是应用窗口（虚拟屏）单模式（有线/无线）参数（二期 Step 4/5）。
+// 注入为 SCEZ_VD_<KEY>_USB / SCEZ_VD_<KEY>_WIFI 两套环境变量，bat 按当前连接
+// 形态（PICK 含":"=无线）选一套组装 CAST_ARGS/VD_ARGS；各字段零值=不注入。
+type VdModeParams struct {
+	Size    string // SCEZ_VD_SIZE_*：虚拟屏初始尺寸 "WxH"（空=该套不注入）
+	Dpi     int    // SCEZ_VD_DPI_*：>0 注入（GUI 按该套尺寸等比算；0=scrcpy 默认）
+	FPS     int    // SCEZ_VD_FPS_*：>0 注入（bat 无值默认 60）
+	Bitrate int    // SCEZ_VD_BIT_*：>0 注入（bat 无值默认 8）
+	Flex    bool   // SCEZ_VD_FLEX_*=1（窗口跟随；未注入=不跟随）
+	Audio   string // SCEZ_VD_AUDIO_*=值（v2.1.78 三档滑条：phone→--no-audio / both→--audio-dup；空=不加参数）
+	// LockFps/LockBitrate ABR 锁定（v2.1.80 窗口设置「锁定」）：注入
+	// SCEZ_VD_LOCK_FPS_*/SCEZ_VD_LOCK_BITRATE_*=1 → bat 追加 --abr-lock-*。
+	LockFps     bool
+	LockBitrate bool
 }
 
 // castEnv 组装注入给 bat 的环境变量表（GUI→bat→scrcpy.exe 的整条注入链）。
@@ -65,6 +111,42 @@ func castEnv(params CastParams, watchTag string) []string {
 			fmt.Sprintf("SCEZ_RES_WIFI=%d", params.Wifi.Res),
 			fmt.Sprintf("SCEZ_FPS_WIFI=%d", params.Wifi.FPS),
 			fmt.Sprintf("SCEZ_BITRATE_WIFI=%d", params.Wifi.Bitrate))
+	}
+	// 声音档位（v2.1.78 三档滑条；独立于 Set 注入——GUI 总是给出最终档，
+	// bat 侧据此追加 --no-audio / --audio-dup）。
+	if params.Usb.Audio != "" {
+		env = append(env, "SCEZ_AUDIO_USB="+params.Usb.Audio)
+	}
+	if params.Wifi.Audio != "" {
+		env = append(env, "SCEZ_AUDIO_WIFI="+params.Wifi.Audio)
+	}
+	// 编码格式（v2.1.91）：独立于 Set（照 Audio 模式）——非空即注入；
+	// bat 侧按模式覆盖 VCODEC/ACODEC（默认 h264/opus）。
+	if params.Usb.VCodec != "" {
+		env = append(env, "SCEZ_VCODEC_USB="+params.Usb.VCodec)
+	}
+	if params.Usb.ACodec != "" {
+		env = append(env, "SCEZ_ACODEC_USB="+params.Usb.ACodec)
+	}
+	if params.Wifi.VCodec != "" {
+		env = append(env, "SCEZ_VCODEC_WIFI="+params.Wifi.VCodec)
+	}
+	if params.Wifi.ACodec != "" {
+		env = append(env, "SCEZ_ACODEC_WIFI="+params.Wifi.ACodec)
+	}
+	// ABR 锁定（v2.1.79 参数浮窗「锁定」）：锁定维度不被自适应调整——独立于
+	// Set（自动档也可锁）；bat 侧按当前连接形态追加 --abr-lock-fps/-bitrate。
+	if params.Usb.LockFps {
+		env = append(env, "SCEZ_LOCK_FPS_USB=1")
+	}
+	if params.Usb.LockBitrate {
+		env = append(env, "SCEZ_LOCK_BITRATE_USB=1")
+	}
+	if params.Wifi.LockFps {
+		env = append(env, "SCEZ_LOCK_FPS_WIFI=1")
+	}
+	if params.Wifi.LockBitrate {
+		env = append(env, "SCEZ_LOCK_BITRATE_WIFI=1")
 	}
 	if params.Serial != "" {
 		env = append(env, "SCEZ_SERIAL="+params.Serial)
@@ -93,6 +175,70 @@ func castEnv(params CastParams, watchTag string) []string {
 		}
 		env = append(env, "SCEZ_PARAM_OVERLAY="+v)
 	}
+	// 虚拟屏参数（SCEZ_VD_*）：未设置不注入——bat 未定义任何 VD 变量时
+	// 行为与现状完全一致（零回归）。DPI/FLEX 等按 bat 侧 if defined 判定注入。
+	if params.VdSize != "" {
+		env = append(env, "SCEZ_VD_SIZE="+params.VdSize)
+	}
+	if params.VdDpi > 0 {
+		env = append(env, fmt.Sprintf("SCEZ_VD_DPI=%d", params.VdDpi))
+	}
+	if params.VdFlex {
+		env = append(env, "SCEZ_VD_FLEX=1")
+	}
+	if params.VdIme != "" {
+		env = append(env, "SCEZ_VD_IME="+params.VdIme)
+	}
+	if params.VdNoDecor {
+		env = append(env, "SCEZ_VD_NO_DECOR=1")
+	}
+	if params.VdKeepContent {
+		env = append(env, "SCEZ_VD_KEEP_CONTENT=1")
+	}
+	if params.VdAudio != "" {
+		env = append(env, "SCEZ_VD_AUDIO="+params.VdAudio)
+	}
+	if params.StartApp != "" {
+		env = append(env, "SCEZ_START_APP="+params.StartApp)
+	}
+	if params.WinTitle != "" {
+		env = append(env, "SCEZ_WIN_TITLE="+params.WinTitle)
+	}
+	// 虚拟屏两套参数（v2.1.47）：_USB/_WIFI 各一组；Size 空=该套不注入。
+	env = vdModeEnv(env, "_USB", params.VdUsb)
+	env = vdModeEnv(env, "_WIFI", params.VdWifi)
 	env = append(env, "SCEZ_WATCH_TAG="+watchTag)
+	return env
+}
+
+// vdModeEnv 注入单套虚拟屏参数（suffix="_USB"/"_WIFI"）；Size 空=整套不注入
+// （bat 侧该形态回退旧单套变量/默认档——零回归）。
+func vdModeEnv(env []string, suffix string, p VdModeParams) []string {
+	if p.Size == "" {
+		return env
+	}
+	env = append(env, "SCEZ_VD_SIZE"+suffix+"="+p.Size)
+	if p.Dpi > 0 {
+		env = append(env, fmt.Sprintf("SCEZ_VD_DPI%s=%d", suffix, p.Dpi))
+	}
+	if p.FPS > 0 {
+		env = append(env, fmt.Sprintf("SCEZ_VD_FPS%s=%d", suffix, p.FPS))
+	}
+	if p.Bitrate > 0 {
+		env = append(env, fmt.Sprintf("SCEZ_VD_BIT%s=%d", suffix, p.Bitrate))
+	}
+	if p.Flex {
+		env = append(env, "SCEZ_VD_FLEX"+suffix+"=1")
+	}
+	if p.Audio != "" {
+		env = append(env, "SCEZ_VD_AUDIO"+suffix+"="+p.Audio)
+	}
+	// ABR 锁定（v2.1.80）：锁定维度不被自适应调整（bat 追加 --abr-lock-* 到 VD_ARGS）。
+	if p.LockFps {
+		env = append(env, "SCEZ_VD_LOCK_FPS"+suffix+"=1")
+	}
+	if p.LockBitrate {
+		env = append(env, "SCEZ_VD_LOCK_BITRATE"+suffix+"=1")
+	}
 	return env
 }

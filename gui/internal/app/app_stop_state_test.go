@@ -148,7 +148,7 @@ func TestStopCastTimeoutResetsStopping(t *testing.T) {
 func TestStopCastStoppingViaIdentityFallback(t *testing.T) {
 	a, rec := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C",
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789",
 			[]string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	setDevices(a, []adb.Device{
@@ -288,7 +288,7 @@ func TestSaveProfileOnlyWritesNoRestart(t *testing.T) {
 	_ = a.StartCast("X")
 	f.waitStarts(t, 1)
 
-	if err := a.SaveProfile("X", "usb", 2400, 90, 55, true); err != nil {
+	if err := a.SaveProfile("X", "usb", 2400, 90, 55, true, "pc", false, false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	p := a.profiles.Get("X")
@@ -310,7 +310,7 @@ func TestSaveProfileOnlyWritesNoRestart(t *testing.T) {
 	if np.Usb.Set {
 		t.Fatalf("SaveProfile 不应注入参数覆盖: %+v", np)
 	}
-	if err := a.SaveProfile("X", "usb", 0, 90, 55, true); err == nil {
+	if err := a.SaveProfile("X", "usb", 0, 90, 55, true, "pc", false, false, "", ""); err == nil {
 		t.Fatal("非法参数应报错")
 	}
 }
@@ -324,9 +324,9 @@ func TestListProfilesInSnapshot(t *testing.T) {
 	}
 
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C",
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789",
 			[]string{"TEST0002"}, []string{"192.0.2.162:5555"}),
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC",
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123",
 			[]string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	items := a.Snapshot().Profiles
@@ -338,7 +338,7 @@ func TestListProfilesInSnapshot(t *testing.T) {
 		items[1].Key != "Xiaomi Pad 8 Pro" || items[1].Name != "Xiaomi Pad 8 Pro" {
 		t.Fatalf("排序/命名错误: %+v", items)
 	}
-	if items[1].Model != "25091RP04C" || len(items[1].Serials) != 1 ||
+	if items[1].Model != "MODEL789" || len(items[1].Serials) != 1 ||
 		items[1].Serials[0] != "TEST0002" || len(items[1].Addrs) != 1 ||
 		items[1].Addrs[0] != "192.0.2.162:5555" {
 		t.Fatalf("条目内容错误: %+v", items[1])

@@ -15,15 +15,15 @@ import (
 
 // --- gui52fix1：配对 identity 归并 + 孤儿 IP:port 档案清理 ---
 
-// TestGui52Fix1PairMergeByIPWhenSerialUnknown：hintSerial 解析失败且 getprop 全空
-// → identity 算不出 → 必须按 IP 归并到已有档案（active 优先），绝不新建
-// IP:port 键档案（双卡根因回归）。
-func TestGui52Fix1PairMergeByIPWhenSerialUnknown(t *testing.T) {
+// TestGui55PairSerialUnknownRefusesArchive（原 gui52fix1「短号未知」用例改写）：
+// gui55 起「配对必须学到名称」——短号学不到（mDNS 服务名 + get-serialno 都拿不到）
+// 时明确报错（ErrCode=serial）且不入档，绝不静默写残缺档案、也不新建 IP:port 键。
+func TestGui55PairSerialUnknownRefusesArchive(t *testing.T) {
 	a, _ := newWirelessApp()
 	// 已配对档案：serial + tlsGuid + 同 IP 的 5555/旧 TLS 地址
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "25091RP04C",
+		Model:      "MODEL789",
 		Serials:    []string{"TEST0002"},
 		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
@@ -48,40 +48,88 @@ func TestGui52Fix1PairMergeByIPWhenSerialUnknown(t *testing.T) {
 		return "", errors.New("getprop unavailable") // marketname/man/model 全空
 	}
 	a.pairOps.mdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
-		return nil, nil // 现场重扫也取不到服务名 → hintSerial 保持空
+		return nil, nil // 现场重扫也取不到服务名
+	}
+	// gui55：短号最硬来源（adb get-serialno）也读不到 → 走「明确报错不入档」分支。
+	a.pairOps.serialFn = func(ctx context.Context, addr string) (string, error) {
+		return "", errors.New("get-serialno unavailable")
 	}
 
 	if err := a.PairConnect("", "192.0.2.183", "37033", "38167", "123456"); err != nil {
 		t.Fatal(err)
 	}
-	waitPairPhase(t, a, PairPhaseSuccess)
-
-	// 等待无线接入学习完成：38167 TLS + 5555 探测入档
-	waitFor(t, 3*time.Second, func() bool {
-		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
-		return ok && gui50Fix45EntryHasAddr(e, "192.0.2.183:38167", ModeTls)
-	}, "配对端口应并入已有档案")
-
-	entries := a.profiles.Entries()
-	if _, ok := entries["192.0.2.183:38167"]; ok {
-		t.Fatalf("hintSerial 解析失败时不得新建 IP:port 键档案: %v", entries)
+	st := waitPairPhase(t, a, PairPhaseFailed)
+	if st.ErrCode != PairErrSerial {
+		t.Fatalf("短号学不到应分类 serial: %+v", st)
 	}
+	if st.ErrText == "" {
+		t.Fatal("短号学不到必须给出可见文案（不得静默）")
+	}
+
+	// 不入档：既有档案不变，也不产生任何新档案/新地址。
+	entries := a.profiles.Entries()
 	if len(entries) != 1 {
-		t.Fatalf("应只有一条主档案: %v", entries)
+		t.Fatalf("短号学不到时不得新建档案: %v", entries)
 	}
 	e, ok := entries["Xiaomi Pad 8 Pro"]
 	if !ok {
 		t.Fatalf("主档案应保留: %v", entries)
 	}
+	if gui24FindAddr(e, "192.0.2.183:38167") != nil {
+		t.Fatalf("短号学不到时不得写入新地址: %+v", e.Addrs)
+	}
 	if !contains(e.Serials, "TEST0002") {
 		t.Fatalf("serials 不得丢失: %+v", e.Serials)
 	}
-	tls := gui24FindAddr(e, "192.0.2.183:38167")
-	if tls == nil || tls.State != AddrStateActive || tls.Mode != ModeTls {
-		t.Fatalf("配对 TLS 地址应合并入主档案 active: %+v", e.Addrs)
+}
+
+// TestGui55PairClaimMergesIncompleteProfileByIP：残缺档案（无短号）在同 IP 上
+// 重新配对 → 认领并入既有档案（写新地址 + 补短号自举），不新建第二张卡。
+// 覆盖 K80 那类「只有一条 TLS 地址、serials/tlsGuid 全空」档案的自愈路径。
+func TestGui55PairClaimMergesIncompleteProfileByIP(t *testing.T) {
+	a, _ := newWirelessApp()
+	gui15Seed(a.profiles, "REDMI K80", &DeviceEntry{
+		Marketname: "REDMI K80",
+		Addrs: []AddrEntry{
+			{Addr: "192.0.2.159:39377", State: AddrStateStale, Mode: ModeTls},
+		},
+		Profiles: DefaultProfile(),
+	})
+	a.pairOps.pairFn = func(ctx context.Context, ip, port, code string) (string, error) {
+		return "Successfully paired to " + ip + ":" + port, nil
 	}
-	if !gui50Fix45EntryHasAddr(e, "192.0.2.183:5555", ModeTcpip) {
-		t.Fatalf("5555 应仍归主档案: %+v", e.Addrs)
+	a.pairOps.connectFn = func(ctx context.Context, addr string) (string, error) {
+		return "connected to " + addr, nil
+	}
+	a.pairOps.getpropFn = func(ctx context.Context, serial, prop string) (string, error) {
+		return "", errors.New("getprop unavailable") // marketname/man/model 全空：逼出认领路径
+	}
+	a.pairOps.serialFn = func(ctx context.Context, addr string) (string, error) {
+		return "TEST0001", nil // 设备自报短号（get-serialno）
+	}
+	a.pairOps.mdnsScanFn = func(ctx context.Context, maxWait time.Duration) ([]discovery.MdnsService, error) {
+		return nil, nil
+	}
+
+	if err := a.PairConnect("", "192.0.2.159", "37033", "41234", "123456"); err != nil {
+		t.Fatal(err)
+	}
+	waitPairPhase(t, a, PairPhaseSuccess)
+
+	entries := a.profiles.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("残缺档案应被认领并入，不得新建第二档: %v", entries)
+	}
+	e, ok := entries["REDMI K80"]
+	if !ok {
+		t.Fatalf("主档案应保留（按 IP 认领）: %v", entries)
+	}
+	if !contains(e.Serials, "TEST0001") {
+		t.Fatalf("短号应补进档案（自举）: %+v", e.Serials)
+	}
+	tls := gui24FindAddr(e, "192.0.2.159:41234")
+	if tls == nil || tls.State != AddrStateActive || tls.Mode != ModeTls {
+		t.Fatalf("配对地址应写入既有档案 active: %+v", e.Addrs)
 	}
 }
 
@@ -91,7 +139,7 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "25091RP04C",
+		Model:      "MODEL789",
 		Serials:    []string{"TEST0002"},
 		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
@@ -122,7 +170,7 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "25091RP04C", nil
+			return "MODEL789", nil
 		}
 		return "", nil
 	}
@@ -165,7 +213,7 @@ func TestGui52Fix1LoadCleansOrphanIPPortArchive(t *testing.T) {
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "model": "25091RP04C",
+      "model": "MODEL789",
       "serials": ["TEST0002"],
       "tlsGuid": "adb-TEST0002-KWqpio",
       "addrs": [

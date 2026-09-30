@@ -89,7 +89,11 @@ var frontRequests struct {
 
 func init() { frontRequests.m = map[string]*atomic.Bool{} }
 
-func frontRequestKey(serials []string) string { return strings.Join(serials, "\x00") }
+// frontRequestKey 浮前请求的幂等键：serials + 应用包名（v2.1.46——
+// 同设备不同应用窗口的请求互不取消；appPkg 空=主投屏标签请求）。
+func frontRequestKey(serials []string, appPkg string) string {
+	return strings.Join(serials, "\x00") + "\x01" + appPkg
+}
 
 // listScrcpyProcsCached 返回缓存/新鲜的 scrcpy 进程枚举（浮前点击按需，无后台轮询）。
 // fresh=false 且缓存未过期（TTL 内）→ 直接复用（快速连点共享一次 Get-CimInstance）；
@@ -227,7 +231,21 @@ func ezHwndNow() (uintptr, string) {
 // 立即返回（内部 goroutine）：延时/重试不阻塞 webview UI 线程；
 // 找不到进程/窗口不算错误（只记日志）；同会话新一轮点击取消上一轮重试（幂等）。
 func BringCastToFront(serials []string) error {
-	key := frontRequestKey(serials)
+	return bringFrontRequest(serials, "")
+}
+
+// BringAppWinToFront：点击应用卡片 → 把对应应用窗口（虚拟屏）提到前面
+// （v2.1.46）——浮前序列与"点标签置顶主投屏"完全同款（①置顶②激活③延时
+// ④ez 顶回最前），只是候选选择换成"指定包名的虚拟屏进程"（同设备多应用窗口
+// 互不误伤；主投屏不吃）。
+func BringAppWinToFront(serials []string, pkg string) error {
+	return bringFrontRequest(serials, pkg)
+}
+
+// bringFrontRequest 浮前请求统一入口（appPkg 为空=主投屏会话；非空=指定应用窗口）：
+// 幂等合并（同 key 连点取消上一轮）+ 独立 goroutine（不阻塞 UI 线程）。
+func bringFrontRequest(serials []string, appPkg string) error {
+	key := frontRequestKey(serials, appPkg)
 	req := &atomic.Bool{}
 	frontRequests.mu.Lock()
 	if old, ok := frontRequests.m[key]; ok {
@@ -237,14 +255,14 @@ func BringCastToFront(serials []string) error {
 	frontRequests.mu.Unlock()
 
 	go func() {
-		err := bringToFrontSync(serials, req)
+		err := bringToFrontSync(serials, appPkg, req)
 		frontRequests.mu.Lock()
 		if frontRequests.m[key] == req {
 			delete(frontRequests.m, key)
 		}
 		frontRequests.mu.Unlock()
 		if err != nil && !req.Load() {
-			DebugLog("[front] bring-to-front serials=%v 最终失败: %v", serials, err)
+			DebugLog("[front] bring-to-front serials=%v pkg=%q 最终失败: %v", serials, appPkg, err)
 		}
 	}()
 	return nil
@@ -255,12 +273,14 @@ func BringCastToFront(serials []string) error {
 // 找到可见主窗才执行一次浮前（raiseFrontWindow），随后立即返回——重试只补侦测，
 // 不重复刷 z-order。前端 fire-and-forget：窗口未就绪时的点击不丢请求（自动重试），
 // 重试有上限（frontMaxAttempts×frontRetryInterval）。
-func bringToFrontSync(serials []string, cancelled *atomic.Bool) error {
+// v2.1.46：appPkg 空=主投屏标签（候选=会话 scrcpy，排除虚拟屏）；非空=应用卡片
+// （候选=指定包名的虚拟屏 scrcpy，主投屏与其他应用窗口不吃）。
+func bringToFrontSync(serials []string, appPkg string, cancelled *atomic.Bool) error {
 	var procs []scrcpyProc
 	haveProcs := false
 	for attempt := 0; attempt < frontMaxAttempts; attempt++ {
 		if cancelled.Load() {
-			DebugLog("[front] bring-to-front serials=%v 被新一轮点击取消", serials)
+			DebugLog("[front] bring-to-front serials=%v pkg=%q 被新一轮点击取消", serials, appPkg)
 			return nil
 		}
 		// 第 1 轮走缓存（快速连点共享枚举）；后续轮强制新鲜——缓存可能停留在
@@ -275,10 +295,15 @@ func bringToFrontSync(serials []string, cancelled *atomic.Bool) error {
 			}
 		}
 		if haveProcs {
-			cands := bringToFrontCandidates(procs, serials)
+			var cands []scrcpyProc
+			if appPkg == "" {
+				cands = bringToFrontCandidates(procs, serials) // 主投屏标签：排除虚拟屏
+			} else {
+				cands = bringAppWinCandidates(procs, serials, appPkg) // 应用卡片：指定包名
+			}
 			if len(cands) == 0 {
-				DebugLog("[front] bring-to-front 未找到本会话 scrcpy 进程（第 %d/%d 轮，candidates=%v）",
-					attempt+1, frontMaxAttempts, serials)
+				DebugLog("[front] bring-to-front 未找到目标 scrcpy 进程（第 %d/%d 轮，candidates=%v pkg=%q）",
+					attempt+1, frontMaxAttempts, serials, appPkg)
 				haveProcs = false // 下轮重新枚举（进程可能尚未启动/刚退出）
 			} else {
 				pids := make(map[int]bool, len(cands))

@@ -30,7 +30,7 @@ func TestGui51ProfileCardNameCustomPriority(t *testing.T) {
 func TestGui51RenameNonEmptyAndClear(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	if err := a.RenameDevicesJSON(`{"REDMI K80":"客厅 K80"}`); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestGui51DeleteWirelessDisconnectAndArchiveRemove(t *testing.T) {
 
 	a := New(Config{AdbPath: fake, ConfigPath: "", ProfilesPath: filepath.Join(dir, "profiles.json"), Version: "test"})
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555", "192.0.2.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555", "192.0.2.197:45005"}),
 	})
 	a.profiles.SetDeviceOrder([]string{"REDMI K80"})
 
@@ -87,7 +87,7 @@ func TestGui51DeleteWirelessDisconnectAndArchiveRemove(t *testing.T) {
 func TestGui51LegacyProfilesLoadWithoutNewFields(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "profiles.json")
-	legacy := `{"devices":{"REDMI K80":{"marketname":"REDMI K80","model":"24117RK2CC","serials":["TEST0001"],"addrs":[],"profiles":{"usb":{"res":2560,"fps":120,"bitrate":60},"wifi":{"res":1920,"fps":60,"bitrate":15}}}}}`
+	legacy := `{"devices":{"REDMI K80":{"marketname":"REDMI K80","model":"MODEL123","serials":["TEST0001"],"addrs":[],"profiles":{"usb":{"res":2560,"fps":120,"bitrate":60},"wifi":{"res":1920,"fps":60,"bitrate":15}}}}}`
 	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,8 @@ const (
 	KindUserClose // scrcpy 用户主动关闭投屏窗口的哨兵行（SCRCPY_EZ_USER_CLOSE）
 	KindError
 	KindPrompt
-	KindTexture // scrcpy-server INFO: Texture: WxH（真实纹理尺寸，徽标优先数据源）
+	KindTexture    // scrcpy-server INFO: Texture: WxH（真实纹理尺寸，徽标优先数据源）
+	KindVDCreating // [窗口] 虚拟屏 ...（应用窗口虚拟屏启动步骤；主投屏不产生此事件）
 )
 
 // PromptKind 表示 bat 正在等待的 stdin 输入类型（choice/pause）。
@@ -99,6 +100,8 @@ func (k Kind) String() string {
 		return "prompt"
 	case KindTexture:
 		return "texture"
+	case KindVDCreating:
+		return "vd-creating"
 	default:
 		return "none"
 	}
@@ -113,6 +116,9 @@ type Spec struct {
 	FPS     int    `json:"fps"`     // 120
 	Mbps    int    `json:"mbps"`    // 50
 	MaxSize int    `json:"maxSize"` // 2560
+	// v2.1.91：编码格式（规格行解析展示；空=未解析到）
+	VCodec string `json:"vcodec,omitempty"`
+	ACodec string `json:"acodec,omitempty"`
 }
 
 // Event 是一次行分类结果。
@@ -130,14 +136,14 @@ type Event struct {
 
 var (
 	reSpecRes = regexp.MustCompile(`(\d{3,4})x(\d{3,4})@(\d{1,3})Hz`)
-	reSpecBr  = regexp.MustCompile(`h264/(\d{1,3})M/(\d{2,4})/(\d{1,3})fps`)
+	reSpecBr  = regexp.MustCompile(`(\w{2,4})/(\d{1,3})M/(\d{2,4})/(\d{1,3})fps`)
 	reKeySDK  = regexp.MustCompile(`SDK=(\d+) -> (\w+) legacy=(\w*)`)
-	reCustom  = regexp.MustCompile(`^\[custom\] (wired|wireless) res=(\d+) fps=(\d+) bitrate=(\d+)( \((usb|wifi)\))?$`)
+	reCustom  = regexp.MustCompile(`^\[custom\] (wired|wireless) res=(\d+) fps=(\d+) bitrate=(\d+)( \((usb|wifi)\))?(?: codec=(\w{2,4}))?(?: acodec=(\w{2,4}))?$`)
 	// 规格行精确格式（行首锚定 + 全格式匹配）：baseline 提取只认这三类 bat 回显行。
 	// 排除 bat 的"使用默认规格"回退行（检测失败时的 50M 默认值不是设备真实规格），
 	// 也天然排除任何 [server] INFO / FRAME / ABR / PULSE 日志行（行首不匹配）。
-	reSpecHD   = regexp.MustCompile(`^\[高清\] 有线模式：.*(?:有线规格|兼容模式) h264/(\d{1,3})M/(\d{2,4})/(\d{1,3})fps`)
-	reSpecWiFi = regexp.MustCompile(`^\[流畅\] 无线模式：.*（h264/(\d{1,3})M/(\d{2,4})/(\d{1,3})fps`)
+	reSpecHD   = regexp.MustCompile(`^\[高清\] 有线模式：.*(?:有线规格|兼容模式) (\w{2,4})/(\d{1,3})M/(\d{2,4})/(\d{1,3})fps`)
+	reSpecWiFi = regexp.MustCompile(`^\[流畅\] 无线模式：.*（(\w{2,4})/(\d{1,3})M/(\d{2,4})/(\d{1,3})fps`)
 	// scrcpy-server 日志行：只进原始日志，绝不参与分类（ABR 行含 bitrate 数字，防误匹配规格）。
 	reServerLog = regexp.MustCompile(`^\[server\] |^(FRAME|ABR|PULSE):`)
 	// 真实纹理行：INFO: Texture: WxH（徽标优先数据源——自定义长边档的短边按此真实值显示）
@@ -154,13 +160,14 @@ func ParseSpec(text string) *Spec {
 		}
 	}
 	if m := reSpecBr.FindStringSubmatch(text); m != nil {
-		if b, err := strconv.Atoi(m[1]); err == nil {
+		s.VCodec = m[1]
+		if b, err := strconv.Atoi(m[2]); err == nil {
 			s.Mbps = b
 		}
-		if x, err := strconv.Atoi(m[2]); err == nil {
+		if x, err := strconv.Atoi(m[3]); err == nil {
 			s.MaxSize = x
 		}
-		if f, err := strconv.Atoi(m[3]); err == nil {
+		if f, err := strconv.Atoi(m[4]); err == nil {
 			s.FPS = f
 		}
 	}
@@ -177,10 +184,10 @@ func specFromHD(t string) *Spec {
 	if m == nil {
 		return nil
 	}
-	mbps, _ := strconv.Atoi(m[1])
-	maxSize, _ := strconv.Atoi(m[2])
-	fps, _ := strconv.Atoi(m[3])
-	s := &Spec{MaxSize: maxSize, FPS: fps, Mbps: mbps, Wired: true}
+	mbps, _ := strconv.Atoi(m[2])
+	maxSize, _ := strconv.Atoi(m[3])
+	fps, _ := strconv.Atoi(m[4])
+	s := &Spec{MaxSize: maxSize, FPS: fps, Mbps: mbps, Wired: true, VCodec: m[1]}
 	if rm := reSpecRes.FindStringSubmatch(t); rm != nil {
 		s.Res = rm[1] + "x" + rm[2]
 	}
@@ -196,10 +203,10 @@ func specFromWiFi(t string) *Spec {
 	if m == nil {
 		return nil
 	}
-	mbps, _ := strconv.Atoi(m[1])
-	maxSize, _ := strconv.Atoi(m[2])
-	fps, _ := strconv.Atoi(m[3])
-	return &Spec{MaxSize: maxSize, FPS: fps, Mbps: mbps, Wired: false}
+	mbps, _ := strconv.Atoi(m[2])
+	maxSize, _ := strconv.Atoi(m[3])
+	fps, _ := strconv.Atoi(m[4])
+	return &Spec{MaxSize: maxSize, FPS: fps, Mbps: mbps, Wired: false, VCodec: m[1]}
 }
 
 // ParseKeyboard 解析 [键盘模式] Android SDK=34 -> uhid legacy= 行。
@@ -239,7 +246,7 @@ func ClassifyLine(line string) Event {
 			fps, _ := strconv.Atoi(m[3])
 			mbps, _ := strconv.Atoi(m[4])
 			wired := m[1] == "wired"
-			ev.Kind, ev.Spec = KindSpec, &Spec{MaxSize: res, FPS: fps, Mbps: mbps, Wired: wired, Custom: true}
+			ev.Kind, ev.Spec = KindSpec, &Spec{MaxSize: res, FPS: fps, Mbps: mbps, Wired: wired, Custom: true, VCodec: m[7], ACodec: m[8]}
 			if wired {
 				ev.Mode = "usb"
 			} else {
@@ -281,6 +288,10 @@ func ClassifyLine(line string) Event {
 		ev.Kind = KindLegacy
 	case strings.Contains(t, "[键盘模式]"):
 		ev.Kind = KindKeyboard
+	case strings.Contains(t, "[窗口] 虚拟屏 "):
+		// 应用窗口虚拟屏启动行（bat echo 于 scrcpy 进程启动前；"参数缺失"回退行
+		// 尾随"参数"不匹配——那是异常路径提示，不当"正在启动"信号）。
+		ev.Kind = KindVDCreating
 	case strings.Contains(t, "[学习] 有线模式"):
 		// 有线模式学习行（检测手机 WiFi IP）：真实模式行 → usb
 		ev.Kind, ev.Mode = KindLearning, "usb"

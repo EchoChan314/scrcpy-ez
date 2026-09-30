@@ -64,6 +64,12 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedGui25TabletArchive(a)
 	seedGui25K80Archive(a)
+	// gui55：纯探测写 active 现在要验身（直读设备自报短号）——按地址注入"设备是谁"。
+	a.pairOps.serialFn = gui55SerialByAddr(map[string]string{
+		"192.0.2.183:5555": "T7000PAD",
+		"192.0.2.162:5555": "T7000PAD",
+		"192.0.2.197:42449": "K80SERXXX",
+	}, "")
 
 	var mu sync.Mutex
 	var calls []string

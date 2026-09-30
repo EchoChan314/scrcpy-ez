@@ -21,7 +21,7 @@ import (
 // gui31K80Profiles 种入 K80 档案（USB serial TEST0001 + 无线 192.0.2.197:5555）。
 func gui31K80Profiles(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 }
 
@@ -35,7 +35,7 @@ func TestGui31FoldGhostUsbMergesUsbFirst(t *testing.T) {
 	devs := a.foldGhostUsb([]adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "TEST0001"}, // model 未就绪
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
-			Model: "24117RK2CC", Marketname: "REDMI K80", Identity: "REDMI K80",
+			Model: "MODEL123", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Battery: 94, Res: "2560x1600", FPS: 120, WirelessRes: "1920x1200",
 			Tls: true, WirelessForm: ModeTcpip},
 	})
@@ -49,7 +49,7 @@ func TestGui31FoldGhostUsbMergesUsbFirst(t *testing.T) {
 	if d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("无线地址应并入 Wireless 副行: %+v", d)
 	}
-	if d.Name != "REDMI K80" || d.Model != "24117RK2CC" || d.Marketname != "REDMI K80" || d.Identity != "REDMI K80" {
+	if d.Name != "REDMI K80" || d.Model != "MODEL123" || d.Marketname != "REDMI K80" || d.Identity != "REDMI K80" {
 		t.Fatalf("名称/型号/身份应从无线卡补缺: %+v", d)
 	}
 	if d.Battery != 94 || d.Res != "2560x1600" || d.FPS != 120 || d.WirelessRes != "1920x1200" ||
@@ -128,8 +128,8 @@ func TestGui31FoldGhostUsbLeavesPureWifi(t *testing.T) {
 func TestGui31FoldGhostUsbNoCrossDeviceMerge(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80":        mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"REDMI K80":        mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	devs := a.foldGhostUsb([]adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "TEST0001"},
@@ -188,7 +188,7 @@ func TestGui31FoldGhostUsbUsbWithModelStillMerges(t *testing.T) {
 	gui31K80Profiles(a)
 	devs := a.foldGhostUsb([]adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80",
-			Model: "24117RK2CC", Marketname: "REDMI K80", Identity: "REDMI K80",
+			Model: "MODEL123", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Battery: 94, Res: "2560x1600", FPS: 120},
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80"},
 	})
@@ -229,7 +229,7 @@ func TestPollOnceGui31UsbFirstNoWirelessFlash(t *testing.T) {
 		"      case \"$5\" in\n" +
 		"        ro.product.marketname) echo 'REDMI K80';;\n" +
 		"        ro.product.manufacturer) echo 'Xiaomi';;\n" +
-		"        ro.product.model) echo '24117RK2CC';;\n" +
+		"        ro.product.model) echo 'MODEL123';;\n" +
 		"        service.adb.tcp.port) echo '5555';;\n" +
 		"      esac\n" +
 		"      ;;\n" +
@@ -277,7 +277,7 @@ func TestPollOnceGui31UsbFirstNoWirelessFlash(t *testing.T) {
 
 	// ② adbd 恢复：USB 回来（无 model、getprop 未就绪）+ 5555 已连（有 model）
 	// → 恢复轮即单 USB 卡（无无线闪现）
-	t.Setenv("G31_DEV", "TEST0001\tdevice\n192.0.2.197:5555\tdevice model:24117RK2CC")
+	t.Setenv("G31_DEV", "TEST0001\tdevice\n192.0.2.197:5555\tdevice model:MODEL123")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
 	noWifiOnly("恢复", devs)
@@ -298,7 +298,7 @@ func TestPollOnceGui31UsbFirstNoWirelessFlash(t *testing.T) {
 
 	// ③ model 就绪轮：USB/无线条目都带 model → adb 层归并稳定单 USB 卡
 	t.Setenv("G31_USB_READY", "1")
-	t.Setenv("G31_DEV", "TEST0001\tdevice model:24117RK2CC\n192.0.2.197:5555\tdevice model:24117RK2CC")
+	t.Setenv("G31_DEV", "TEST0001\tdevice model:MODEL123\n192.0.2.197:5555\tdevice model:MODEL123")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
 	noWifiOnly("稳定", devs)
@@ -309,7 +309,7 @@ func TestPollOnceGui31UsbFirstNoWirelessFlash(t *testing.T) {
 	gui49fix6WaitPlugClear(t, a) // USB 连续 device 满稳定窗口 → 插线遮罩清
 
 	// ④ 拔线：仅无线 5555 → 无线卡照常（gui30 学习生效，不回归）
-	t.Setenv("G31_DEV", "192.0.2.197:5555\tdevice model:24117RK2CC")
+	t.Setenv("G31_DEV", "192.0.2.197:5555\tdevice model:MODEL123")
 	a.pollOnce(context.Background())
 	waitForMdns(t, "拔线遮罩 connect 成功后应恢复无线卡", func() bool {
 		devs = a.Snapshot().Devices

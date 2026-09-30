@@ -18,7 +18,7 @@ func gbkBytes(t *testing.T, s string) []byte {
 }
 
 func TestDecodeGBK(t *testing.T) {
-	in := "[OK] 检测到 USB 设备：Redmi K80（24117RK2CC）"
+	in := "[OK] 检测到 USB 设备：Redmi K80（MODEL123）"
 	got := DecodeGBK(gbkBytes(t, in))
 	if got != in {
 		t.Fatalf("GBK 往返失败: %q", got)

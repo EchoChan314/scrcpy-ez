@@ -12,7 +12,7 @@ import (
 func fix2SeedPad(a *App) {
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "25091RP04C",
+		Model:      "MODEL789",
 		Serials:    []string{"TEST0002"},
 		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{

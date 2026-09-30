@@ -11,7 +11,7 @@ import (
 
 // seedProfiles 直接给内存档案库种入身份条目（复现 16:53 实况的档案分裂形态：
 // "REDMI K80" 只有 USB serial、无线地址 197 被市场名读取失败时记到了
-// "Xiaomi 24117RK2CC" 键下）。
+// "Xiaomi MODEL123" 键下）。
 func seedProfiles(a *App, devices map[string]*DeviceEntry) {
 	a.profiles.mu.Lock()
 	defer a.profiles.mu.Unlock()
@@ -41,8 +41,8 @@ func mkEntry(marketname, model string, serials, addrs []string) *DeviceEntry {
 func TestNewDevicePopupSameIdentityDualTransportNoPopup(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80":        mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"REDMI K80":        mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	// K80 USB 会话已存在
 	setDevices(a, []adb.Device{
@@ -68,8 +68,8 @@ func TestNewDevicePopupSameIdentityDualTransportNoPopup(t *testing.T) {
 	devs := []adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"}, // 本轮 marketname 读不到（回退值）
+			Name: "Xiaomi MODEL123", Identity: "Xiaomi MODEL123",
+			Manufacturer: "Xiaomi", Model: "MODEL123"}, // 本轮 marketname 读不到（回退值）
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 	}
 	setDevices(a, devs)
@@ -88,12 +88,12 @@ func TestNewDevicePopupSameIdentityDualTransportNoPopup(t *testing.T) {
 }
 
 // 弹窗文本必须用市场名：卡片 Name 是 man+model 回退值时，档案有 marketname
-// 就用市场名（"REDMI K80" 而非 "Xiaomi 24117RK2CC"）。
+// 就用市场名（"REDMI K80" 而非 "Xiaomi MODEL123"）。
 // 判据 v2：K80 已建档 → 经 USB 插线事件触发弹窗。
 func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	// 平板会话在投
 	setDevices(a, []adb.Device{
@@ -104,8 +104,8 @@ func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 	baseline := []adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Name: "Xiaomi MODEL123", Identity: "Xiaomi MODEL123",
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	}
 	setDevices(a, baseline)
 	a.applyTrackUpdate(baseline)
@@ -116,8 +116,8 @@ func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 	devs := []adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro", Identity: "Xiaomi Pad 8 Pro"},
 		{Serial: "TEST0001", State: "device", ConnType: "usb",
-			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Name: "Xiaomi MODEL123", Identity: "Xiaomi MODEL123",
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	}
 	setDevices(a, devs)
 	a.applyTrackUpdate(devs)
@@ -142,17 +142,17 @@ func TestNewDevicePopupUsesMarketNameText(t *testing.T) {
 func TestNewDevicePopupDismissStableAcrossIdentityFlip(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devsFallback := []adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb",
-			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Name: "Xiaomi MODEL123", Identity: "Xiaomi MODEL123",
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	}
 	devsMarket := []adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb",
 			Name: "REDMI K80", Identity: "REDMI K80", Marketname: "REDMI K80",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	}
 	setDevices(a, nil)
 	a.applyTrackUpdate(nil) // 基线（无设备）
@@ -180,7 +180,7 @@ func TestNewDevicePopupDismissStableAcrossIdentityFlip(t *testing.T) {
 func TestStartCastInjectsMarketModelForLockedSession(t *testing.T) {
 	a, rec := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	setDevices(a, []adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Identity: "REDMI K80"},
@@ -189,7 +189,7 @@ func TestStartCastInjectsMarketModelForLockedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := rec.serial("TEST0001")[0].waitParams(t, 1)
-	if p.Serial != "TEST0001" || p.Market != "REDMI K80" || p.Model != "24117RK2CC" {
+	if p.Serial != "TEST0001" || p.Market != "REDMI K80" || p.Model != "MODEL123" {
 		t.Fatalf("锁定会话应注入 SCEZ_SERIAL+SCEZ_MARKET+SCEZ_MODEL: %+v", p)
 	}
 	// 档案 addrs 归并后：SCEZ_ADDR 同步注入（无线分支直连本尊，不读共享 config.txt）
@@ -199,17 +199,17 @@ func TestStartCastInjectsMarketModelForLockedSession(t *testing.T) {
 	// 档案无 marketname（新设备只读到 model）：Market 不注、Model 注
 	a2, rec2 := multiTestApp()
 	seedProfiles(a2, map[string]*DeviceEntry{
-		"Xiaomi 24117RK2CC": mkEntry("", "24117RK2CC", []string{"TEST0001"}, nil),
+		"Xiaomi MODEL123": mkEntry("", "MODEL123", []string{"TEST0001"}, nil),
 	})
 	setDevices(a2, []adb.Device{
-		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "Xiaomi 24117RK2CC",
-			Identity: "Xiaomi 24117RK2CC", Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "Xiaomi MODEL123",
+			Identity: "Xiaomi MODEL123", Manufacturer: "Xiaomi", Model: "MODEL123"},
 	})
 	if err := a2.StartCast("TEST0001"); err != nil {
 		t.Fatal(err)
 	}
 	p2 := rec2.serial("TEST0001")[0].waitParams(t, 1)
-	if p2.Market != "" || p2.Model != "24117RK2CC" {
+	if p2.Market != "" || p2.Model != "MODEL123" {
 		t.Fatalf("无市场名档案：只注 MODEL: %+v", p2)
 	}
 }
@@ -261,13 +261,13 @@ func TestStopCastServerKillGateMultiSession(t *testing.T) {
 func TestStartCastIdentityViaProfileMarketname(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	// K80 无线卡（本轮 marketname 读不到 → 卡片 Identity 是 man+model 回退值）
 	setDevices(a, []adb.Device{
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Name: "Xiaomi MODEL123", Identity: "Xiaomi MODEL123",
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	})
 	startVerifyAlwaysOK(a) // gui32 验证链：档案候选 5555 验证通过才选用
 	if err := a.StartCast("192.0.2.197:5555"); err != nil {
@@ -283,23 +283,23 @@ func TestStartCastIdentityViaProfileMarketname(t *testing.T) {
 }
 
 // 档案分裂自愈（16:53 实况的档案形态）：marketname 读不到时无线地址被记到
-// man+model 键下（"Xiaomi 24117RK2CC"）→ 市场名恢复读取后 SyncDevices 必须
+// man+model 键下（"Xiaomi MODEL123"）→ 市场名恢复读取后 SyncDevices 必须
 // 归并回 "REDMI K80"（addr 回本尊档案）→ BestAddr 才有值 → SCEZ_ADDR 才注得上；
 // 且 marketname 仍读不到时档案市场名优先，identity 不抖动、不分裂。
 func TestProfileSyncHealsMarketnameSplit(t *testing.T) {
 	s := NewProfileStore("")
 	// 直接构造分裂态（与实况 profiles.json 一致）
 	s.mu.Lock()
-	s.data.Devices["REDMI K80"] = mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, nil)
-	s.data.Devices["Xiaomi 24117RK2CC"] = mkEntry("", "24117RK2CC", nil, []string{"192.0.2.197:5555"})
+	s.data.Devices["REDMI K80"] = mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, nil)
+	s.data.Devices["Xiaomi MODEL123"] = mkEntry("", "MODEL123", nil, []string{"192.0.2.197:5555"})
 	s.mu.Unlock()
 
 	// ① marketname 仍读不到：档案市场名优先 → 197 卡身份保持 REDMI K80，
 	// 不新建/不重键回 man+model（identity 稳定）；卡片 Marketname/Identity 被补正
 	devs := []adb.Device{
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi 24117RK2CC", Identity: "Xiaomi 24117RK2CC",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Name: "Xiaomi MODEL123", Identity: "Xiaomi MODEL123",
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	}
 	if !s.SyncDevices(devs) {
 		t.Fatal("SyncDevices 应有改动（addr 成功记录）")
@@ -315,11 +315,11 @@ func TestProfileSyncHealsMarketnameSplit(t *testing.T) {
 	devs2 := []adb.Device{
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi",
 			Name: "REDMI K80", Identity: "REDMI K80", Marketname: "REDMI K80",
-			Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+			Manufacturer: "Xiaomi", Model: "MODEL123"},
 	}
 	s.SyncDevices(devs2)
 	s.mu.Lock()
-	_, split := s.data.Devices["Xiaomi 24117RK2CC"]
+	_, split := s.data.Devices["Xiaomi MODEL123"]
 	s.mu.Unlock()
 	if split {
 		t.Fatal("归并后 man+model 分裂键应消失")

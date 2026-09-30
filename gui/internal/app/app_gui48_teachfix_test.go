@@ -78,7 +78,7 @@ func (o *teachfixOps) order() []string {
 
 func teachfixSeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 }
@@ -184,6 +184,7 @@ func TestTeachfixOneTeachPerPlugCycle(t *testing.T) {
 	}
 
 	// 拔线：周期结束清除名额；再插线 = 新周期重新学习。
+	a.plugClear("REDMI K80", "测试结束学习周期")
 	a.applyTrackUpdate(nil)
 	if teachfixTaught(a, "TEST0001") {
 		t.Fatal("拔线后应清除 taughtTcpip 名额")

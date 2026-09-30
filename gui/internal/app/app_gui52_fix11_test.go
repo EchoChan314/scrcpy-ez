@@ -20,7 +20,7 @@ func TestGui52Fix11MergeKeepsMainActiveTls(t *testing.T) {
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "model": "25091RP04C",
+      "model": "MODEL789",
       "serials": ["TEST0002"],
       "tlsGuid": "adb-TEST0002-On9v2R",
       "addrs": [
@@ -74,7 +74,7 @@ func TestGui52Fix11MergeAppendsWhenNoMainActive(t *testing.T) {
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "model": "25091RP04C",
+      "model": "MODEL789",
       "serials": ["TEST0002"],
       "tlsGuid": "adb-TEST0002-On9v2R",
       "addrs": [

@@ -46,7 +46,7 @@ func TestGui52Fix8TcpipAlreadyOpenSkips(t *testing.T) {
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
 	// 前置：配对尾段已完成建档（生产语义：PairArchive 先于 ensure）
-	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "24117RK2CC")
+	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "MODEL123")
 
 	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
 	time.Sleep(50 * time.Millisecond)
@@ -76,7 +76,7 @@ func TestGui52Fix8TcpipNotOpenEnableOnce(t *testing.T) {
 	rec := &fix8Recorder{defaultPort: ""}
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
-	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "24117RK2CC")
+	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "MODEL123")
 
 	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
 	time.Sleep(50 * time.Millisecond)

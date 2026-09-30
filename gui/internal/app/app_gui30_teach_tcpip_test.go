@@ -243,7 +243,7 @@ func TestPollOnceGui30TeachTcpipFullChain(t *testing.T) {
 		"      case \"$5\" in\n" +
 		"        ro.product.marketname) echo 'REDMI K80';;\n" +
 		"        ro.product.manufacturer) echo 'Xiaomi';;\n" +
-		"        ro.product.model) echo '24117RK2CC';;\n" +
+		"        ro.product.model) echo 'MODEL123';;\n" +
 		"        service.adb.tcp.port) cat \"$G30_PORT\" 2>/dev/null;;\n" +
 		"      esac\n" +
 		"      ;;\n" +

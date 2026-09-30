@@ -5,11 +5,13 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"scrcpy-ez/gui/internal/app"
 	"scrcpy-ez/gui/internal/bridge"
 	"scrcpy-ez/gui/internal/ui"
+	"scrcpy-ez/gui/internal/updater"
 )
 
 // gui54 退出体验优化：「假关」+ 并行清理 + 15s 全局兜底。
@@ -111,6 +114,9 @@ var appJS string
 //go:embed web/param_state.js
 var paramStateJS string
 
+//go:embed web/appsetting_state.js
+var appsettingStateJS string
+
 //go:embed web/session_map.js
 var sessionMapJS string
 
@@ -120,11 +126,32 @@ var dragOrderJS string
 //go:embed web/pair_ui.js
 var pairUIJS string
 
+//go:embed web/pinyin_pro.js
+var pinyinProJS string
+
+//go:embed web/app_search.js
+var appSearchJS string
+
+//go:embed web/appwin_text.js
+var appWinTextJS string
+
+//go:embed web/appwin_bar.js
+var appWinBarJS string
+
+//go:embed web/update_ui.js
+var updateUIJS string
+
 //go:embed assets/icon.ico
 var iconICO []byte
 
+//go:embed assets/github-mark-white.png
+var githubMarkPNG []byte
+
+//go:embed assets/gitee.svg
+var giteeMarkSVG []byte
+
 const (
-	version = "v2.1.0"
+	version = "v2.2.1"
 )
 
 // appDir gui53 产品级修复：返回 exe 所在目录（发行包内 bat 与 GUI 同级解压）。
@@ -185,6 +212,12 @@ func migrateLegacyProfile(newPath string) {
 }
 
 func main() {
+	if updater.RunIfRequested(os.Args[1:]) {
+		return
+	}
+	if updater.RecoverIfNeeded(appDir()) {
+		return
+	}
 	log.SetFlags(log.Ltime)
 
 	// gui53：bat/adb/config 默认取 exe 同目录（发行包结构）；环境变量可显式覆盖。
@@ -242,8 +275,13 @@ func main() {
 		return bridge.NewBatRunner(cfg.BatPath, cfg.AdbPath, onLine, onExit), nil
 	})
 	a.StartDevicePolling(context.Background())
+	// v2.1.77：5037 抢庄——启动检测归属，旧版 adb server 坐庄时夺回（异步不阻塞首屏）。
+	a.StartServerOwnershipCheck()
 
-	html, err := ui.BuildIndex(indexHTML, styleCSS, sessionMapJS+"\n"+paramStateJS+"\n"+dragOrderJS+"\n"+pairUIJS+"\n"+appJS)
+	// v2.1.18：pinyin_pro（拼音库，全局 pinyinPro）+ app_search（搜索过滤模块）
+	// 在业务脚本前内联（app.js 依赖 SCEZAppSearch）。
+	pageTemplate := strings.NewReplacer("/*__GITHUB_ICON__*/", base64.StdEncoding.EncodeToString(githubMarkPNG), "/*__GITEE_ICON__*/", base64.StdEncoding.EncodeToString(giteeMarkSVG)).Replace(indexHTML)
+	html, err := ui.BuildIndex(pageTemplate, styleCSS, updateUIJS+"\n"+pinyinProJS+"\n"+appSearchJS+"\n"+appWinTextJS+"\n"+appWinBarJS+"\n"+sessionMapJS+"\n"+paramStateJS+"\n"+appsettingStateJS+"\n"+dragOrderJS+"\n"+pairUIJS+"\n"+appJS)
 	if err != nil {
 		log.Fatalf("界面资源组装失败: %v", err)
 	}

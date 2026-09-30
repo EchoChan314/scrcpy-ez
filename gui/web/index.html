@@ -13,7 +13,7 @@
 <div id="top-chrome">
   <div class="winbar">
     <div class="title" id="win-title">scrcpy-ez</div>
-    <div class="ver" id="app-ver">v0.1</div>
+    <button class="ver" id="app-ver" type="button" title="检查更新">v0.1</button>
     <div class="spacer"></div>
     <div class="iconbtn" title="刷新" id="btn-refresh">↻</div>
     <div class="iconbtn" title="设置" aria-label="设置" id="btn-settings">⚙</div>
@@ -29,7 +29,15 @@
 <!-- ================= 视图 1：设备列表 ================= -->
 <div class="view" id="view-devices">
   <div class="section-title">已连接设备（<span id="dev-count">0</span>）<span class="spacer"></span><button class="batch-entry" id="batch-toggle" type="button">批量管理</button></div>
-  <div id="device-list"><div class="empty-tip">正在扫描设备…</div></div>
+  <div class="device-content">
+    <div id="device-list"><div class="empty-tip">正在扫描设备…</div></div>
+
+    <!-- 配对入口不属于排序容器，卡片换位不会移动或挤入入口。 -->
+    <div class="device-footer">
+      <button class="pair-entry" id="pair-entry" type="button"><span class="pe-plus">+</span>从「无线调试」配对新设备</button>
+      <div class="foot">scrcpy-ez · 轻松易用不折腾</div>
+    </div>
+  </div>
 
   <div class="batch-bar" id="batch-bar" style="display:none">
     <span class="cnt" id="batch-cnt">已选 0 台</span>
@@ -41,7 +49,6 @@
     <div class="xbtn" id="batch-x" title="退出批量管理"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2l10 10M12 2L2 12"/></svg></div>
   </div>
 
-  <div class="foot">scrcpy-ez · 轻松易用不折腾</div>
 </div>
 
 <!-- ================= 视图 2：窗口总览（投屏中视图；常驻 tab，切换靠顶部 tabs） ================= -->
@@ -58,20 +65,6 @@
   </div>
   <div id="cast-sessions"></div>
 
-  <!-- 快捷键说明弹窗 -->
-  <div class="modal-mask" id="shortcut-modal" style="display:none">
-    <div class="modal-card">
-      <div class="modal-head"><b>快捷键说明</b><span class="modal-close" id="shortcut-close">✕</span></div>
-      <div class="keycard">
-        <div class="key-row"><span class="kbd">Ctrl</span><span class="kbd">F</span><span class="key-desc">参数控件开关（可 Alt 拖动）</span></div>
-        <div class="key-row"><span class="kbd">Ctrl</span><span class="kbd">G</span><span class="key-desc">复制图片存手机相册</span></div>
-        <div class="key-row"><span class="kbd">Ctrl</span><span class="kbd">H</span><span class="key-desc">黑屏省电（再按恢复）</span></div>
-        <div class="key-row"><span class="kbd">Ctrl</span><span class="kbd">T</span><span class="key-desc">窗口置顶开关</span></div>
-        <div class="key-row"><span class="kbd">Alt</span><span class="kbd">F</span><span class="key-desc">全屏</span></div>
-      </div>
-    </div>
-  </div>
-
   <!-- 参数浮窗（有线/无线两套独立；投屏中快捷调参，保持现状） -->
   <div class="modal-mask" id="param-modal" style="display:none">
     <div class="modal-card param-card">
@@ -82,6 +75,42 @@
       <div class="param-sub">每设备两套分别记忆 · 保存后重新投屏</div>
       <div class="param-mode" id="param-mode">当前：有线模式</div>
       <div id="param-rows"></div>
+
+      <div class="param-row" id="param-vcodec-row">
+        <div class="param-rowhead">
+          <span class="param-label" id="param-vcodec-label">视频编码 (<b>h264</b>)</span>
+          <span class="param-actions"><button class="param-reset" id="param-vcodec-reset">重置</button></span>
+        </div>
+        <div class="chips" id="param-vcodec-chips"></div>
+      </div>
+      <div class="param-row" id="param-audio-row">
+        <div class="param-rowhead">
+          <span class="param-label" id="param-audio-label">声音 (<b>电脑</b>)</span>
+          <span class="param-actions"><button class="param-reset" id="param-audio-reset">重置</button></span>
+        </div>
+        <div class="audio-slider" id="param-audio-slider">
+          <div class="as-labels">
+            <span class="as-label" data-i="0">手机</span>
+            <span class="as-label" data-i="1">电脑</span>
+            <span class="as-label" data-i="2">两边</span>
+          </div>
+          <div class="as-rail">
+            <div class="as-track"></div>
+            <div class="as-stop" data-i="0"></div>
+            <div class="as-stop" data-i="1"></div>
+            <div class="as-stop" data-i="2"></div>
+          </div>
+        </div>
+        <div class="param-audio-note" id="param-audio-note"></div>
+      </div>
+      <div class="param-row" id="param-acodec-row">
+        <div class="param-rowhead">
+          <span class="param-label" id="param-acodec-label">音频编码 (<b>opus</b>)</span>
+          <span class="param-actions"><button class="param-reset" id="param-acodec-reset">重置</button></span>
+        </div>
+        <div class="chips" id="param-acodec-chips"></div>
+      </div>
+
       <div class="param-note" id="param-note"></div>
       <div class="param-foot">
         <button class="btn ghost" id="param-cancel">取消</button>
@@ -90,6 +119,8 @@
     </div>
   </div>
 
+  <!-- （appwin-modal 已移至 body 级：避免被 view-enter 动画的 transform 困住——
+       否则切视图瞬间 fixed 浮窗会相对 view-cast 定位，出现"偏下几帧"。） -->
   <!-- 新设备弹窗（轮 B：非模态提示条——检测到未创建会话的在线设备） -->
   <div class="newdev-popup" id="newdev-popup" style="display:none">
     <div class="np-row">
@@ -104,6 +135,20 @@
 
 <!-- 轻提示（全局：设备/窗口总览共用） -->
 <div class="toast" id="cast-toast" style="display:none"></div>
+
+<!-- 应用窗口面板（二期）：模态浮窗——搜索 + 应用网格（自适应列数、纵向滚动；站最前不裁切）。
+     置于 body 级：不受任何视图动画 transform 影响（fix 浮窗"偏下几帧"）。 -->
+<div class="modal-mask" id="appwin-modal" style="display:none">
+  <div class="modal-card appwin-card">
+    <div class="modal-head">
+      <b id="appwin-modal-title">应用窗口</b>
+      <span class="modal-close" id="appwin-modal-close">✕</span>
+    </div>
+    <input class="appwin-search" id="appwin-modal-search" placeholder="搜索应用…">
+    <div class="appwin-grid" id="appwin-modal-grid"><div class="appwin-loading">正在读取应用列表…</div></div>
+    <div class="appwin-hint">点击应用 → 在独立窗口打开</div>
+  </div>
+</div>
 
 <!-- ================= 无线调试配对向导（gui50：自动发现 / 手动 / 二维码三路线） ================= -->
 <div class="modal-mask" id="pair-modal" style="display:none">
@@ -211,6 +256,76 @@
   </div>
 </div>
 
+<!-- ================= 应用窗口设置浮窗（二期 Step 4/5：虚拟屏参数——每应用有线/无线两套） ================= -->
+<div class="modal-mask" id="appset-modal" style="display:none">
+  <div class="modal-card param-card">
+    <div class="modal-head">
+      <b id="appset-title">窗口设置</b>
+      <span class="modal-close" id="appset-close">✕</span>
+    </div>
+    <div class="param-sub">每应用两套分别记忆 · 保存后重新投屏</div>
+    <div id="appset-rows"></div>
+    <div class="param-row" id="appset-vcodec-row">
+      <div class="param-rowhead">
+        <span class="param-label" id="appset-vcodec-label">视频编码 (<b>h264</b>)</span>
+        <span class="param-actions"><button class="param-reset" id="appset-vcodec-reset">重置</button></span>
+      </div>
+      <div class="chips" id="appset-vcodec-chips"></div>
+    </div>
+    <div class="param-row" id="appset-acodec-row">
+      <div class="param-rowhead">
+        <span class="param-label" id="appset-acodec-label">音频编码 (<b>opus</b>)</span>
+        <span class="param-actions"><button class="param-reset" id="appset-acodec-reset">重置</button></span>
+      </div>
+      <div class="chips" id="appset-acodec-chips"></div>
+    </div>
+    <div class="param-note" id="appset-note"></div>
+    <div class="appset-opts">
+      <div class="set-row">
+        <div class="set-main">
+          <div class="set-title">窗口跟随</div>
+          <div class="set-note">调整窗口大小时，画面自动适应窗口尺寸</div>
+        </div>
+        <div class="switch on" id="appset-flex" role="switch" aria-checked="true"><span class="knob"></span></div>
+      </div>
+      <div class="set-row" id="appset-audio-row">
+        <div class="set-main">
+          <div class="param-rowhead">
+            <div class="set-title">声音</div>
+            <span class="param-actions"><button class="param-reset" id="appset-audio-reset">重置</button></span>
+          </div>
+          <div class="audio-slider" id="appset-audio">
+            <div class="as-labels">
+              <span class="as-label" data-i="0">手机</span>
+              <span class="as-label" data-i="1">电脑</span>
+              <span class="as-label" data-i="2">两边</span>
+            </div>
+            <div class="as-rail">
+              <div class="as-track"></div>
+              <div class="as-stop" data-i="0"></div>
+              <div class="as-stop" data-i="1"></div>
+              <div class="as-stop" data-i="2"></div>
+            </div>
+          </div>
+          <div class="set-note" id="appset-audio-note"></div>
+        </div>
+      </div>
+    </div>
+    <div class="param-foot">
+      <button class="btn ghost" id="appset-cancel">取消</button>
+      <button class="btn primary" id="appset-save">保存并重新投屏</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="appset-ratio-error-modal" style="display:none">
+  <div class="modal-card ratio-error-card">
+    <div class="modal-head"><b id="appset-ratio-error-title">初始比例未完成</b><span class="modal-close" id="appset-ratio-error-close">✕</span></div>
+    <div class="set-note" id="appset-ratio-error-message">请输入完整且有效的宽、高整数。</div>
+    <div class="param-foot"><button class="btn primary" id="appset-ratio-error-ok">返回修改</button></div>
+  </div>
+</div>
+
 <!-- ================= 指引弹窗（原连接向导精简版） ================= -->
 <div class="modal-mask" id="guide-modal" style="display:none">
   <div class="modal-card">
@@ -247,6 +362,48 @@
   </div>
 </div>
 
+
+<!-- 版本信息弹窗（点击顶栏版本号；v2.1.22） -->
+<div class="modal-mask" id="update-modal" style="display:none">
+  <div class="modal-card update-card">
+    <div class="modal-head"><b>版本与更新</b><span class="modal-close" id="update-close">✕</span></div>
+    <div class="update-row"><span class="update-label">当前版本</span><b id="update-current">-</b></div>
+    <div class="update-row"><span class="update-label">最新版本</span><b id="update-latest">-</b></div>
+    <div class="update-row"><span class="update-label">下载源</span><b id="update-source">自动选择（GitHub / Gitee）</b></div>
+    <div class="update-state" id="update-state"></div>
+    <div class="update-note" id="update-notice" style="display:none"></div>
+    <div class="update-error" id="update-error" style="display:none" role="alert"></div>
+    <div id="update-progress" style="display:none">
+      <progress id="update-progress-bar" max="100" aria-label="下载进度"></progress>
+      <div class="update-note" id="update-progress-text" aria-live="polite"></div>
+    </div>
+    <div class="update-note">下载期间可以继续投屏，关闭此弹窗后仍会下载。重启安装会结束投屏窗口，设备档案与设置会保留。</div>
+    <div class="update-error" id="update-result" style="display:none"></div>
+    <div id="update-confirm" class="update-confirm" style="display:none">
+      <div id="update-confirm-text"></div>
+      <div class="update-actions">
+        <button class="btn ghost" id="update-confirm-cancel" type="button">稍后更新</button>
+        <button class="btn primary" id="update-confirm-ok" type="button">结束投屏并更新</button>
+      </div>
+    </div>
+    <div class="update-actions">
+      <button class="btn ghost" id="update-check" type="button">检查更新</button>
+      <button class="btn ghost" id="update-cancel" type="button" style="display:none">取消下载</button>
+      <button class="btn primary" id="update-download" type="button" style="display:none">下载更新</button>
+      <button class="btn primary" id="update-install" type="button" style="display:none">重启并更新</button>
+      <button class="btn ghost" id="update-later" type="button">关闭</button>
+    </div>
+    <div class="update-links">
+      <button class="update-repo-icon" id="update-repo" type="button" title="GitHub" aria-label="打开 GitHub 仓库">
+        <svg class="repo-mark repo-mark-github" viewBox="48 48 288 288" aria-hidden="true" focusable="false"><image width="384" height="384" href="data:image/png;base64,/*__GITHUB_ICON__*/"/></svg>
+      </button>
+      <button class="update-repo-icon" id="update-gitee" type="button" title="Gitee" aria-label="打开 Gitee 仓库">
+        <img class="repo-mark" src="data:image/svg+xml;base64,/*__GITEE_ICON__*/" alt="" aria-hidden="true" draggable="false">
+      </button>
+    </div>
+    <button class="update-result-dismiss" id="update-result-dismiss" type="button" style="display:none">清除安装结果</button>
+  </div>
+</div>
 <script src="qrcode.js"></script>
 <script>
 /*__JS__*/

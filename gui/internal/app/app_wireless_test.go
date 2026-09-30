@@ -88,7 +88,7 @@ func TestPairConnectSuccessTlsArchive(t *testing.T) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "25091RP04C", nil
+			return "MODEL789", nil
 		}
 		return "", errors.New("unknown prop")
 	}

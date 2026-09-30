@@ -36,7 +36,7 @@ func gui50Fix3InstallSuccessFakes(a *App) *int {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "24117RK2CC", nil
+			return "MODEL123", nil
 		}
 		return "", nil
 	}

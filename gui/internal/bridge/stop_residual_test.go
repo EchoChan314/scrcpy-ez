@@ -85,7 +85,7 @@ func TestScrcpyCmdlineMatches(t *testing.T) {
 	}
 }
 
-// --- 残余 scrcpy 候选选择：父链 + 命令行，多会话隔离 ---
+// --- 残余 scrcpy 候选选择：父链 + 命令行（serial+形态），多会话隔离 ---
 
 func TestResidualScrcpyCandidates(t *testing.T) {
 	procs := []scrcpyProc{
@@ -95,7 +95,8 @@ func TestResidualScrcpyCandidates(t *testing.T) {
 		{pid: 200, ppid: 42, cmdline: `scrcpy.exe --serial TEST0001`},           // 本会话：双命中
 		{pid: 500, ppid: 7, cmdline: `scrcpy.exe --serial 192.0.2.197:5555`}, // 本会话：无线候选命中
 	}
-	got := residualScrcpyCandidates(procs, 42, []string{"TEST0001", "192.0.2.197:5555"})
+	// 本会话=主投屏（无虚拟屏形态特征）
+	got := residualScrcpyCandidates(procs, 42, []string{"TEST0001", "192.0.2.197:5555"}, "", "")
 	want := []int{100, 200, 300, 500}
 	if len(got) != len(want) {
 		t.Fatalf("候选数错误: %+v", got)
@@ -106,8 +107,29 @@ func TestResidualScrcpyCandidates(t *testing.T) {
 		}
 	}
 	// 无命中 → 空
-	if got := residualScrcpyCandidates(procs, 4242, nil); len(got) != 0 {
+	if got := residualScrcpyCandidates(procs, 4242, nil, "", ""); len(got) != 0 {
 		t.Fatalf("无命中应空: %+v", got)
+	}
+}
+
+// v2.1.30 穿透回归：同设备主投屏 + 虚拟屏并存（scrcpy --serial 相同），
+// Stop 的残余判定必须靠形态特征区分——主投屏 Stop 不得命中虚拟屏进程（曾实锤：
+// 停止主投屏把虚拟屏一起优雅关窗杀掉），反向同理。
+func TestResidualScrcpyNoBleedSameDevice(t *testing.T) {
+	procs := []scrcpyProc{
+		{pid: 600, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --keyboard=uhid --max-size 2560`}, // 主投屏（他会话）
+		{pid: 700, ppid: 8, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --flex-display --start-app=+com.android.browser`}, // 虚拟屏（本会话）
+		{pid: 800, ppid: 9, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.settings`},              // 同设备另一应用窗口
+	}
+	// 主投屏 Stop（无形态特征）：只命中主投屏进程 600
+	got := residualScrcpyCandidates(procs, 42, []string{"TEST0001"}, "", "")
+	if len(got) != 1 || got[0].pid != 600 {
+		t.Fatalf("主投屏 Stop 只能命中主投屏进程（防穿透）: %+v", got)
+	}
+	// 虚拟屏 Stop（形态=1280x720 + browser）：只命中 700
+	got = residualScrcpyCandidates(procs, 42, []string{"TEST0001"}, "1280x720", "+com.android.browser")
+	if len(got) != 1 || got[0].pid != 700 {
+		t.Fatalf("虚拟屏 Stop 只能命中本应用窗口进程: %+v", got)
 	}
 }
 
@@ -156,6 +178,15 @@ func TestBringToFrontCandidates(t *testing.T) {
 	if got := bringToFrontCandidates(procs, []string{"TEST0002"}); len(got) != 1 || got[0].pid != 400 {
 		t.Fatalf("平板候选应只命中平板: %+v", got)
 	}
+	// v2.1.30：虚拟屏（应用窗口）不进主投屏浮前候选——同设备并存时点主投屏
+	// 标签，不应把虚拟屏窗口也一起提到前面。
+	procs2 := []scrcpyProc{
+		{pid: 600, ppid: 7, cmdline: `scrcpy.exe --serial TEST0001 --max-size 2560`},
+		{pid: 700, ppid: 8, cmdline: `scrcpy.exe --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.browser`},
+	}
+	if got := bringToFrontCandidates(procs2, []string{"TEST0001"}); len(got) != 1 || got[0].pid != 600 {
+		t.Fatalf("浮前候选应排除虚拟屏: %+v", got)
+	}
 }
 
 // v3 修复组合场景（实况）：平板会话键=TEST0002（USB），scrcpy 实际命令行
@@ -178,5 +209,27 @@ func TestBringToFrontCandidatesProfileAddrCombo(t *testing.T) {
 		if p.pid != want[i] {
 			t.Fatalf("候选第 %d 个应为 pid=%d: %+v", i, want[i], got)
 		}
+	}
+}
+
+// v2.1.46：点击应用卡片浮前——候选=指定包名的虚拟屏进程（serial 命中 +
+// 含 --new-display + --start-app=+<pkg> 精确命中）；主投屏（无 --new-display）
+// 与其他应用窗口（不同包名/其他设备）都不吃。
+func TestBringAppWinCandidates(t *testing.T) {
+	procs := []scrcpyProc{
+		{pid: 100, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --keyboard=uhid --max-size 2560`},                                                          // 主投屏：不吃
+		{pid: 200, ppid: 8, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.browser --window-title=browser`},      // 目标
+		{pid: 300, ppid: 9, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.settings --window-title=settings`},     // 同设备其他应用窗口：不吃
+		{pid: 400, ppid: 10, cmdline: `"C:\x\scrcpy.exe" --serial TEST0002 --new-display=1280x720/240 --start-app=+com.android.browser`},                              // 其他设备：不吃
+	}
+	got := bringAppWinCandidates(procs, []string{"TEST0001"}, "com.android.browser")
+	if len(got) != 1 || got[0].pid != 200 {
+		t.Fatalf("应只命中目标应用窗口: %+v", got)
+	}
+	if got := bringAppWinCandidates(procs, []string{"TEST0001"}, ""); len(got) != 2 {
+		t.Fatalf("空 pkg=不限包名（本设备两路虚拟屏）: %+v", got)
+	}
+	if got := bringAppWinCandidates(procs, []string{"TEST0001"}, "com.not.exist"); len(got) != 0 {
+		t.Fatalf("不存在的包名应零命中: %+v", got)
 	}
 }

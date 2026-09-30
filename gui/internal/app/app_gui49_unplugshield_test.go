@@ -14,7 +14,7 @@ import (
 
 func gui49SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 }

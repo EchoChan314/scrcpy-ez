@@ -84,7 +84,7 @@ func TestReadTrackBlockInvalidPrefix(t *testing.T) {
 }
 
 func TestParseTrackDevicesNormal(t *testing.T) {
-	block := "TEST0001\tdevice\n192.0.2.162:5555\tdevice model:24117RK2CC\n"
+	block := "TEST0001\tdevice\n192.0.2.162:5555\tdevice model:MODEL123\n"
 	devs := ParseTrackDevices(block)
 	if len(devs) != 2 {
 		t.Fatalf("应解析 2 台设备: %+v", devs)
@@ -92,7 +92,7 @@ func TestParseTrackDevicesNormal(t *testing.T) {
 	if devs[0].Serial != "TEST0001" || devs[0].ConnType != "usb" || devs[0].State != "device" {
 		t.Fatalf("USB 条目错误: %+v", devs[0])
 	}
-	if devs[1].Serial != "192.0.2.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "24117RK2CC" {
+	if devs[1].Serial != "192.0.2.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "MODEL123" {
 		t.Fatalf("无线条目错误: %+v", devs[1])
 	}
 }

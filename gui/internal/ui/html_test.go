@@ -47,9 +47,10 @@ func TestBuildIndexRealAssets(t *testing.T) {
 	css, _ := readFile("../../web/style.css")
 	smap, _ := readFile("../../web/session_map.js")
 	param, _ := readFile("../../web/param_state.js")
+	appset, _ := readFile("../../web/appsetting_state.js")
 	drag, _ := readFile("../../web/drag_order.js")
 	js, _ := readFile("../../web/app.js")
-	got, err := BuildIndex(index, css, smap+"\n"+param+"\n"+drag+"\n"+js)
+	got, err := BuildIndex(index, css, smap+"\n"+param+"\n"+appset+"\n"+drag+"\n"+js)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +63,13 @@ func TestBuildIndexRealAssets(t *testing.T) {
 	if !strings.Contains(got, "SCEZParamState") {
 		t.Fatal("param_state.js 未组装进页面（浮窗状态机缺失）")
 	}
+	if !strings.Contains(got, "SCEZAppSetState") {
+		t.Fatal("appsetting_state.js 未组装进页面（窗口设置状态机缺失）")
+	}
 	if !strings.Contains(got, "DragOrder") {
 		t.Fatal("drag_order.js 未组装进页面（标签拖拽排序缺失）")
 	}
-	if !strings.Contains(got, "logbox-head") {
+	if !strings.Contains(got, "logmods") {
 		t.Fatal("app.js 新版原始输出结构未组装进页面")
 	}
 }

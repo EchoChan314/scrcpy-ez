@@ -37,7 +37,7 @@ func TestPopupNewDeviceUnconditional(t *testing.T) {
 func TestPopupProfiledWifiOnlyNoPop(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := []adb.Device{wifiDev("192.0.2.197:5555", "REDMI K80")}
 	setDevices(a, devs)
@@ -56,7 +56,7 @@ func TestPopupProfiledWifiOnlyNoPop(t *testing.T) {
 func TestPopupProfiledUSBPlugPops(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	// 上轮：仅无线在线（无线就绪）→ 不弹
 	devsWifi := []adb.Device{wifiDev("192.0.2.162:5555", "Xiaomi Pad 8 Pro")}
@@ -88,7 +88,7 @@ func TestPopupProfiledUSBPlugPops(t *testing.T) {
 func TestPopupProfiledUSBWirelessReadyFirstPollNoPop(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	devs := []adb.Device{usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555")}
 	setDevices(a, devs)
@@ -109,7 +109,7 @@ func TestPopupProfiledUSBWirelessReadyFirstPollNoPop(t *testing.T) {
 func TestPopupProfiledUSBReplugPops(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Redmi K80": mkEntry("Redmi K80", "24117RK2CC", []string{"TEST0001"}, nil),
+		"Redmi K80": mkEntry("Redmi K80", "MODEL123", []string{"TEST0001"}, nil),
 	})
 	devs := []adb.Device{usbDev("TEST0001", "Redmi K80", "")}
 	setDevices(a, devs)
@@ -132,7 +132,7 @@ func TestPopupProfiledUSBReplugPops(t *testing.T) {
 func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "24117RK2CC", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	// K80 USB+无线合并卡（线一直插着、无线也在线——v2 曾因"无线就绪未投屏"误弹）
 	devs := []adb.Device{usbDev("TEST0001", "REDMI K80", "192.0.2.197:5555")}
@@ -177,7 +177,7 @@ func TestPopupNoRepopAfterStopCastWhilePlugged(t *testing.T) {
 func TestPopupDismissReplugNewCycle(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Redmi K80": mkEntry("Redmi K80", "24117RK2CC", []string{"TEST0001"}, nil),
+		"Redmi K80": mkEntry("Redmi K80", "MODEL123", []string{"TEST0001"}, nil),
 	})
 	devs := []adb.Device{usbDev("TEST0001", "Redmi K80", "")}
 	setDevices(a, devs)
@@ -203,8 +203,8 @@ func TestPopupDismissReplugNewCycle(t *testing.T) {
 func TestPopupCastingDeviceNeverPops(t *testing.T) {
 	a, _ := multiTestApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
-		"Redmi K80":        mkEntry("Redmi K80", "24117RK2CC", []string{"TEST0001"}, nil),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"Redmi K80":        mkEntry("Redmi K80", "MODEL123", []string{"TEST0001"}, nil),
 	})
 	setDevices(a, []adb.Device{usbDev("TEST0002", "Xiaomi Pad 8 Pro", "192.0.2.162:5555")})
 	if err := a.StartCast("TEST0002"); err != nil {
@@ -253,7 +253,7 @@ func TestPollOnceProfiledUSBPlugPops(t *testing.T) {
 
 	a := New(Config{AdbPath: fake, ConfigPath: "", ProfilesPath: filepath.Join(dir, "profiles.json"), Version: "test"})
 	seedProfiles(a, map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 
 	// 轮询 1：已建档设备仅无线出现 → 不弹

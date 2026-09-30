@@ -297,7 +297,7 @@ func TestStartCastNativeResFromProfile(t *testing.T) {
 	// 真实流程：无线卡在线时 SyncDevices 建 identity 档案并持久化 Res
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi",
-			Marketname: "Xiaomi Pad 8 Pro", Model: "25091RP04C", Res: "3200x2136"},
+			Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789", Res: "3200x2136"},
 	})
 	if e, ok := a.profiles.Entry("192.0.2.162:5555"); !ok || e.Res != "3200x2136" {
 		t.Fatalf("SyncDevices 应持久化 Res: %+v", e)

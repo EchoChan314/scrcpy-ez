@@ -42,6 +42,8 @@ ok('errText pair-code 含30秒提示', P.errText('pair-code').indexOf('30 秒') 
 ok('errText pair-port 含配对界面', P.errText('pair-port').indexOf('配对界面') >= 0);
 ok('errText conn-port 含手动填写', P.errText('conn-port').indexOf('手动填写') >= 0);
 ok('errText timeout 含网络', P.errText('timeout').indexOf('同一网络') >= 0);
+// gui55：配对已连接但读不到设备序列号（不得静默残缺入档）
+ok('errText serial 含序列号', P.errText('serial').indexOf('序列号') >= 0);
 ok('errText 未知码回落 fallback', P.errText('unknown-x', '自定义文案') === '自定义文案');
 ok('errText 未知码默认文案', P.errText('unknown-x').length > 0);
 

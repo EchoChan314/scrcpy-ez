@@ -43,7 +43,18 @@ type BatRunner struct {
 	// 字段/SetCanKillServer 仍保留以兼容外部调用方，不影响新行为）。
 	watchTag         string
 	serialCandidates []string
+	// vdSize/startApp 是本会话的形态特征（虚拟屏判定，v2.1.30）：主投屏为空
+	// （VdSize==""），虚拟屏为"WxH"+启动包（如 "+com.android.browser"）——
+	// Stop 的残余 scrcpy 判定用它区分同设备并行的主投屏/虚拟屏会话
+	// （同设备会话 scrcpy --serial 相同，纯 serial 匹配会穿透误杀）。
+	vdSize           string
+	startApp         string
 	CanKillServer    func() bool
+	// skipNotifWait（v2.1.75）：跳过"等设备端通知撤下"——设备级单通知（固定 id）下，
+	// 非"本设备最后一个会话"停止时通知不会撤下（幸存者重发），等待必然超时；
+	// App 层在停止/重启前按"是否本设备最后一个会话"设置。默认 false=等待
+	// （最后一个会话必须等：server 优雅退出撤下通知，防滞留）。
+	skipNotifWait bool
 
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -72,6 +83,9 @@ func (r *BatRunner) Start(serial string, params CastParams) error {
 	}
 	// 本会话 scrcpy --serial 匹配候选（Stop 残余兜底复查用，Start 时定格）
 	r.serialCandidates = serialCandidates(serial, params)
+	// 本会话形态特征（主投屏/虚拟屏区分，v2.1.30——Stop 残余判定防穿透）
+	r.vdSize = params.VdSize
+	r.startApp = params.StartApp
 
 	DebugLog("[start] cmd.exe /c %s (usb set=%v res=%d fps=%d bitrate=%d | wifi set=%v res=%d fps=%d bitrate=%d | serial=%q addr=%q addr2=%q nowatch=%v | overlay set=%v visible=%v)",
 		r.batPath, params.Usb.Set, params.Usb.Res, params.Usb.FPS, params.Usb.Bitrate,
@@ -196,6 +210,8 @@ func (r *BatRunner) Stop() error {
 	}
 	tag := r.watchTag
 	serials := append([]string{}, r.serialCandidates...)
+	vdSize, startApp := r.vdSize, r.startApp
+	skipNotifWait := r.skipNotifWait
 	r.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return errors.New("bat 未在运行")
@@ -206,8 +222,10 @@ func (r *BatRunner) Stop() error {
 	// ⓪ gui54 通知滞留修复：先单独收掉本会话客户端（保留 adb.exe），等设备端通知撤下
 	//    再做整树清理。写"复活门"标记在前：客户端若被强杀（退出码非 0），bat 也不会
 	//    在 2 秒后自动重连拉起新会话（新会话会重新挂通知，随后整树杀又让它滞留）。
+	//    v2.1.30：客户端判定带会话形态特征（vdSize/startApp）——同设备并行的
+	//    虚拟屏/主投屏互不误杀（穿透修复）。
 	markSessionClosed(tag)
-	r.stopClientFirst(pid, serials)
+	r.stopClientFirst(pid, serials, vdSize, startApp, skipNotifWait)
 
 	// ① 整树杀优先：cmd 存活时 taskkill /T 把 cmd+scrcpy+watcher 一并清掉
 	treeKiller := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
@@ -231,9 +249,9 @@ func (r *BatRunner) Stop() error {
 		DebugLog("[stop] watcher 清理失败: %v", err)
 	}
 
-	// ④ 残余 scrcpy 兜底复查（500ms 后）：只杀本会话的（父链/命令行判定）
+	// ④ 残余 scrcpy 兜底复查（500ms 后）：只杀本会话的（父链/命令行+形态判定）
 	time.Sleep(500 * time.Millisecond)
-	r.killResidualScrcpy(pid, serials)
+	r.killResidualScrcpy(pid, serials, vdSize, startApp)
 
 	// ⑤ gui46：不再兜底 kill-server（原继承 bat :adb_cleanup 语义，杀服会断全部
 	// transport 引发离线卡窗口）——adb 清理由 GUI 退出时统一执行（见 App.ShouldKillServerOnExit）。
@@ -261,14 +279,15 @@ func listScrcpyProcs() ([]scrcpyProc, error) {
 }
 
 // killResidualScrcpy 复查并补杀本会话残余 scrcpy（Stop ④）：
-// 只按"父链==本 cmd pid 或 命令行含本会话 serial"判定本会话，多会话安全。
-func (r *BatRunner) killResidualScrcpy(cmdPid int, serials []string) {
+// 只按"父链==本 cmd pid 或 命令行含本会话 serial+形态特征"判定本会话，多会话安全
+// （v2.1.30：带 vdSize/startApp 区分同设备并行的主投屏/虚拟屏，防穿透误杀）。
+func (r *BatRunner) killResidualScrcpy(cmdPid int, serials []string, vdSize, startApp string) {
 	procs, err := listScrcpyProcs()
 	if err != nil {
 		DebugLog("[stop] 残余 scrcpy 复查失败（跳过）: %v", err)
 		return
 	}
-	for _, p := range residualScrcpyCandidates(procs, cmdPid, serials) {
+	for _, p := range residualScrcpyCandidates(procs, cmdPid, serials, vdSize, startApp) {
 		DebugLog("[stop] 兜底补杀本会话残余 scrcpy pid=%d (ppid=%d, cmdline=%.120s)", p.pid, p.ppid, p.cmdline)
 		killer := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(p.pid))
 		killer.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
@@ -291,6 +310,17 @@ func (r *BatRunner) SetCanKillServer(f func() bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.CanKillServer = f
+}
+
+// SetSkipNotifWait 设置"跳过等设备端通知撤下"（v2.1.75 设备级单通知配套）。
+// 调用方=App 层停止/重启会话前的"是否本设备最后一个会话"判定：非最后会话停止时，
+// 设备端通知不会被撤下（幸存者 server 收到 canceled 后自动重发），等待必然超时——
+// 跳过它（省一次 adb 查询 + 最长 4 秒）。默认 false=等待（最后一个会话必须等：
+// server 优雅退出撤下通知，防"通知滞留"回归）。
+func (r *BatRunner) SetSkipNotifWait(v bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skipNotifWait = v
 }
 
 
@@ -333,20 +363,32 @@ func markSessionClosed(tag string) {
 //
 // 步骤：优雅关窗（taskkill /PID 不带 /F，窗口 WM_CLOSE）→ 必要时强杀客户端单进程
 // （--no-window 场景）→ 轮询设备端通知确认撤下 → 交回原有整树清理（防逃逸语义不变）。
-func (r *BatRunner) stopClientFirst(cmdPid int, serials []string) {
+// v2.1.30：客户端判定带会话形态特征（vdSize/startApp）——同设备的虚拟屏/主投屏
+// 互不误杀（修复"停止主投屏把虚拟屏一起杀掉"的穿透）。
+// v2.1.75：skipNotifWait=true（本设备还有其它会话）→ 跳过"等通知撤下"整段——
+// 设备级单通知（固定 id）下，非最后会话停止时通知不会被撤下（幸存者 server 收到
+// canceled 后自动重发），等待必然超时；最后一个会话保持等待（server 优雅退出的
+// 观测点，防"通知滞留"回归）。
+func (r *BatRunner) stopClientFirst(cmdPid int, serials []string, vdSize, startApp string, skipNotifWait bool) {
 	procs, err := listScrcpyProcs()
 	if err != nil {
 		DebugLog("[stop] scrcpy 枚举失败，跳过优雅收尾: %v", err)
 		return
 	}
-	targets := residualScrcpyCandidates(procs, cmdPid, serials)
+	targets := residualScrcpyCandidates(procs, cmdPid, serials, vdSize, startApp)
 	if len(targets) == 0 {
 		DebugLog("[stop] 未发现本会话 scrcpy 客户端，跳过优雅收尾")
 		return
 	}
-	// 关客户端之前先取设备端通知基线（客户端一死就取不到了）
-	baseline := r.shellNotifKeys(serials)
-	DebugLog("[stop] 优雅收尾：本会话客户端 %d 个，设备端基线通知 %d 条", len(targets), len(baseline))
+	// 关客户端之前先取设备端通知基线（客户端一死就取不到了）。
+	// v2.1.75：非最后会话跳过基线抓取（省一次 adb 调用 + 后续最长 4 秒等待）。
+	var baseline []string
+	if skipNotifWait {
+		DebugLog("[stop] 非本设备最后会话：跳过'等通知撤下'（设备级单通知由幸存者持有）")
+	} else {
+		baseline = r.shellNotifKeys(serials)
+		DebugLog("[stop] 优雅收尾：本会话客户端 %d 个，设备端基线通知 %d 条", len(targets), len(baseline))
+	}
 
 	// ① 优雅关窗：taskkill /PID 不带 /F → 向窗口发 WM_CLOSE → scrcpy 走 SDL_QUIT
 	//    → 退出码 0 + 打印 SCRCPY_EZ_USER_CLOSE（bat 走"窗口关闭"分支，不会重连）
@@ -372,8 +414,10 @@ func (r *BatRunner) stopClientFirst(cmdPid int, serials []string) {
 	}
 
 	// ③ 等设备端通知撤下：server 经数据 socket EOF 优雅退出后再做整树清理
+	//    （v2.1.30：多会话并行时判据=本会话通知撤下，见 waitShellNotifReduced）
+	//    （v2.1.75：仅"本设备最后会话"会走到这里——skipNotifWait 时 baseline 为空自动跳过）
 	if len(baseline) > 0 {
-		gone, waited := r.waitShellNotifGone(serials, baseline)
+		gone, waited := r.waitShellNotifReduced(serials, baseline)
 		DebugLog("[stop] 设备端通知已撤下=%v（等待 %s）", gone, waited.Round(time.Millisecond))
 	}
 }
@@ -395,6 +439,13 @@ func forceKillPID(pid int) {
 		DebugLog("[stop] taskkill /F /PID %d: %v", pid, err)
 	}
 }
+
+// GracefulClosePID 导出包装（应用窗口会话停止用）：taskkill 不带 /F → WM_CLOSE。
+func GracefulClosePID(pid int) { gracefulClosePID(pid) }
+
+// ForceKillPID 导出包装：taskkill /F 强杀单个进程（不连带子进程，保留 adb.exe）。
+func ForceKillPID(pid int) { forceKillPID(pid) }
+
 
 // alivePIDs 用 tasklist 复查这些 pid 里还有哪些存活（无副作用，不会误发关窗）。
 func alivePIDs(pids []int) []int {
@@ -422,12 +473,14 @@ func (r *BatRunner) shellNotifKeys(serials []string) []string {
 	return shellNotificationKeys(out)
 }
 
-// waitShellNotifGone 轮询设备端，直到基线通知全部消失（或超时）。
-func (r *BatRunner) waitShellNotifGone(serials, baseline []string) (bool, time.Duration) {
+// waitShellNotifReduced 轮询设备端，直到基线中至少一条通知消失（或超时）。
+// v2.1.30：判据从"全部消失"放宽为"至少一条消失"——多会话并行时只等本会话的
+// 通知撤下（见 notificationsReduced；server 侧通知 id 已会话唯一）。
+func (r *BatRunner) waitShellNotifReduced(serials, baseline []string) (bool, time.Duration) {
 	start := time.Now()
 	for {
 		if out, ok := r.adbShellOutput(serials, "cmd", "notification", "list"); ok {
-			if notificationsGone(out, baseline) {
+			if notificationsReduced(out, baseline) {
 				return true, time.Since(start)
 			}
 		}

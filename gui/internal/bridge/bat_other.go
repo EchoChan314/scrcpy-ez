@@ -18,3 +18,10 @@ func NewBatRunner(batPath, adbPath string, onLine func(string), onExit func(int)
 func (r *BatRunner) Start(_ string, _ CastParams) error { return nil }
 func (r *BatRunner) Stop() error                        { return nil }
 func (r *BatRunner) ExitCode() int                      { return -1 }
+
+// SetSkipNotifWait 非 Windows 桩（v2.1.75 设备级单通知配套；纯逻辑见 bat_windows.go）。
+func (r *BatRunner) SetSkipNotifWait(bool) {}
+
+// 应用窗口会话停止（非 Windows 桩）。
+func GracefulClosePID(pid int) {}
+func ForceKillPID(pid int)     {}

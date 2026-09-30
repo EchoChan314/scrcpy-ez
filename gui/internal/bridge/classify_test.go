@@ -11,15 +11,15 @@ func TestClassifyLine(t *testing.T) {
 	}{
 		{"[1] 重置 adb 服务...", KindADBReset, PromptNone},
 		{"[2] 检测 USB 设备...", KindDetect, PromptNone},
-		{"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（24117RK2CC）", KindUSBFound, PromptNone},
-		{"[提示] 检测到 USB 设备（24117RK2CC）但未授权或未就绪，", KindUSBHint, PromptNone},
+		{"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（MODEL123）", KindUSBFound, PromptNone},
+		{"[提示] 检测到 USB 设备（MODEL123）但未授权或未就绪，", KindUSBHint, PromptNone},
 		{"[提示] 未检测到 USB 设备，进入无线模式", KindNoUSB, PromptNone},
 		{"[3] 无线模式：尝试连接上次保存的地址...", KindWifiTry, PromptNone},
 		{"[OK] 连接成功：192.0.2.45:5555", KindWifiOK, PromptNone},
 		{"[提示] 连接失败或设备未就绪：192.0.2.45:5555（请确认同一局域网且无线调试端口已开启）", KindWifiFail, PromptNone},
 		{"[3] 扫描已有无线设备（IP 条目优先，自动去重）...", KindScanWifi, PromptNone},
 		{"===== 首次连接向导 =====", KindGuide, PromptNone},
-		{"===== 开始投屏：Redmi K80（24117RK2CC） =====", KindCasting, PromptNone},
+		{"===== 开始投屏：Redmi K80（MODEL123） =====", KindCasting, PromptNone},
 		{"[高清] 有线模式：检测到设备 2560x1708@120Hz，有线规格 h264/50M/2560/120fps（低延迟优化，剪贴板自动同步（电脑复制即达手机））", KindSpec, PromptNone},
 		{"[流畅] 无线模式：带宽有限，已启用低延迟串流（h264/15M/1920/60fps，剪贴板自动同步（电脑复制即达手机））", KindSpec, PromptNone},
 		{"[兼容] 老设备使用定制 server（已自动关闭 ABR，保留图片剪贴板）", KindLegacy, PromptNone},
@@ -125,7 +125,7 @@ func TestClassifySpecStrict(t *testing.T) {
 		"[server] INFO: ABR: bitrate 80000000 -> 56000000",
 		"[server] INFO: ABR: bitrate 50000000 -> 39200000",
 		"[server] INFO: PULSE: pts=639777249807",
-		"[server] INFO: Device: [Xiaomi] Xiaomi 25091RP04C (Android 16)",
+		"[server] INFO: Device: [Xiaomi] Xiaomi MODEL789 (Android 16)",
 		"FRAME: type=P pts=639775223012 delayDelta=72ms size=5KB",
 		"ABR: bitrate 50000000 -> 80000000 bps",
 		"PULSE: pts=123",
@@ -158,6 +158,18 @@ func TestClassifyTextureLine(t *testing.T) {
 	}
 	if ev := ClassifyLine("ABR: bitrate 50000000 -> 39200000"); ev.Kind == KindTexture || ev.Texture != "" {
 		t.Fatalf("ABR 行不应识别为 Texture: %+v", ev)
+	}
+}
+
+// v2.1.54：应用窗口虚拟屏启动行（bat echo 于 scrcpy 启动前）→ KindVDCreating；
+// "参数缺失"回退行（异常路径）不误判。
+func TestClassifyVDCreatingLine(t *testing.T) {
+	ev := ClassifyLine("[窗口] 虚拟屏 1920x1280 dpi=264 flex=1 静音= 应用=+com.android.browser")
+	if ev.Kind != KindVDCreating {
+		t.Fatalf("虚拟屏启动行解析错误: %+v", ev)
+	}
+	if ev = ClassifyLine("[窗口] 虚拟屏参数缺失（SCEZ_VD_SIZE[_USB/_WIFI] 均未定义，跳过虚拟屏参数）"); ev.Kind == KindVDCreating {
+		t.Fatalf("参数缺失回退行不应识别为 VDCreating: %+v", ev)
 	}
 }
 

@@ -176,7 +176,7 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "24117RK2CC", nil
+			return "MODEL123", nil
 		}
 		return "", nil
 	}
@@ -214,12 +214,12 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 func TestGui52DisplayNameWinsForOnlineCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "24117RK2CC"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "MODEL123"},
 	})
 	a.profiles.SetDisplayName("REDMI K80", "红米k80")
 
 	devs := []adb.Device{
-		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "24117RK2CC", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "MODEL123", Identity: "REDMI K80"},
 	}
 	applyProfileNames(devs, a.profiles)
 	if devs[0].Name != "红米k80" {
