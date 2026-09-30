@@ -44,6 +44,8 @@ struct sc_server_params {
     uint8_t min_size_alignment;
     uint32_t video_bit_rate;
     uint32_t audio_bit_rate;
+    bool abr_lock_fps; // ez: ABR 锁定——fps 维度不被自动调整
+    bool abr_lock_bitrate; // ez: ABR 锁定——码率维度不被自动调整
     const char *max_fps; // float to be parsed by the server
     const char *angle; // float to be parsed by the server
     sc_tick screen_off_timeout;
@@ -91,6 +93,10 @@ struct sc_server {
     sc_mutex mutex;
     sc_cond cond_stopped;
     bool stopped;
+    // scrcpy-ez: true 表示正在等待 server 接入连接（accept 阶段）。
+    // 连接看门狗（sc_server_on_connect_timeout）据此判定"真超时"还是
+    // "已取消的定时器回调"，防止在正常连接后误中断。mutex 保护。
+    bool connect_waiting;
 
     struct sc_intr intr;
     struct sc_adb_tunnel tunnel;

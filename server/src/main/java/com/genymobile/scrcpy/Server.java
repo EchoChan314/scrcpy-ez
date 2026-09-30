@@ -121,8 +121,16 @@ public final class Server {
                 // scrcpy-ez: 设备端「正在投屏」提示通知（带「停止投屏」按钮）。
                 // 点击停止 → 走控制通道告诉电脑端优雅停止（而非"意外断开"）。
                 // 通知属于附加能力，任何失败都在 BgNotification 内部静默降级。
+                // scid 传入：通知 id 会话唯一（多会话并行时通知/事件互不干扰，v2.1.30）。
+                // v2.1.75+：副文优先显示**控制端名称**（电脑主机名，客户端经 ez_client_name
+                // 参数传入）——通知是给看手机的人看的：他清楚自己拿着什么设备，
+                // "哪台电脑在连我"才是关键信息（安全感知）；旧客户端不传 → 回退设备名。
                 final Controller activeController = controller;
-                bgNotification = BgNotification.start("scrcpy-ez 正在投屏", Device.getDeviceName() + " · 点按可停止",
+                String ezClientName = options.getEzClientName();
+                String notifText = (ezClientName != null && !ezClientName.isEmpty())
+                        ? ezClientName + " · 点按可停止"
+                        : Device.getDeviceName() + " · 点按可停止";
+                bgNotification = BgNotification.start(scid, "scrcpy-ez 正在投屏", notifText,
                         () -> activeController.getDeviceMessageSender().send(DeviceMessage.createStopMirroring()));
             }
 
@@ -278,6 +286,15 @@ public final class Server {
                 Workarounds.apply();
                 Ln.i("Processing Android apps... (this may take some time)");
                 Ln.i(LogUtils.buildAppListMessage());
+            }
+            if (options.getExportAppIcons()) {
+                // ez 自定义（二期 Step 1c）：导出应用图标 PNG → /data/local/tmp/scrcpy/icons/
+                // v2.1.16：支持定向导出（export_app_icons=pkg1,pkg2；全量时 list=null）
+                Workarounds.apply();
+                String only = options.getExportAppIconsList();
+                Ln.i("Exporting app icons..." + (only != null ? " (filtered)" : ""));
+                int count = Device.exportAppIcons(only);
+                Ln.i("Exported icons: " + count);
             }
             // Just print the requested data, do not mirror
             return;

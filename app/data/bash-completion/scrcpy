@@ -1,6 +1,8 @@
 _scrcpy() {
     local cur prev words cword
     local opts="
+        --abr-lock-bitrate
+        --abr-lock-fps
         --always-on-top
         --angle
         --audio-bit-rate=

@@ -61,6 +61,10 @@ public class Options {
     private boolean powerOffScreenOnClose;
     private boolean clipboardAutosync = true;
     private boolean downsizeOnError = true;
+    // ez 自定义 ABR 锁定（GUI「锁定」按钮）：锁定后该维度不被 ABR 自动调整
+    // （fps 锁定=gui79；码率锁定=gui79；双锁=ABR 整体禁用，最稳定）。
+    private boolean abrLockFps;
+    private boolean abrLockBitrate;
     private boolean cleanup = true;
     private boolean powerOn = true;
 
@@ -80,6 +84,13 @@ public class Options {
     private boolean listCameras;
     private boolean listCameraSizes;
     private boolean listApps;
+    // ez 自定义：导出应用图标 PNG（二期 Step 1c；v2.1.16 起支持定向）
+    //   "true" = 全量导出；"pkg1,pkg2" = 只导出这些包；"false"/空 = 关。
+    private String exportAppIcons;
+
+    // ez 自定义：控制端名称（电脑主机名）——设备端通知显示"谁在投屏"（v2.1.75+）。
+    // 旧客户端不传该参数时为 null → 通知回退显示设备名。
+    private String ezClientName;
 
     // Options not used by the scrcpy client, but useful to use scrcpy-server directly
     private boolean sendDeviceMeta = true; // send device name and size
@@ -239,6 +250,14 @@ public class Options {
         return downsizeOnError;
     }
 
+    public boolean isAbrLockFps() {
+        return abrLockFps;
+    }
+
+    public boolean isAbrLockBitrate() {
+        return abrLockBitrate;
+    }
+
     public boolean getCleanup() {
         return cleanup;
     }
@@ -280,7 +299,7 @@ public class Options {
     }
 
     public boolean getList() {
-        return listEncoders || listDisplays || listCameras || listCameraSizes || listApps;
+        return listEncoders || listDisplays || listCameras || listCameraSizes || listApps || getExportAppIcons();
     }
 
     public boolean getListEncoders() {
@@ -301,6 +320,23 @@ public class Options {
 
     public boolean getListApps() {
         return listApps;
+    }
+
+    public boolean getExportAppIcons() {
+        return exportAppIcons != null && !exportAppIcons.isEmpty() && !"false".equals(exportAppIcons);
+    }
+
+    // ez：定向导出清单（null = 全量；非 null = 逗号分隔包名）。
+    public String getExportAppIconsList() {
+        if (exportAppIcons == null || "true".equals(exportAppIcons) || "false".equals(exportAppIcons)) {
+            return null;
+        }
+        return exportAppIcons;
+    }
+
+    // ez：控制端名称（电脑主机名；旧客户端不传=null → 通知回退设备名）。
+    public String getEzClientName() {
+        return ezClientName;
     }
 
     public boolean getSendDeviceMeta() {
@@ -348,6 +384,10 @@ public class Options {
                         throw new IllegalArgumentException("scid may not be negative (except -1 for 'none'): " + scid);
                     }
                     options.scid = scid;
+                    break;
+                case "ez_client_name":
+                    // ez 自定义：控制端名称（电脑主机名）——设备端通知显示"谁在投屏"。
+                    options.ezClientName = value;
                     break;
                 case "log_level":
                     options.logLevel = Ln.Level.valueOf(value.toUpperCase(Locale.ENGLISH));
@@ -459,6 +499,12 @@ public class Options {
                 case "clipboard_autosync":
                     options.clipboardAutosync = Boolean.parseBoolean(value);
                     break;
+                case "abr_lock_fps":
+                    options.abrLockFps = Boolean.parseBoolean(value);
+                    break;
+                case "abr_lock_bitrate":
+                    options.abrLockBitrate = Boolean.parseBoolean(value);
+                    break;
                 case "downsize_on_error":
                     options.downsizeOnError = Boolean.parseBoolean(value);
                     break;
@@ -482,6 +528,9 @@ public class Options {
                     break;
                 case "list_apps":
                     options.listApps = Boolean.parseBoolean(value);
+                    break;
+                case "export_app_icons":
+                    options.exportAppIcons = value;
                     break;
                 case "camera_id":
                     if (!value.isEmpty()) {

@@ -269,6 +269,17 @@ public class SurfaceEncoder implements AsyncProcessor {
     // and the configured bitrate, freezing the picture. Keep the configured
     // bitrate/fps untouched on these devices.
     private final boolean legacyDevice;
+    // ez 自定义 ABR 锁定（GUI「锁定」按钮 / --abr-lock-fps、--abr-lock-bitrate）：
+    //   - abrLockFps：fps 维度冻结——档位表替换为单值表（降档/探测/恢复全部
+    //     解析为同一值，数据驱动锁，不改降级链本身），外加各变更点防御性短路；
+    //   - abrLockBitrate：码率维度冻结——lower/raiseBitrate 入口短路，
+    //     isLowBitrateFpsTier() 语义映射为"缓冲不可用"→ 帧率维度全权接战；
+    //   - 双锁 = ABR 整体禁用（最稳定路径，与 legacyDevice 同门）。
+    private final boolean abrLockFps;
+    private final boolean abrLockBitrate;
+    private final boolean abrDisabled;
+    // fps 维度使用的档位表：常态=标准表；fps 锁定时=锁定值重复的单值表。
+    private final int[] fpsLevels;
 
     private boolean firstFrameSent;
     private int consecutiveErrors;
@@ -288,6 +299,21 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.videoBitRate = options.getVideoBitRate();
         this.maxSize = options.getMaxSize();
         this.maxFps = options.getMaxFps();
+        // ABR 锁定：必须先把档位表定下来（fpsRestoreCeiling/abrFps 依赖它）。
+        boolean lockFpsReq = options.isAbrLockFps();
+        int lockFpsValue = Math.round(maxFps);
+        if (lockFpsReq && lockFpsValue <= 0) {
+            Ln.w("ABR: fps lock ignored (max-fps not set)");
+            lockFpsReq = false;
+        }
+        this.abrLockFps = lockFpsReq;
+        this.abrLockBitrate = options.isAbrLockBitrate();
+        this.abrDisabled = this.abrLockFps && this.abrLockBitrate;
+        if (this.abrLockFps) {
+            this.fpsLevels = new int[] { lockFpsValue, lockFpsValue, lockFpsValue, lockFpsValue };
+        } else {
+            this.fpsLevels = ABR_FPS_LEVELS;
+        }
         // fps level must be initialized before streamCapture() builds the
         // MediaFormat (effectiveMaxFps()); encode() re-applies it on the
         // first session too (idempotent).
@@ -300,6 +326,16 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.legacyDevice = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q;
         if (legacyDevice) {
             Ln.i("Video ABR disabled for legacy device (SDK=" + Build.VERSION.SDK_INT + ")");
+        }
+        if (abrDisabled) {
+            Ln.i("Video ABR disabled by lock (fps+bitrate locked)");
+        } else {
+            if (abrLockFps) {
+                Ln.i("Video ABR fps locked at " + lockFpsValue + " (no fps adaptation)");
+            }
+            if (abrLockBitrate) {
+                Ln.i("Video ABR bitrate locked (no bitrate adaptation)");
+            }
         }
     }
 
@@ -570,7 +606,7 @@ public class SurfaceEncoder implements AsyncProcessor {
                         // fires. Budget uses the current frame rate estimated
                         // from the frame gap (normal 8-17ms; a gap >500ms is a
                         // dropped frame, not a normal frame interval).
-                        if (!legacyDevice) {
+                        if (!legacyDevice && !abrDisabled) {
                             long gapUs = ptsUs - pulseLastPtsUs;
                             if (gapUs > 0 && gapUs < 500_000) {
                                 long fps = 1_000_000 / gapUs;
@@ -663,8 +699,9 @@ public class SurfaceEncoder implements AsyncProcessor {
      * the bitrate is raised back step by step.
      */
     private void maybeAdaptBitrate(MediaCodec codec, long ptsUs, long nowNs, boolean isKeyFrame) {
-        if (legacyDevice) {
-            // Legacy compatibility: no dynamic bitrate/fps adjustment.
+        if (legacyDevice || abrDisabled) {
+            // Legacy compatibility / ABR fully locked (fps+bitrate): no dynamic
+            // bitrate/fps adjustment.
             return;
         }
         // Delay calibration: the first frames measure the baseline encoder
@@ -958,7 +995,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         // the restore (abrRestoring was already cleared by the trigger).
         // Sliding/video never sustain overloads at 1M, so a single spike
         // (or a lone flicker) never triggers this path.
-        if (wasRestoring && fpsProbeUntilNs <= 0) {
+        if (!abrLockFps && wasRestoring && fpsProbeUntilNs <= 0) {
             // Only REAL overloads (window -1, or instant >=100ms) count toward
             // the restore-phase fps drop; mild blips (<100ms) are a bitrate
             // matter (gentle x0.7) and must NOT knock the fps level back down —
@@ -1026,7 +1063,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         // fps drops only when the bitrate is already low (<=5M below target
         // or at the 1M floor) and the overload persists. This avoids
         // simultaneous fps+bitrate adjustments and states like 60fps+42M.
-        if (probeSensitive && instantOverloadStreak >= ABR_FPS_INSTANT_STREAK) {
+        if (!abrLockFps && probeSensitive && instantOverloadStreak >= ABR_FPS_INSTANT_STREAK) {
             boolean bitrateAlreadyLow = isLowBitrateFpsTier();
             if (bitrateAlreadyLow) {
                 if (nowNs < fpsDropCooldownUntilNs) {
@@ -1084,7 +1121,7 @@ public class SurfaceEncoder implements AsyncProcessor {
             // step). Only delay events at/above the fps evidence bar (or
             // window/complex overloads) may touch fps: 35-39ms instant
             // events are bitrate-only. No-op when fps is already below 120.
-            if (abrFps == ABR_FPS_LEVELS[0]
+            if (!abrLockFps && abrFps == fpsLevels[0]
                     && (delayDelta < 0 || delayDelta >= fpsEvidenceThreshold(nowNs))) {
                 if (noteFullFpsOverloadBurst(codec, nowNs)) {
                     // This 120->90 buffer drop completed a single-animation
@@ -1122,7 +1159,7 @@ public class SurfaceEncoder implements AsyncProcessor {
      * before any restore probe. A lone spike never reaches two events.
      */
     private boolean noteFullFpsOverloadBurst(MediaCodec codec, long nowNs) {
-        if (abrFps != ABR_FPS_LEVELS[0]) {
+        if (abrLockFps || abrFps != fpsLevels[0]) {
             abrFullFpsBurstFirstNs = 0;
             abrFullFpsBurstCount = 0;
             return false;
@@ -1169,6 +1206,11 @@ public class SurfaceEncoder implements AsyncProcessor {
      * stops oscillating back to the configured maximum.
      */
     private boolean noteRepeatedFpsBufferDrop(MediaCodec codec, long nowNs) {
+        if (abrLockFps) {
+            abrFpsBufferDropFirstNs = 0;
+            abrFpsBufferDropCount = 0;
+            return false;
+        }
         if (abrFpsBufferDropFirstNs == 0
                 || nowNs - abrFpsBufferDropFirstNs > ABR_FPS_BUFFER_REPEAT_WINDOW_NS) {
             abrFpsBufferDropFirstNs = nowNs;
@@ -1203,7 +1245,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     private boolean notePersistentMildOverload(MediaCodec codec, long nowNs, long delayDelta) {
         // Only engage once ABR has already pushed the rate low (<=5M below
         // the configured target) or the rate is at the absolute floor.
-        if (!isMildFpsCandidate()) {
+        if (abrLockFps || !isMildFpsCandidate()) {
             abrMildOverloadFirstNs = 0;
             abrMildOverloadCount = 0;
             return false;
@@ -1237,7 +1279,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         // Evidence window full: force the fps step.
         abrMildOverloadFirstNs = 0;
         abrMildOverloadCount = 0;
-        if (abrFps == ABR_FPS_LEVELS[ABR_FPS_LEVELS.length - 1]) {
+        if (abrFps == fpsLevels[fpsLevels.length - 1]) {
             // Already at the fps floor: there is no lower step.
             return false;
         }
@@ -1261,6 +1303,11 @@ public class SurfaceEncoder implements AsyncProcessor {
     }
 
     private boolean isLowBitrateFpsTier() {
+        // 码率锁定（--abr-lock-bitrate）：码率缓冲不可用——语义上等同"已耗尽"，
+        // 帧率维度全权接管降载（用户预期：保清晰、帧率果断让步）。
+        if (abrLockBitrate) {
+            return true;
+        }
         // The rate must already be reduced below the configured target and
         // at <=5M, OR be at the absolute 1M floor (a configured floor counts
         // too: bitrate can no longer act as the buffer).
@@ -1304,6 +1351,9 @@ public class SurfaceEncoder implements AsyncProcessor {
     }
 
     private void lowerFps(MediaCodec codec, long nowNs) {
+        if (abrLockFps) {
+            return; // fps locked: defense-in-depth (call sites are guarded too)
+        }
         brOverloadFirstNs = 0; // new fps level: fresh restore-overload window
         brOverloadCount = 0;
         fpsRecoverOverloads = 0; // new fps level: fresh overload debounce
@@ -1315,7 +1365,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         abrFullFpsBurstCount = 0;
         abrFullFpsBurstLastEventNs = 0;
         int idx = indexOfFps(abrFps);
-        if (idx < 0 || idx >= ABR_FPS_LEVELS.length - 1) {
+        if (idx < 0 || idx >= fpsLevels.length - 1) {
             if (nowNs - abrFpsFloorLogNs >= 1_000_000_000L) {
                 Ln.i("ABR: fps already at floor " + abrFps + " (bitrate at floor)");
                 abrFpsFloorLogNs = nowNs;
@@ -1327,10 +1377,10 @@ public class SurfaceEncoder implements AsyncProcessor {
         // engages -> fps 120->90 together) and the smooth restore step
         // (30->60->90->120). No 90 mid-step on the fast path.
         int nextIdx = idx + 1;
-        if (nextIdx + 1 < ABR_FPS_LEVELS.length && ABR_FPS_LEVELS[nextIdx] == 90) {
+        if (nextIdx + 1 < fpsLevels.length && fpsLevels[nextIdx] == 90) {
             nextIdx++;
         }
-        int newFps = ABR_FPS_LEVELS[nextIdx];
+        int newFps = fpsLevels[nextIdx];
         fpsProbeUntilNs = 0; // cancel any in-flight probe
         fpsProbeFrom = 0;
         Ln.i("ABR: fps degrade " + abrFps + "->" + newFps + " (fast path, gl drop)");
@@ -1359,11 +1409,14 @@ public class SurfaceEncoder implements AsyncProcessor {
     }
 
     private void probeFpsUp(MediaCodec codec, long nowNs) {
+        if (abrLockFps) {
+            return; // fps locked: defense-in-depth
+        }
         int idx = indexOfFps(abrFps);
         if (idx <= 0) {
             return; // already at the highest level
         }
-        int newFps = ABR_FPS_LEVELS[idx - 1];
+        int newFps = fpsLevels[idx - 1];
         fpsProbeFrom = abrFps;
         fpsRecoverOverloads = 0; // fresh probe: fresh overload debounce
         abrMildOverloadFirstNs = 0; // fresh level: fresh mild-evidence window
@@ -1388,6 +1441,9 @@ public class SurfaceEncoder implements AsyncProcessor {
     }
 
     private void revertFps(MediaCodec codec, long nowNs) {
+        if (abrLockFps) {
+            return; // fps locked: defense-in-depth
+        }
         int from = abrFps;
         int back = fpsProbeFrom > 0 ? fpsProbeFrom : abrFps;
         fpsProbeUntilNs = 0;
@@ -1441,9 +1497,9 @@ public class SurfaceEncoder implements AsyncProcessor {
         }
     }
 
-    private static int indexOfFps(int fps) {
-        for (int i = 0; i < ABR_FPS_LEVELS.length; i++) {
-            if (ABR_FPS_LEVELS[i] == fps) {
+    private int indexOfFps(int fps) {
+        for (int i = 0; i < fpsLevels.length; i++) {
+            if (fpsLevels[i] == fps) {
                 return i;
             }
         }
@@ -1452,12 +1508,12 @@ public class SurfaceEncoder implements AsyncProcessor {
 
     /** Highest fps level allowed by the client max-fps (default 120). */
     private int fpsRestoreCeiling() {
-        for (int level : ABR_FPS_LEVELS) {
+        for (int level : fpsLevels) {
             if (level <= maxFps) {
                 return level;
             }
         }
-        return ABR_FPS_LEVELS[ABR_FPS_LEVELS.length - 1];
+        return fpsLevels[fpsLevels.length - 1];
     }
 
     private void lowerBitrate(MediaCodec codec, long nowNs) {
@@ -1465,6 +1521,9 @@ public class SurfaceEncoder implements AsyncProcessor {
     }
 
     private void lowerBitrate(MediaCodec codec, long nowNs, boolean gentle) {
+        if (abrLockBitrate) {
+            return; // bitrate locked: never auto-lower
+        }
         // Aggressive down-shift: x0.3 (60M -> 18M -> 5.4M -> 5M in 3 steps)
         // so mid/high bitrates drop instantly on stutter.
         // gentle (recovery-phase complex-frame concession): x0.7, stay well
@@ -1488,6 +1547,9 @@ public class SurfaceEncoder implements AsyncProcessor {
     }
 
     private void raiseBitrate(MediaCodec codec, long nowNs) {
+        if (abrLockBitrate) {
+            return; // bitrate locked: never auto-raise
+        }
         // Fast recovery: uniform x2 steps (1M -> 2M -> 4M -> 8M -> 16M ->
         // 32M -> 60M), gated by the stable delay (ABR_UP_DELAY_NS) and the
         // up interval (100ms below / 200ms above 16M). Capped by the

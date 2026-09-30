@@ -8,6 +8,8 @@
 local arguments
 
 arguments=(
+    '--abr-lock-bitrate[Lock the video bitrate: ABR keeps --video-bit-rate fixed]'
+    '--abr-lock-fps[Lock the frame rate: ABR keeps --max-fps fixed]'
     '--always-on-top[Make scrcpy window always on top \(above other windows\)]'
     '--angle=[Rotate the video content by a custom angle, in degrees]'
     '--audio-bit-rate=[Encode the audio at the given bit-rate]'

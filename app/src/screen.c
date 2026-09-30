@@ -827,12 +827,25 @@ sc_screen_show_initial_window(struct sc_screen *screen) {
         get_initial_optimal_size(screen->content_size, screen->req.width,
                                                        screen->req.height);
 
-    if (screen->flex_display
-            && window_size.width == screen->content_size.width
-            && window_size.height == screen->content_size.height) {
-        // Avoid sending an unnecessary initial "resize display" request to the
-        // server if the size has not changed.
-        sc_screen_track_resize(screen, window_size);
+    if (screen->flex_display) {
+        if (window_size.width == screen->content_size.width
+                && window_size.height == screen->content_size.height) {
+            // Avoid sending an unnecessary initial "resize display" request to
+            // the server if the size has not changed.
+            sc_screen_track_resize(screen, window_size);
+        } else {
+            // ez fix: the initial window size differs from the display size
+            // (typically when the display is larger than the screen: the window
+            // is scaled down to fit the display bounds). Without an initial
+            // request, the server would keep the original display size and the
+            // video would be rendered at the wrong scale (cropped/zoomed) until
+            // the user resizes the window manually. Track the size (so that the
+            // resulting local resize event is ignored) and request the server
+            // to resize the display to match the window.
+            sc_screen_track_resize(screen, window_size);
+            sc_screen_request_resize_display(screen, window_size.width,
+                                                        window_size.height);
+        }
     }
 
     assert(is_windowed(screen));

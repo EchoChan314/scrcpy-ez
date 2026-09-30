@@ -51,6 +51,8 @@ enum {
     OPT_NO_CLIPBOARD_AUTOSYNC,
     OPT_NO_CLIPBOARD_SYNC,
     OPT_NO_CLIPBOARD_PUSH_ON_START,
+    OPT_ABR_LOCK_FPS,
+    OPT_ABR_LOCK_BITRATE,
     OPT_TCPIP,
     OPT_RAW_KEY_EVENTS,
     OPT_NO_DOWNSIZE_ON_ERROR,
@@ -657,6 +659,21 @@ static const struct sc_option options[] = {
                 "This option disables this startup push (useful when scrcpy "
                 "is restarted automatically for a mode switch, e.g. USB to "
                 "wireless, to avoid pushing the same content again)."
+    },
+    {
+        .longopt_id = OPT_ABR_LOCK_FPS,
+        .longopt = "abr-lock-fps",
+        .text = "Lock the frame rate: the adaptive bitrate algorithm (ABR) "
+                "never changes the frame rate, so the configured --max-fps "
+                "stays fixed (the bitrate still adapts)."
+    },
+    {
+        .longopt_id = OPT_ABR_LOCK_BITRATE,
+        .longopt = "abr-lock-bitrate",
+        .text = "Lock the video bitrate: ABR never changes the bitrate, so "
+                "the configured --video-bit-rate stays fixed (the frame rate "
+                "still adapts; a locked bitrate acts as an exhausted buffer, "
+                "so the frame-rate dimension takes over the load)."
     },
     {
         .longopt_id = OPT_NO_DOWNSIZE_ON_ERROR,
@@ -2763,6 +2780,12 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 break;
             case OPT_NO_CLIPBOARD_PUSH_ON_START:
                 opts->clipboard_push_on_start = false;
+                break;
+            case OPT_ABR_LOCK_FPS:
+                opts->abr_lock_fps = true;
+                break;
+            case OPT_ABR_LOCK_BITRATE:
+                opts->abr_lock_bitrate = true;
                 break;
 
             case OPT_TCPIP:

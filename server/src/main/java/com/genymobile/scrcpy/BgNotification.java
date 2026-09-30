@@ -31,9 +31,12 @@ import java.util.regex.Pattern;
  * scrcpy-ez 扩展：设备端「正在投屏」提示通知（纯事件驱动版）。
  *
  * 功能：
- * - 投屏期间常驻显示（ongoing），带「停止投屏」动作按钮，点击通知本体即停止
+ * - 投屏期间常驻显示（ongoing），点击通知本体即停止投屏
  * - 用户点击通知 → 毫秒级触发 onStopRequested（Server 接的是"发 TYPE_STOP_MIRRORING"）
  * - 通知被划掉 → 自动重新发出（保持"常驻"语义）
+ * - v2.1.75「设备级单条通知」：通知 id 固定（不区分会话）——多会话（主投屏 + 应用窗口）
+ *   同 id 覆盖=通知栏始终一条；点击事件被同 key 的所有 server 共同消费=点一下停该设备
+ *   全部投屏；会话退出撤销时存活者自动重发=通知活到最后一位
  *
  * 信号来源（本版本不轮询，纯事件驱动）：
  * 用户在通知栏点击 / 划掉一条通知时，system_server 的 NotificationManagerService 会向
@@ -62,7 +65,8 @@ public final class BgNotification {
 
     private static final String CHANNEL_ID = "scrcpy_ez_mirroring";
     private static final String CHANNEL_NAME = "投屏提示";
-    private static final int NOTIFICATION_ID = 0x53435A; // "SCZ"
+    /** 通知 id 基值（"SCZ"）；实际 id = 基值 ^ scid（会话唯一，见 notificationId()）。 */
+    private static final int NOTIFICATION_BASE_ID = 0x53435A; // "SCZ"
 
     private static final String ACTION_STOP = "com.genymobile.scrcpy.action.STOP_MIRRORING";
     private static final int REQ_STOP = 1;
@@ -92,6 +96,9 @@ public final class BgNotification {
     private final String text;
     private final Runnable onStopRequested;
 
+    /** 本会话通知 id（会话唯一，见 notificationId()）：post/cancel/keySuffix 一致使用。 */
+    private final int notificationId;
+
     /** 本会话通知 key 的后缀：|com.android.shell|<id>|null|<uid> */
     private final String keySuffix;
 
@@ -104,20 +111,54 @@ public final class BgNotification {
     private volatile java.lang.Process logcatProcess;
     private volatile long lastPostWallMs;
 
-    private BgNotification(Context context, NotificationManager nm, String title, String text, Runnable onStopRequested) {
+    /**
+     * 延迟补发调度（v2.1.75）：直接重发命中防抖窗口时延迟补发，避免通知空窗
+     * （固定通知 id 后，"幸存者重发"是通知不消失的唯一保障）。
+     */
+    private final java.util.concurrent.ScheduledExecutorService repostScheduler =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "bg-notification-repost");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private BgNotification(Context context, NotificationManager nm, int scid, String title, String text, Runnable onStopRequested) {
         this.context = context;
         this.nm = nm;
         this.title = title;
         this.text = text;
         this.onStopRequested = onStopRequested;
-        this.keySuffix = "|" + FakeContext.PACKAGE_NAME + "|" + NOTIFICATION_ID + "|null|" + Process.myUid();
+        this.notificationId = notificationId();
+        this.keySuffix = "|" + FakeContext.PACKAGE_NAME + "|" + this.notificationId + "|null|" + Process.myUid();
         this.sessionStartWallMs = System.currentTimeMillis();
     }
 
     /**
-     * 发出提示通知并开始监听用户操作。任何异常都返回 null（不影响投屏）。
+     * 通知 id（v2.1.75：固定单条，不再 ^ scid——「设备级通知」语义）。
+     *
+     * 为什么改回固定：
+     * ①多会话并行（主投屏 + 应用窗口虚拟屏）时同 id notify = 后发覆盖先发
+     *   → 通知栏始终只有一条（产品语义：一个设备一条投屏通知，不区分会话）；
+     * ②点击事件（events buffer）按通知 key 匹配——同 id 使所有 server 的 keySuffix
+     *   相同：用户点一下，每个会话的 server 都会读到这次点击并各自优雅停止
+     *   → 「点一下停该设备全部投屏」；
+     * ③某个会话退出撤销通知时，仍存活的其它 server 会收到 canceled 事件并自动重发
+     *   （见 handleEventLine）→ 通知"活到最后一位"，不会出现"还有会话在投屏而通知
+     *   被先退出的会话撤走"的空窗。
+     *
+     * （v2.1.30 曾改为 ^ scid 会话唯一，用于"多会话互不干扰"；本次按主人拍板
+     * 反向收编为"设备级单条 + 点击全停"，多会话停止判据由电脑端配套处理。）
      */
-    public static BgNotification start(String title, String text, Runnable onStopRequested) {
+    private static int notificationId() {
+        return NOTIFICATION_BASE_ID;
+    }
+
+    /**
+     * 发出提示通知并开始监听用户操作。任何异常都返回 null（不影响投屏）。
+     *
+     * @param scid 会话 id（client 传入）：用于生成会话唯一的通知 id（多会话并行互不干扰）。
+     */
+    public static BgNotification start(int scid, String title, String text, Runnable onStopRequested) {
         try {
             Context context = FakeContext.get();
             NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -126,7 +167,7 @@ public final class BgNotification {
                 return null;
             }
 
-            BgNotification bg = new BgNotification(context, nm, title, text, onStopRequested);
+            BgNotification bg = new BgNotification(context, nm, scid, title, text, onStopRequested);
             bg.createChannel();
             // 先起事件流再发通知：保证不会漏掉紧随其后的点击
             bg.startEventReader();
@@ -290,7 +331,7 @@ public final class BgNotification {
 
     private void post() {
         lastPostWallMs = System.currentTimeMillis();
-        nm.notify(NOTIFICATION_ID, build());
+        nm.notify(notificationId, build());
     }
 
     /**
@@ -303,8 +344,9 @@ public final class BgNotification {
         if (thread != null) {
             thread.interrupt();
         }
+        repostScheduler.shutdownNow();
         try {
-            nm.cancel(NOTIFICATION_ID);
+            nm.cancel(notificationId);
         } catch (Throwable t) {
             Ln.w("Cancel notification failed: " + t);
         }
@@ -389,16 +431,35 @@ public final class BgNotification {
                 Ln.w("Stop callback failed: " + t);
             }
         } else {
-            // notification_canceled：用户划掉 / 被清除 → 重新发出，保持"划不掉"语义
-            if (System.currentTimeMillis() - lastPostWallMs < REPOST_DEBOUNCE_MS) {
+            // notification_canceled：用户划掉 / 其它会话退出撤销 → 重新发出，保持"划不掉"语义。
+            // v2.1.75：固定通知 id 后本分支还承担「幸存者持有」语义——别的会话退出撤销通知时，
+            // 本会话（仍存活）必须把通知抢回来；若直接重发命中防抖窗口，改为延迟补发
+            // （否则会出现"会话还在跑但通知被前一个退出的会话撤走"的空窗）。
+            long sincePost = System.currentTimeMillis() - lastPostWallMs;
+            if (sincePost < REPOST_DEBOUNCE_MS) {
+                long delay = REPOST_DEBOUNCE_MS - sincePost + 20;
+                Ln.i("Device notification dismissed; scheduled re-post in " + delay + "ms");
+                try {
+                    repostScheduler.schedule(this::safeRepost, delay, TimeUnit.MILLISECONDS);
+                } catch (Throwable t) {
+                    Ln.w("Schedule re-post failed: " + t);
+                }
                 return;
             }
             Ln.i("Device notification dismissed, re-posting");
-            try {
-                post();
-            } catch (Throwable t) {
-                Ln.w("Re-post notification failed: " + t);
-            }
+            safeRepost();
+        }
+    }
+
+    /** 重发通知（直接调用与延迟补发共用）；已停止（stopped/stopRequested）时不再重发。 */
+    private void safeRepost() {
+        if (stopped || stopRequested) {
+            return;
+        }
+        try {
+            post();
+        } catch (Throwable t) {
+            Ln.w("Re-post notification failed: " + t);
         }
     }
 

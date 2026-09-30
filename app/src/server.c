@@ -14,6 +14,13 @@
 #include "util/net_intr.h"
 #include "util/process.h"
 #include "util/str.h"
+#include "util/timeout.h"
+
+#ifdef _WIN32
+# include <windows.h> // GetComputerNameA（控制端名称，设备端通知"谁在投屏"用）
+#else
+# include <unistd.h> // gethostname
+#endif
 
 #define SC_SERVER_FILENAME "scrcpy-server"
 
@@ -205,6 +212,40 @@ validate_string(const char *s) {
     return true;
 }
 
+// scrcpy-ez: 取控制端名称（电脑主机名）——设备端通知显示"谁在投屏"（安全感知，
+// 通知是给看手机的人看的：他知道自己拿着什么设备，"哪台电脑在连我"才是有用信息）。
+// 只保留可安全放进 adb shell 参数的字符（参照 validate_string 的白名单裁剪，
+// 其余替换为 '_'——主机名异常也绝不阻断投屏）；失败返回空串（调用方跳过该参数，
+// server 回退显示设备名）。
+static void
+sc_server_get_client_name(char *buf, size_t len) {
+    if (!len) {
+        return;
+    }
+    buf[0] = '\0';
+#ifdef _WIN32
+    DWORD n = (DWORD) len;
+    if (!GetComputerNameA(buf, &n)) {
+        buf[0] = '\0';
+        return;
+    }
+    buf[len - 1] = '\0';
+#else
+    if (gethostname(buf, len - 1) != 0) {
+        buf[0] = '\0';
+        return;
+    }
+    buf[len - 1] = '\0';
+#endif
+    for (char *c = buf; *c; ++c) {
+        bool ok = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z')
+               || (*c >= '0' && *c <= '9') || *c == '-' || *c == '_' || *c == '.';
+        if (!ok) {
+            *c = '_';
+        }
+    }
+}
+
 static sc_pid
 execute_server(struct sc_server *server,
                const struct sc_server_params *params) {
@@ -267,6 +308,15 @@ execute_server(struct sc_server *server,
     } while(0)
 
     ADD_PARAM("scid=%08x", params->scid);
+
+    // scrcpy-ez: 控制端名称（电脑主机名）——设备端通知显示"谁在投屏"（v2.1.75+）；
+    // 取不到则跳过（server 回退设备名）。
+    char ez_client_name[256];
+    sc_server_get_client_name(ez_client_name, sizeof(ez_client_name));
+    if (ez_client_name[0] != '\0') {
+        ADD_PARAM("ez_client_name=%s", ez_client_name);
+    }
+
     ADD_PARAM("log_level=%s", log_level_to_server_string(params->log_level));
 
     if (!params->video) {
@@ -274,6 +324,12 @@ execute_server(struct sc_server *server,
     }
     if (params->video_bit_rate) {
         ADD_PARAM("video_bit_rate=%" PRIu32, params->video_bit_rate);
+    }
+    if (params->abr_lock_fps) {
+        ADD_PARAM("abr_lock_fps=true");
+    }
+    if (params->abr_lock_bitrate) {
+        ADD_PARAM("abr_lock_bitrate=true");
     }
     if (!params->audio) {
         ADD_PARAM("audio=false");
@@ -574,6 +630,7 @@ sc_server_init(struct sc_server *server, const struct sc_server_params *params,
     server->serial = NULL;
     server->device_socket_name = NULL;
     server->stopped = false;
+    server->connect_waiting = false;
 
     server->video_socket = SC_SOCKET_NONE;
     server->audio_socket = SC_SOCKET_NONE;
@@ -609,6 +666,49 @@ device_read_info(struct sc_intr *intr, sc_socket device_socket,
     return true;
 }
 
+// scrcpy-ez: how long the client waits for the server to connect to the
+// tunnel socket (accept phase, reverse tunnel mode). If nothing connects
+// within this delay (e.g. another scrcpy instance occupied the same port and
+// stole the incoming connections), the pending accept is interrupted, the
+// connection attempt fails, and the launcher (bat) automatically restarts
+// scrcpy — a fresh instance picks non-conflicting ports and recovers.
+#define SC_SERVER_CONNECT_TIMEOUT_MS 30000
+
+static void
+sc_server_on_connect_timeout(struct sc_timeout *timeout, void *userdata) {
+    (void) timeout;
+    struct sc_server *server = userdata;
+
+    sc_mutex_lock(&server->mutex);
+    bool waiting = server->connect_waiting;
+    sc_mutex_unlock(&server->mutex);
+
+    if (!waiting) {
+        // The timer was stopped right after a successful connection: the
+        // callback still runs (sc_timeout semantics), but nothing to do.
+        return;
+    }
+
+    LOGW("Timeout: no server connection after %d ms, aborting",
+         SC_SERVER_CONNECT_TIMEOUT_MS);
+    sc_intr_interrupt(&server->intr);
+}
+
+static void
+sc_server_disarm_connect_timeout(struct sc_server *server,
+                                 struct sc_timeout *timeout, bool *armed) {
+    sc_mutex_lock(&server->mutex);
+    server->connect_waiting = false;
+    sc_mutex_unlock(&server->mutex);
+
+    if (*armed) {
+        sc_timeout_stop(timeout);
+        sc_timeout_join(timeout);
+        sc_timeout_destroy(timeout);
+        *armed = false;
+    }
+}
+
 static bool
 sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     struct sc_adb_tunnel *tunnel = &server->tunnel;
@@ -625,7 +725,31 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     sc_socket video_socket = SC_SOCKET_NONE;
     sc_socket audio_socket = SC_SOCKET_NONE;
     sc_socket control_socket = SC_SOCKET_NONE;
+
+    // scrcpy-ez: connect watchdog（仅 reverse 模式需要 —— forward 模式已有
+    // 重试上限；reverse 模式的 accept 没有任何超时，端口被另一实例占用时
+    // 会永远阻塞）。
+    struct sc_timeout connect_timeout;
+    bool connect_timeout_armed = false;
+
     if (!tunnel->forward) {
+        if (sc_timeout_init(&connect_timeout)) {
+            static const struct sc_timeout_callbacks connect_timeout_cbs = {
+                .on_timeout = sc_server_on_connect_timeout,
+            };
+            sc_tick deadline = sc_tick_now()
+                             + SC_TICK_FROM_MS(SC_SERVER_CONNECT_TIMEOUT_MS);
+            if (sc_timeout_start(&connect_timeout, deadline,
+                                 &connect_timeout_cbs, server)) {
+                connect_timeout_armed = true;
+                sc_mutex_lock(&server->mutex);
+                server->connect_waiting = true;
+                sc_mutex_unlock(&server->mutex);
+            } else {
+                sc_timeout_destroy(&connect_timeout);
+            }
+        }
+
         if (video) {
             video_socket =
                 net_accept_intr(&server->intr, tunnel->server_socket);
@@ -649,6 +773,10 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
                 goto fail;
             }
         }
+
+        // 全部连接已到齐 —— 立即解除看门狗（成功路径；失败路径由 fail 兜底）
+        sc_server_disarm_connect_timeout(server, &connect_timeout,
+                                         &connect_timeout_armed);
     } else {
         uint32_t tunnel_host = server->params.tunnel_host;
         if (!tunnel_host) {
@@ -738,6 +866,10 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     return true;
 
 fail:
+    // scrcpy-ez: 兜底解除连接看门狗（accept 失败/中断路径）
+    sc_server_disarm_connect_timeout(server, &connect_timeout,
+                                     &connect_timeout_armed);
+
     if (video_socket != SC_SOCKET_NONE) {
         if (!net_close(video_socket)) {
             LOGW("Could not close video socket");

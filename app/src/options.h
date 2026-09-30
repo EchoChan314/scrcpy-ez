@@ -317,6 +317,8 @@ struct scrcpy_options {
     bool clipboard_autosync;
     bool clipboard_sync;
     bool clipboard_push_on_start;
+    bool abr_lock_fps;
+    bool abr_lock_bitrate;
     bool downsize_on_error;
     bool tcpip;
     const char *tcpip_dst;

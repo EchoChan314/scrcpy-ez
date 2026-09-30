@@ -19,6 +19,10 @@ import android.app.ActivityOptions;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -28,6 +32,9 @@ import android.view.InputEvent;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -254,6 +261,164 @@ public final class Device {
         }
 
         return apps;
+    }
+
+    // ez 自定义（二期 Step 1c）：应用图标 PNG 导出目录（shell 身份可写）。
+    private static final String ICONS_DIR = "/data/local/tmp/scrcpy/icons";
+
+    // 图标统一缩到长边 ≤144px（桌面网格显示够用，体积小）。
+    private static final int ICON_MAX_SIZE = 144;
+
+    // 临时诊断（实验）：图标导出耗时拆解（纳秒累计；exportAppIcons 末尾输出后清零）。
+    private static long tmGetNs, tmDrawNs, tmScaleNs, tmEncodeNs, tmTotalNs;
+
+    /**
+     * ez 自定义：导出全部可启动应用的图标为 PNG（<pkg>.png），
+     * 供桌面端 adb pull 后本地缓存使用。全量重导（先清旧目录）。
+     * @return 成功导出的数量
+     */
+    public static int exportAppIcons() {
+        return exportAppIcons(null);
+    }
+
+    /**
+     * ez 自定义（v2.1.16）：导出应用图标 PNG（<pkg>.png）。
+     * @param onlyPkgs null = 全量（先清空目录，卸载残留自然清）；
+     *                 非 null = 逗号分隔包名清单（定向：保留其他文件，只覆盖指定包；
+     *                 已卸载的包自动跳过）
+     * @return 成功导出的数量
+     */
+    public static int exportAppIcons(String onlyPkgs) {
+        PackageManager pm = FakeContext.get().getPackageManager();
+        File baseDir = new File(ICONS_DIR);
+        if (onlyPkgs == null) {
+            // 全量：先清旧目录
+            File[] olds = baseDir.listFiles();
+            if (olds != null) {
+                for (File f : olds) {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
+            if (!baseDir.exists() && !baseDir.mkdirs()) {
+                Ln.e("Could not create icons directory: " + baseDir);
+                return 0;
+            }
+
+            int ok = 0;
+            for (ApplicationInfo appInfo : getLaunchableApps(pm)) {
+                File out = new File(baseDir, appInfo.packageName + ".png");
+                if (saveAppIconPng(appInfo.packageName, out)) {
+                    ok++;
+                }
+            }
+            logIconTiming(ok);
+            return ok;
+        }
+        // 定向：不清目录（保留其他图标），只覆盖指定包
+        if (!baseDir.exists() && !baseDir.mkdirs()) {
+            Ln.e("Could not create icons directory: " + baseDir);
+            return 0;
+        }
+        int ok = 0;
+        for (String raw : onlyPkgs.split(",")) {
+            String pkg = raw.trim();
+            if (pkg.isEmpty()) {
+                continue;
+            }
+            File out = new File(baseDir, pkg + ".png");
+            if (saveAppIconPng(pkg, out)) {
+                ok++;
+            }
+        }
+        logIconTiming(ok);
+        return ok;
+    }
+
+    // 临时诊断（实验）：输出图标导出耗时拆解并清零累计。
+    private static void logIconTiming(int apps) {
+        Ln.i("ICON_TIMING apps=" + apps
+                + " get=" + (tmGetNs / 1000000) + "ms draw=" + (tmDrawNs / 1000000)
+                + "ms scale=" + (tmScaleNs / 1000000) + "ms encode=" + (tmEncodeNs / 1000000)
+                + "ms total=" + (tmTotalNs / 1000000) + "ms");
+        tmGetNs = tmDrawNs = tmScaleNs = tmEncodeNs = tmTotalNs = 0;
+    }
+
+    @SuppressLint("QueryPermissionsNeeded")
+    private static Drawable getAppIcon(String packageName) {
+        PackageManager pm = FakeContext.get().getPackageManager();
+        try {
+            ApplicationInfo appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
+            return pm.getApplicationIcon(appInfo);
+        } catch (PackageManager.NameNotFoundException e) {
+            Ln.e("Package not found: " + packageName);
+            return null;
+        }
+    }
+
+    private static boolean saveAppIconPng(String packageName, File outFile) {
+        long t0 = System.nanoTime();
+        Drawable icon = getAppIcon(packageName);
+        long tGet = System.nanoTime();
+        if (icon == null) {
+            return false;
+        }
+        try {
+            Bitmap bitmap;
+            if (icon instanceof BitmapDrawable) {
+                bitmap = ((BitmapDrawable) icon).getBitmap();
+            } else {
+                int width = Math.max(1, icon.getIntrinsicWidth());
+                int height = Math.max(1, icon.getIntrinsicHeight());
+                bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(bitmap);
+                icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+                icon.draw(canvas);
+            }
+            long tDraw = System.nanoTime();
+            int w = bitmap.getWidth();
+            int h = bitmap.getHeight();
+            if (w > ICON_MAX_SIZE || h > ICON_MAX_SIZE) {
+                float scale = Math.min((float) ICON_MAX_SIZE / w, (float) ICON_MAX_SIZE / h);
+                int nw = Math.max(1, Math.round(w * scale));
+                int nh = Math.max(1, Math.round(h * scale));
+                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, nw, nh, true);
+                if (scaled != bitmap) {
+                    bitmap = scaled;
+                }
+            }
+            // v2.1.17：裁掉最外 2px——去掉系统渲染的灰色描边（1px 灰 + 抗锯齿余量），
+            // 显示端回到 100%（内容等效放大 ~3%，换边缘干净、接近原始观感）。
+            if (bitmap.getWidth() > 8 && bitmap.getHeight() > 8) {
+                bitmap = Bitmap.createBitmap(bitmap, 2, 2, bitmap.getWidth() - 4, bitmap.getHeight() - 4);
+            }
+            long tScale = System.nanoTime();
+            FileOutputStream fos = null;
+            boolean ok = false;
+            try {
+                fos = new FileOutputStream(outFile);
+                ok = bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                fos.flush();
+            } finally {
+                if (fos != null) {
+                    try {
+                        fos.close();
+                    } catch (IOException ignored) {
+                        // ignore
+                    }
+                }
+            }
+            long tEnd = System.nanoTime();
+            tmGetNs += tGet - t0;
+            tmDrawNs += tDraw - tGet;
+            tmScaleNs += tScale - tDraw;
+            tmEncodeNs += tEnd - tScale;
+            tmTotalNs += tEnd - t0;
+            return ok;
+        } catch (Exception e) {
+            Ln.e("Error saving icon for " + packageName + ": " + e.getMessage());
+            return false;
+        }
     }
 
     @SuppressLint("QueryPermissionsNeeded")

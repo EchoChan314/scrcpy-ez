@@ -8,7 +8,7 @@ package com.genymobile.scrcpy;
  * 这里把处理好的品牌 PNG 以 base64 内嵌（构建产物无外部文件依赖），运行时
  * BitmapFactory.decodeByteArray 解出 Bitmap 交给 Notification.Builder.setLargeIcon。
  *
- * 原始素材：D:/dsh_work/icon_source.png（256x256，含绿色圆角外框）。
+ * 原始素材：品牌图标（256x256，含绿色圆角外框）。
  * 处理：去绿框（连通域 + 邻域刷白，白底保留、插画与四角星点零改动）后放大到 512x512。
  * 数据分段存放：单个字符串常量有 64KB UTF-8 上限，故按 20000 字符切块，运行时拼接。
  */

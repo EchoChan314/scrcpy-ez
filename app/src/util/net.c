@@ -157,11 +157,29 @@ bool
 net_listen(sc_socket server_socket, uint32_t addr, uint16_t port, int backlog) {
     sc_raw_socket raw_sock = unwrap(server_socket);
 
+#ifdef _WIN32
+    // scrcpy-ez: use SO_EXCLUSIVEADDRUSE instead of SO_REUSEADDR on Windows.
+    // With SO_REUSEADDR, Windows lets a second process bind (and even steal
+    // connections from) a port already bound by another process. Two scrcpy
+    // instances launched concurrently (same port range, e.g. 27183) could
+    // therefore both "successfully" listen on the same port, then one of them
+    // would never receive any connection (the kernel routes them all to the
+    // other instance), leaving it stuck forever on accept().
+    // SO_EXCLUSIVEADDRUSE makes the second bind fail, so the caller correctly
+    // retries with the next port (and the associated adb reverse tunnel no
+    // longer collides either).
+    int exclusive = 1;
+    if (setsockopt(raw_sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   (const void *) &exclusive, sizeof(exclusive)) == -1) {
+        net_perror("setsockopt(SO_EXCLUSIVEADDRUSE)");
+    }
+#else
     int reuse = 1;
     if (setsockopt(raw_sock, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse,
                    sizeof(reuse)) == -1) {
         net_perror("setsockopt(SO_REUSEADDR)");
     }
+#endif
 
     SOCKADDR_IN sin;
     sin.sin_family = AF_INET;

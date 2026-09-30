@@ -435,6 +435,8 @@ scrcpy(struct scrcpy_options *options) {
         .video_bit_rate = options->video_bit_rate,
         .audio_bit_rate = options->audio_bit_rate,
         .max_fps = options->max_fps,
+        .abr_lock_fps = options->abr_lock_fps,
+        .abr_lock_bitrate = options->abr_lock_bitrate,
         .angle = options->angle,
         .screen_off_timeout = options->screen_off_timeout,
         .capture_orientation = options->capture_orientation,
