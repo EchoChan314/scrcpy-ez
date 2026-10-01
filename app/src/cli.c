@@ -1208,11 +1208,6 @@ static const struct sc_shortcut shortcuts[] = {
         .text = "Copy to clipboard (inject COPY keycode, Android >= 7 only)",
     },
     {
-        .shortcuts = { "MOD+Shift+c" },
-        .text = "Copy computer clipboard (image or text) to the device "
-                "clipboard without pasting",
-    },
-    {
         .shortcuts = { "MOD+x" },
         .text = "Cut to clipboard (inject CUT keycode, Android >= 7 only)",
     },
