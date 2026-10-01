@@ -17,8 +17,13 @@ set "WATCH_TAG=%SCEZ_WATCH_TAG%"
 set "PICK=%SCEZ_EVENT_ROUTE%"
 set "USB_DEV=%SCEZ_EVENT_ROUTE%"
 set "SCRCPY_SERVER_PATH=%~dp0scrcpy-server"
-set "ADB=adb"
-if exist "%~dp0adb.exe" set "ADB=%~dp0adb.exe"
+rem Only use bundled adb.exe (PATH fallback removed to prevent hijack)
+if not exist "%~dp0adb.exe" (
+    echo [ERROR] adb.exe not found in script directory.
+    echo [ERROR] PATH fallback disabled for security. Please reinstall.
+    exit /b 1
+)
+set "ADB=%~dp0adb.exe"
 set "SCRIPT_DIR=%~dp0"
 
 rem ----- 串流参数：有线 USB 带宽充足用高规格；无线带宽有限保持低延迟 -----
