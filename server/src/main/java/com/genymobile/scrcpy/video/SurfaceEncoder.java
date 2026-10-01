@@ -280,6 +280,8 @@ public class SurfaceEncoder implements AsyncProcessor {
     private final boolean abrDisabled;
     // fps 维度使用的档位表：常态=标准表；fps 锁定时=锁定值重复的单值表。
     private final int[] fpsLevels;
+    // --no-abr：整体禁用 ABR（配置的码率与帧率保持固定，与"双锁"同门）。
+    private final boolean noAbr;
 
     private boolean firstFrameSent;
     private int consecutiveErrors;
@@ -326,6 +328,10 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.legacyDevice = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q;
         if (legacyDevice) {
             Ln.i("Video ABR disabled for legacy device (SDK=" + Build.VERSION.SDK_INT + ")");
+        }
+        this.noAbr = options.isNoAbr();
+        if (noAbr) {
+            Ln.i("Video ABR disabled by --no-abr (fixed bitrate/fps)");
         }
         if (abrDisabled) {
             Ln.i("Video ABR disabled by lock (fps+bitrate locked)");
@@ -606,7 +612,7 @@ public class SurfaceEncoder implements AsyncProcessor {
                         // fires. Budget uses the current frame rate estimated
                         // from the frame gap (normal 8-17ms; a gap >500ms is a
                         // dropped frame, not a normal frame interval).
-                        if (!legacyDevice && !abrDisabled) {
+                        if (!legacyDevice && !abrDisabled && !noAbr) {
                             long gapUs = ptsUs - pulseLastPtsUs;
                             if (gapUs > 0 && gapUs < 500_000) {
                                 long fps = 1_000_000 / gapUs;
@@ -699,9 +705,9 @@ public class SurfaceEncoder implements AsyncProcessor {
      * the bitrate is raised back step by step.
      */
     private void maybeAdaptBitrate(MediaCodec codec, long ptsUs, long nowNs, boolean isKeyFrame) {
-        if (legacyDevice || abrDisabled) {
-            // Legacy compatibility / ABR fully locked (fps+bitrate): no dynamic
-            // bitrate/fps adjustment.
+        if (legacyDevice || abrDisabled || noAbr) {
+            // Legacy compatibility / ABR fully locked (fps+bitrate) or --no-abr:
+            // no dynamic bitrate/fps adjustment.
             return;
         }
         // Delay calibration: the first frames measure the baseline encoder

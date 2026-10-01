@@ -57,6 +57,7 @@ type Device struct {
 }
 
 type cachedSpec struct {
+	mu           sync.Mutex
 	name         string
 	marketname   string
 	manufacturer string
@@ -482,6 +483,8 @@ func (m *Manager) enrich(ctx context.Context, d *Device) {
 	}
 	m.mu.Unlock()
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	now := time.Now()
 	if c.name != "" {
 		// 市场名补采（多会话竞态自愈）：首次 getprop 失败用 man+model 兜底缓存后，

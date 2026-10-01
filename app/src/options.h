@@ -319,6 +319,7 @@ struct scrcpy_options {
     bool clipboard_push_on_start;
     bool abr_lock_fps;
     bool abr_lock_bitrate;
+    bool no_abr;
     bool downsize_on_error;
     bool tcpip;
     const char *tcpip_dst;

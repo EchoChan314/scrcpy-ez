@@ -46,6 +46,7 @@ struct sc_server_params {
     uint32_t audio_bit_rate;
     bool abr_lock_fps; // ez: ABR 锁定——fps 维度不被自动调整
     bool abr_lock_bitrate; // ez: ABR 锁定——码率维度不被自动调整
+    bool no_abr;
     const char *max_fps; // float to be parsed by the server
     const char *angle; // float to be parsed by the server
     sc_tick screen_off_timeout;

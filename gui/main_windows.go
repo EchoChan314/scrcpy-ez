@@ -151,6 +151,7 @@ var githubMarkPNG []byte
 var giteeMarkSVG []byte
 
 const (
+	// 合并上游 v2.2.1（应用窗口 + 双源更新）后随上游版本号。
 	version = "v2.2.1"
 )
 
