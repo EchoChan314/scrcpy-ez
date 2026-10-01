@@ -1,5 +1,15 @@
 //go:build windows && cgo
 
+// MinGW-w64's regenerated WinRT headers emit explicit specializations of both
+// IReference<BYTE> and IReference<boolean>; in C++ both typedef to
+// 'unsigned char', so windows.foundation.h fails with "redefinition of
+// IReference<unsigned char>" (mingw-w64 issues #88 / #117). MSYS2 ships
+// MINGW-packages#22160 to strip it, but a plain MinGW-w64 toolchain (e.g. the
+// one on the CI runner) does not, so the build must skip the duplicate here.
+// This translation unit never uses IReference<boolean>: keep this define until
+// the upstream header is fixed, otherwise `go test ./...` / `go build` break.
+#define ____FIReference_1_boolean_INTERFACE_DEFINED__
+
 #include "native_windows.h"
 #include <windows.h>
 #include <roapi.h>
