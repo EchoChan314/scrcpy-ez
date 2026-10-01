@@ -100,6 +100,7 @@ const struct scrcpy_options scrcpy_options_default = {
     .clipboard_push_on_start = true,
     .abr_lock_fps = false,
     .abr_lock_bitrate = false,
+    .no_abr = false,
     .downsize_on_error = true,
     .tcpip = false,
     .tcpip_dst = NULL,

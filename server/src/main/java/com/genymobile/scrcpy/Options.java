@@ -60,6 +60,7 @@ public class Options {
     private String audioEncoder;
     private boolean powerOffScreenOnClose;
     private boolean clipboardAutosync = true;
+    private boolean noAbr;
     private boolean downsizeOnError = true;
     // ez 自定义 ABR 锁定（GUI「锁定」按钮）：锁定后该维度不被 ABR 自动调整
     // （fps 锁定=gui79；码率锁定=gui79；双锁=ABR 整体禁用，最稳定）。
@@ -246,6 +247,10 @@ public class Options {
 
     public boolean getClipboardAutosync() {
         return clipboardAutosync;
+    }
+
+    public boolean isNoAbr() {
+        return noAbr;
     }
 
     public boolean getDownsizeOnError() {
@@ -447,6 +452,9 @@ public class Options {
                     break;
                 case "video_bit_rate":
                     options.videoBitRate = Integer.parseInt(value);
+                    break;
+                case "no_abr":
+                    options.noAbr = Boolean.parseBoolean(value);
                     break;
                 case "audio_bit_rate":
                     options.audioBitRate = Integer.parseInt(value);

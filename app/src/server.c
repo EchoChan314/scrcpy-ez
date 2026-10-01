@@ -331,6 +331,9 @@ execute_server(struct sc_server *server,
     if (params->abr_lock_bitrate) {
         ADD_PARAM("abr_lock_bitrate=true");
     }
+    if (params->no_abr) {
+        ADD_PARAM("no_abr=true");
+    }
     if (!params->audio) {
         ADD_PARAM("audio=false");
     }

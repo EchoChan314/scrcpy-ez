@@ -155,6 +155,7 @@ var githubMarkPNG []byte
 var giteeMarkSVG []byte
 
 const (
+	// 合并上游 v2.2.2（设备重命名、应用图标/目录协议修复等）后随上游版本号。
 	version = "v2.2.2"
 )
 

@@ -53,6 +53,7 @@ enum {
     OPT_NO_CLIPBOARD_PUSH_ON_START,
     OPT_ABR_LOCK_FPS,
     OPT_ABR_LOCK_BITRATE,
+    OPT_NO_ABR,
     OPT_TCPIP,
     OPT_RAW_KEY_EVENTS,
     OPT_NO_DOWNSIZE_ON_ERROR,
@@ -676,6 +677,16 @@ static const struct sc_option options[] = {
                 "so the frame-rate dimension takes over the load)."
     },
     {
+        .longopt_id = OPT_NO_ABR,
+        .longopt = "no-abr",
+        .text = "By default, scrcpy-ez dynamically reduces the video "
+                "bitrate and frame rate (ABR) when the encoder is "
+                "overloaded, trading sharpness for smoothness.\n"
+                "This option disables ABR: the configured bitrate and "
+                "frame rate stay fixed, keeping the image sharp (the "
+                "encoder may drop frames on overload instead)."
+    },
+    {
         .longopt_id = OPT_NO_DOWNSIZE_ON_ERROR,
         .longopt = "no-downsize-on-error",
         .text = "By default, on MediaCodec error, scrcpy automatically tries "
@@ -1206,11 +1217,6 @@ static const struct sc_shortcut shortcuts[] = {
     {
         .shortcuts = { "MOD+c" },
         .text = "Copy to clipboard (inject COPY keycode, Android >= 7 only)",
-    },
-    {
-        .shortcuts = { "MOD+Shift+c" },
-        .text = "Copy computer clipboard (image or text) to the device "
-                "clipboard without pasting",
     },
     {
         .shortcuts = { "MOD+x" },
@@ -2786,6 +2792,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 break;
             case OPT_ABR_LOCK_BITRATE:
                 opts->abr_lock_bitrate = true;
+                break;
+            case OPT_NO_ABR:
+                opts->no_abr = true;
                 break;
 
             case OPT_TCPIP:
