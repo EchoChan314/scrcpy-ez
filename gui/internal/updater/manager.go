@@ -43,13 +43,14 @@ type cached struct {
 	Ready bool        `json:"ready"`
 }
 type Manager struct {
-	mu     sync.Mutex
-	opts   Options
-	state  State
-	cancel context.CancelFunc
-	done   chan struct{}
-	cache  cached
-	closed bool
+	mu             sync.Mutex
+	opts           Options
+	state          State
+	cancel         context.CancelFunc
+	done           chan struct{}
+	cache          cached
+	closed         bool
+	consumedResult *Result
 }
 
 func New(opts Options) *Manager {
@@ -63,6 +64,10 @@ func New(opts Options) *Manager {
 	}
 	m := &Manager{opts: opts, state: State{Phase: "idle", Info: ReleaseInfo{Current: opts.Version, RepoURL: RepoURL, DownloadURL: LatestURL}}}
 	if opts.Cache != "" {
+		var consumed Result
+		if ReadJSON(filepath.Join(opts.Cache, "result-seen.json"), &consumed) == nil && consumed.OK {
+			m.consumedResult = &consumed
+		}
 		var c cached
 		if ReadJSON(filepath.Join(opts.Cache, "candidate.json"), &c) == nil && c.Plan.Install == opts.Install && VersionLess(opts.Version, c.Info.Latest) && filepath.Dir(c.Plan.Work) == opts.Cache && len(c.Plan.Token) == 32 && filepath.Base(c.Plan.Work) == "job-"+c.Plan.Token {
 			m.cache = c
@@ -80,13 +85,43 @@ func New(opts Options) *Manager {
 func (m *Manager) State() State {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.readResultLocked()
 	st := m.state
 	st.Info.Sources = append([]DownloadSource(nil), st.Info.Sources...)
-	var result Result
-	if ReadJSON(filepath.Join(m.opts.Install, ".ez-update-result.json"), &result) == nil {
+	if st.Result != nil {
+		result := *st.Result
 		st.Result = &result
 	}
 	return st
+}
+
+func (m *Manager) readResultLocked() {
+	path := filepath.Join(m.opts.Install, ".ez-update-result.json")
+	var result Result
+	if ReadJSON(path, &result) != nil {
+		return
+	}
+	if !result.OK {
+		m.state.Result = &result
+		return
+	}
+	// The helper saves success after the new GUI reports healthy, so discover
+	// late results here rather than reading only when the manager is created.
+	if !sameVersion(result.Version, m.opts.Version) {
+		// Do not remove an older receipt while the helper may be replacing it
+		// with this installation's success result.
+		return
+	}
+	if m.consumedResult == nil || *m.consumedResult != result {
+		m.state.Result = &result
+		m.consumedResult = &result
+		// Keep a receipt in the per-installation cache if the result file cannot
+		// be removed, for example after the install folder becomes read-only.
+		if m.opts.Cache != "" {
+			_ = WriteJSON(filepath.Join(m.opts.Cache, "result-seen.json"), result)
+		}
+	}
+	_ = os.Remove(path)
 }
 func (m *Manager) busyLocked() bool {
 	switch m.state.Phase {
@@ -266,6 +301,9 @@ func (m *Manager) InstallError(err error) {
 	})
 }
 func (m *Manager) DismissResult() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Result = nil
 	_ = os.Remove(filepath.Join(m.opts.Install, ".ez-update-result.json"))
 }
 

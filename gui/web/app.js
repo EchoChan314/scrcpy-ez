@@ -3694,13 +3694,19 @@
   }, true);
 
   // ---------- 应用内更新：关闭弹窗不取消；安装由用户明确触发 ----------
-  var updateState = null, updateSeen = false, updateReading = false, updateRequest = false;
+  var updateState = null, updateSeenVersion = '', updateResultSeen = false, updateReading = false, updateRequest = false;
   var updateConfirm = false;
   var updateLocalError = '';
   function updateVisible(id, yes) { el(id).style.display = yes ? '' : 'none'; }
   function renderUpdate(s) {
     updateState = s; var info = s.info || {}, m = window.SCEZUpdateUI.model(s);
-    if (!updateSeen && (info.hasNew || s.result)) el('app-ver').classList.add('has-new');
+    var latestKey = (info.latest || '').replace(/^v/, '');
+    if (el('update-modal').style.display !== 'none') {
+      if (info.hasNew) updateSeenVersion = latestKey;
+      if (s.result) updateResultSeen = true;
+    }
+    if ((info.hasNew && latestKey !== updateSeenVersion) || (s.result && !updateResultSeen)) el('app-ver').classList.add('has-new');
+    else el('app-ver').classList.remove('has-new');
     el('update-current').textContent = info.current || (lastState && lastState.version) || '-';
     el('update-latest').textContent = info.latest || (s.phase === 'checking' ? '检查中…' : '未知');
     el('update-source').textContent = m.source;
@@ -3743,9 +3749,10 @@
   function closeUpdateModal() {
     if (updateState && updateState.phase === 'installing') return;
     clearUpdateConfirm(); el('update-modal').style.display = 'none';
+    if (updateState && updateState.result && updateState.result.ok) updateCall('DismissUpdateResult');
   }
   function openUpdateModal() {
-    updateSeen = true; el('app-ver').classList.remove('has-new');
+    el('app-ver').classList.remove('has-new');
     el('update-modal').style.display = ''; clearUpdateConfirm();
     readUpdate().then(function (s) { if (!s || s.phase === 'idle') updateCall('BeginUpdateCheck'); });
   }
