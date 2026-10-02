@@ -63,8 +63,8 @@ func TestAppWinPhaseTextMapping(t *testing.T) {
 // 生命周期：真实 bat 行序列走一遍（用日志里的原样行）。
 func TestAppWinPhaseLifecycle(t *testing.T) {
 	e := newAppWinEnv(t)
-	setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
-	if err := e.a.StartAppWin("MODEL123", "com.android.browser", "浏览器"); err != nil {
+	setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
+	if err := e.a.StartAppWin("12345TESTA", "com.android.browser", "浏览器"); err != nil {
 		t.Fatal(err)
 	}
 	e.f.waitStarts(t, 1)
@@ -87,7 +87,7 @@ func TestAppWinPhaseLifecycle(t *testing.T) {
 	}
 
 	// ③ 开始投屏（转换走完）→ 清空（回默认"正在窗口"）。
-	e.fireLine("===== 开始投屏：Xiaomi Pad 8 Pro（4567bcde） =====")
+	e.fireLine("===== 开始投屏：Xiaomi Pad 8 Pro（TESTUSB0003） =====")
 	if list := waitAppWins(t, e.a, 1); list[0].PhaseText != "" || list[0].Phase != "" {
 		t.Fatalf("开始投屏后应清空状态: %+v", list[0])
 	}

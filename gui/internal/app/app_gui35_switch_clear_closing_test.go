@@ -173,7 +173,7 @@ func TestGui35PlainWindowCloseKeepsClosing(t *testing.T) {
 	// 无切换事件的行序列：都不清 closing
 	lines := []string{
 		"普通日志行（未分类）",
-		"[OK] 检测到 USB 设备：Xiaomi Pad（MODEL123）",
+		"[OK] 检测到 USB 设备：Xiaomi Pad（12345TESTA）",
 		"投屏已结束，感谢使用", // 普通 Done（非"已检测到窗口关闭"）：不置也不清
 	}
 	for _, l := range lines {

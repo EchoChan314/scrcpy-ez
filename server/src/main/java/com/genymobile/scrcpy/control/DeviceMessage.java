@@ -10,10 +10,14 @@ public final class DeviceMessage {
     // scrcpy-ez: 设备端「停止投屏」按钮被点击（无 payload）
     public static final int TYPE_STOP_MIRRORING = 5;
 
+    public static final int TYPE_CLIPBOARD_SNAPSHOT = 6;
+    public static final int TYPE_IMAGE_CLIPBOARD_SNAPSHOT = 7;
+
     private int type;
     private String text;
     private String mimeType;
     private long sequence;
+    private long clipboardRevision;
     private int id;
     private byte[] data;
     private int bitrate;
@@ -27,6 +31,24 @@ public final class DeviceMessage {
         event.type = TYPE_CLIPBOARD;
         event.text = text;
         return event;
+    }
+
+    public static DeviceMessage createClipboard(String text, long revision) {
+        DeviceMessage event = createClipboard(text);
+        event.type = TYPE_CLIPBOARD_SNAPSHOT; // versioned clipboard snapshot, existing types unchanged
+        event.clipboardRevision = revision;
+        return event;
+    }
+
+    public static DeviceMessage createImageClipboard(byte[] data, String mime, long revision) {
+        DeviceMessage event = createImageClipboard(data, mime);
+        event.type = TYPE_IMAGE_CLIPBOARD_SNAPSHOT;
+        event.clipboardRevision = revision;
+        return event;
+    }
+
+    public long getClipboardRevision() {
+        return clipboardRevision;
     }
 
     public static DeviceMessage createAckClipboard(long sequence) {

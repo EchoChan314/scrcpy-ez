@@ -99,7 +99,7 @@ func TestGui48Mdns8GoodbyeProbeSuccessActiveAndLog(t *testing.T) {
 	a, _ := newWirelessApp()
 	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
-	a.profiles.MarkAddrStale("REDMI K80", addr) // 先 stale：验证翻回
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), addr) // 先 stale：验证翻回
 	logPath := mdns8StartLogCapture(t)
 	probeCalls := make(chan string, 1)
 	a.disc.TcpProbeFn = func(ctx context.Context, got string) bool {
@@ -226,7 +226,7 @@ func TestGui48Mdns8IdleTwoRoundsConverge(t *testing.T) {
 	a, _ := newWirelessApp()
 	addr := "192.0.2.197:45005"
 	fix2Seed(a, addr)
-	a.profiles.MarkAddrStale("REDMI K80", addr)
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), addr)
 	var mu sync.Mutex
 	n := 0
 	a.disc.TcpProbeFn = func(ctx context.Context, got string) bool {
@@ -285,7 +285,7 @@ func TestGui48Mdns8InterleavedProbeLastWins(t *testing.T) {
 func TestGui48Mdns8ProfileOfflineCardIdentityHave(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := a.appendProfileOfflineCards([]adb.Device{
 		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi", Name: "REDMI K80", Identity: "REDMI K80"},

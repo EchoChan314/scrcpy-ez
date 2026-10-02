@@ -46,11 +46,11 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 		t.Fatalf("删除前应显示平板卡")
 	}
 
-	if err := a.DeleteDevices([]string{"Xiaomi Pad 8 Pro"}); err != nil {
+	if err := a.DeleteDevices([]string{fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro")}); err != nil {
 		t.Fatalf("DeleteDevices: %v", err)
 	}
 	// 删除集键应含：档案键/市场名/短号/TlsGuid/IP 键
-	for _, k := range []string{"Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
+	for _, k := range []string{"archive:Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
 		if !a.deletedUsbMarked(k) {
 			t.Fatalf("删除集应含键 %q", k)
 		}
@@ -68,7 +68,7 @@ func TestGui52Fix17DeleteWirelessBlocksRebirth(t *testing.T) {
 	if sn := a.Snapshot(); sn.NewDevice != nil {
 		t.Fatalf("删除后秒回不得弹新设备弹窗：%+v", sn.NewDevice)
 	}
-	if _, ok := a.profiles.Entry("Xiaomi Pad 8 Pro"); ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro")); ok {
 		t.Fatalf("删除后秒回不得重建档案")
 	}
 
@@ -115,7 +115,7 @@ func TestGui52Fix17DeleteWirelessNoPendingCard(t *testing.T) {
 // 主动配对成功 = 重来：clearDeletedForProfile 全键清（扫码/手动配对成功路径）。
 func TestGui52Fix17PairSuccessClearsDeleted(t *testing.T) {
 	a, _ := newWirelessApp()
-	for _, k := range []string{"Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
+	for _, k := range []string{"archive:Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
 		a.setDeletedUsb(k)
 	}
 	// 配对成功：档案重建（PairArchive 语义简化：直接种档案）
@@ -129,7 +129,7 @@ func TestGui52Fix17PairSuccessClearsDeleted(t *testing.T) {
 	a.profiles.mu.Unlock()
 
 	a.clearDeletedForProfile("192.0.2.162", "TEST0002", "adb-TEST0002-On9v2R")
-	for _, k := range []string{"Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
+	for _, k := range []string{"archive:Xiaomi Pad 8 Pro", "TEST0002", "adb-TEST0002-On9v2R", "ip:192.0.2.162"} {
 		if a.deletedUsbMarked(k) {
 			t.Fatalf("配对成功后删除集应清空：%q 仍在", k)
 		}
@@ -142,16 +142,17 @@ func TestGui52Fix17DeleteBlocksMdnsArchive(t *testing.T) {
 	seedPadProfile(t, a)
 	// 档案地址全部置 stale（删除后离线残留场景），并置删除集 IP 键
 	a.profiles.mu.Lock()
-	a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[0].State = AddrStateStale
-	a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[1].State = AddrStateStale
+	a.profiles.data.Devices[fixtureArchiveKeyLocked(a.profiles, "Xiaomi Pad 8 Pro")].Addrs[0].State = AddrStateStale
+	a.profiles.data.Devices[fixtureArchiveKeyLocked(a.profiles, "Xiaomi Pad 8 Pro")].Addrs[1].State = AddrStateStale
 	a.profiles.mu.Unlock()
 	a.setDeletedUsb("ip:192.0.2.162")
+	a.setDeletedUsb("TEST0002")
 
 	a.applyMdnsServiceAdded(&discovery.MdnsService{
 		Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-On9v2R",
 		Addr: "192.0.2.162:45205", Mode: discovery.MdnsModeTls,
 	})
-	e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatalf("档案应存在")
 	}
@@ -183,12 +184,12 @@ func TestGui52Fix17bDeleteUsbReplugRebuildsArchive(t *testing.T) {
 	a.profiles.mu.Unlock()
 
 	// 删除（含市场名键 + serial 键 + IP 键；索引 serial → 全键集）
-	if err := a.DeleteDevices([]string{"HUAWEI FLA-TL10"}); err != nil {
+	if err := a.DeleteDevices([]string{fixtureArchiveKey(a.profiles, "HUAWEI FLA-TL10")}); err != nil {
 		t.Fatalf("DeleteDevices: %v", err)
 	}
 	// 删除后无线 transport 立即被过滤（不复活）
 	a.applyTrackUpdate([]adb.Device{{Serial: "192.0.2.242:5555", State: "device", ConnType: "wifi"}})
-	if _, ok := a.profiles.Entry("HUAWEI FLA-TL10"); ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "HUAWEI FLA-TL10")); ok {
 		t.Fatalf("删除后无线秒回不得重建档案")
 	}
 
@@ -198,7 +199,7 @@ func TestGui52Fix17bDeleteUsbReplugRebuildsArchive(t *testing.T) {
 	}
 	a.applyTrackUpdate(offline)
 	// 索引全清必须在 added 帧生效（不再依赖 marketname 字段）
-	if a.deletedUsbMarked("HUAWEI FLA-TL10") || a.deletedUsbMarked("TEST0003") || a.deletedUsbMarked("ip:192.0.2.242") {
+	if a.deletedUsbMarked("archive:HUAWEI FLA-TL10") || a.deletedUsbMarked("TEST0003") || a.deletedUsbMarked("ip:192.0.2.242") {
 		t.Fatalf("offline added 帧即应全清删除集（市场名键残留会挡建档）")
 	}
 
@@ -208,7 +209,7 @@ func TestGui52Fix17bDeleteUsbReplugRebuildsArchive(t *testing.T) {
 		Marketname: "HUAWEI FLA-TL10", Identity: "HUAWEI FLA-TL10", Name: "HUAWEI FLA-TL10",
 	}}
 	a.applyTrackUpdate(device)
-	if _, ok := a.profiles.Entry("HUAWEI FLA-TL10"); !ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "HUAWEI FLA-TL10")); !ok {
 		t.Fatalf("device 帧应正常重建档案（删除集已清，不挡建档）")
 	}
 	if !hasCard(a, "TEST0003") {

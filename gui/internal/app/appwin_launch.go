@@ -38,9 +38,10 @@ import (
 
 // AppWinItem 是快照里的一条应用窗口（前端卡片数据源）。
 type AppWinItem struct {
-	Serial string `json:"serial"`
-	Pkg    string `json:"pkg"`
-	Name   string `json:"name"`
+	Serial   string `json:"serial"`
+	Identity string `json:"identity,omitempty"`
+	Pkg      string `json:"pkg"`
+	Name     string `json:"name"`
 	// Mode = 启动时连接形态（usb/wifi）——设置面板标题「有线/无线参数」与档案
 	// 套选择用（v2.1.47）。
 	Mode string `json:"mode"`
@@ -59,16 +60,18 @@ type AppWinItem struct {
 // appWinState 是一路应用窗口会话的运行时状态。
 // closing 由 a.mu 保护（快照读出给前端）。
 type appWinState struct {
-	serial     string
-	pkg        string
-	name       string
-	mode       string // 启动时连接形态（usb/wifi）
-	phase      string // 转换/重连中的动态状态（bridge.Kind 字符串；v2.1.54）
-	phaseText  string // 卡片状态文字（""=默认"正在窗口"）
-	runner     Runner
-	startedAt  time.Time
-	closing    bool
-	restarting bool // 参数重启间隙（v2.1.70）：条目原地保留（卡片不消失），runner 释放后原地替换
+	serial        string
+	identity      string
+	identityCheck *wirelessIdentityCheck
+	pkg           string
+	name          string
+	mode          string // 启动时连接形态（usb/wifi）
+	phase         string // 转换/重连中的动态状态（bridge.Kind 字符串；v2.1.54）
+	phaseText     string // 卡片状态文字（""=默认"正在窗口"）
+	runner        Runner
+	startedAt     time.Time
+	closing       bool
+	restarting    bool // 参数重启间隙（v2.1.70）：条目原地保留（卡片不消失），runner 释放后原地替换
 	// log 是最近 60 行原始输出（v2.1.81：排查用日志区——与主投屏 CastState.Log 同模式，
 	// 快照随 AppWinItem.Log 带出；前端渲染「应用名」输出（虚拟屏）模块）。
 	log []string
@@ -108,7 +111,11 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 		return fmt.Errorf("参数不完整（serial/pkg 为空）")
 	}
 	key := appWinKey(serial, pkg)
+	lookupKey := serial
 	a.mu.Lock()
+	if old := a.appWins[key]; old != nil && old.restarting && old.identity != "" {
+		lookupKey = old.identity
+	}
 	// v2.1.70：restarting 条目（参数重启间隙）放行——下方原地替换（照主投屏重启模式）。
 	if old := a.appWins[key]; old != nil && !old.restarting {
 		a.mu.Unlock()
@@ -122,14 +129,15 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 	}
 
 	// 设备锁定注入（USB 优先 / 无线地址+备用 / 身份防抢——与 StartCast 同链）。
-	params := a.appWinLockParams(serial)
+	params := a.appWinLockParams(lookupKey)
+	identity := a.appListKeyFor(lookupKey)
 	if params.Serial == "" && params.Addr == "" {
 		return errors.New("设备当前没有可用连接地址")
 	}
 	// v2.1.91：编码格式随档案两套注入（独立于 Set——应用窗口与主投屏同源）。
 	// v2.1.95：应用级优先，空则继承设备档案（应用没设置过 → 跟随设备档案）。
-	lp := a.profiles.Get(serial)
-	ap, hasArchive := a.appWinParamsFor(serial, pkg)
+	lp := a.profiles.Get(identity)
+	ap, hasArchive := a.appWinParamsFor(identity, pkg)
 	pickV := func(appV, devV string) string {
 		if strings.TrimSpace(appV) != "" {
 			return NormalizeVCodec(appV)
@@ -160,13 +168,15 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 	// 本次不注入（scrcpy flex 默认 160）。StartAppWin 跑在 GUI 消息循环线程上，
 	// 同步 adb 查询会冻结整个界面（实测"启动虚拟屏时 GUI 卡一下、无法操作"）。
 	// （ap/hasArchive 已在编码注入处提前取得。）
-	phys := a.devicePhysCached(serial)
+	phys := a.devicePhysCached(identity)
 	if phys.dpi == 0 {
 		bridge.DebugLog("[appwin] 物理参数未缓存 serial=%s（本次不注入 dpi，已触发后台预热）", serial)
-		go a.guard("appwin-phys-warm", func() { a.devicePhys(serial) })
+		if a.appListKeyFor(serial) == identity {
+			go a.guard("appwin-phys-warm", func() { a.devicePhys(serial) })
+		}
 	}
 	// v2.1.74：档案 Size=长边 → 按设备宽高比换算 WxH 注入（native=内存读，无慢 IO）。
-	native := a.nativeRes(serial)
+	native := a.nativeRes(identity)
 	params.VdUsb = vdParamsToBridge(ap.Usb, phys, native)
 	params.VdWifi = vdParamsToBridge(ap.Wifi, phys, native)
 	// 旧单套字段同步注入（启动形态那套）：新旧 bat 组合兼容（旧 bat 读 SCEZ_VD_SIZE 等）。
@@ -179,6 +189,7 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 	params.VdFlex = cur.Flex
 	params.VdAudio = cur.Audio
 	params.VdIme = "local"
+	params.VdNoDecor = a.appWinNoSystemDecorations(identity)
 	params.StartApp = "+" + pkg // "+"=先强停再启动（保完整形态 + 干净，总纲 §1.4）
 	params.WinTitle = sanitizeWinTitle(name)
 
@@ -200,8 +211,12 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 		return fmt.Errorf("创建 bat 会话失败：%w", err)
 	}
 	// 创建 runner 期间也可能收到新地址，启动前再读取同一档案入口。
-	locked := a.appWinLockParams(serial)
+	if a.appListKeyFor(lookupKey) != identity {
+		return errors.New("设备身份已变化，请重新选择设备")
+	}
+	locked := a.appWinLockParams(lookupKey)
 	params.Serial, params.Addr, params.Addr2 = locked.Serial, locked.Addr, locked.Addr2
+	params.ExpectedSerial = locked.ExpectedSerial
 	params.Market, params.Model = locked.Market, locked.Model
 	mode = "wifi"
 	if params.Serial != "" {
@@ -211,8 +226,9 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 		return fmt.Errorf("启动 bat 失败：%w", err)
 	}
 
-	st := &appWinState{serial: serial, pkg: pkg, name: name, mode: mode, runner: r, startedAt: time.Now()}
+	st := &appWinState{serial: serial, identity: identity, pkg: pkg, name: name, mode: mode, runner: r, startedAt: time.Now()}
 	a.mu.Lock()
+	st.identityCheck = a.wirelessIdentityChecks[params.Addr]
 	// v2.1.70：重启间隙原地替换——沿用 startedAt 保持卡片位置/顺序（照主投屏 restarting 模式）。
 	if old := a.appWins[key]; old != nil && old.restarting {
 		st.startedAt = old.startedAt
@@ -224,6 +240,7 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 		ap.Usb.Size, ap.Usb.FPS, ap.Usb.Bitrate, ap.Usb.Flex, ap.Usb.EffectiveAppWinAudio(), params.VdUsb.Dpi, params.Usb.VCodec, params.Usb.ACodec,
 		ap.Wifi.Size, ap.Wifi.FPS, ap.Wifi.Bitrate, ap.Wifi.Flex, ap.Wifi.EffectiveAppWinAudio(), params.VdWifi.Dpi, params.Wifi.VCodec, params.Wifi.ACodec,
 		phys.longSide, phys.dpi)
+	bridge.DebugLog("[appwin] 虚拟屏系统界面 identity=%s enabled=%v", identity, !params.VdNoDecor)
 	// v2.1.50（主人拍板）：本次以默认档开虚拟屏（无自定义档案）→ 首次把推导默认
 	// 规格播种入档（该形态 baseline）——之后各处直接读档，不再每次从头推导。
 	// 收益：设备离线/富化数据过期时默认值稳定不漂移；档案可见可查。
@@ -232,7 +249,7 @@ func (a *App) StartAppWin(serial, pkg, name string) error {
 		if mode == "wifi" {
 			cur = ap.Wifi
 		}
-		a.seedAppWinBaseline(serial, mode, cur)
+		a.seedAppWinBaseline(identity, mode, cur)
 	}
 	return nil
 }
@@ -310,6 +327,11 @@ func (a *App) onAppWinLine(serial, pkg, line string) {
 			st.phase, st.phaseText = "", ""
 		}
 	}
+	if ev.Kind == bridge.KindWifiOK || ev.Kind == bridge.KindTexture {
+		st.identity = a.bindPendingCastIdentityLocked(st.identity, &st.identityCheck, st.serial)
+		a.retryWirelessIdentityLocked(st.identityCheck)
+	}
+	identity := st.identity
 	a.mu.Unlock()
 	// 规格入档（锁外；updateBaseline 自行取锁）：虚拟屏投屏也算一次"实测"——
 	// 与主屏投屏共享同一 baseline（主人："主屏虚拟屏都行"）。[custom] 回显不更新。
@@ -319,7 +341,10 @@ func (a *App) onAppWinLine(serial, pkg, line string) {
 		if ev.Spec.Wired {
 			m = "usb"
 		}
-		a.updateBaseline(a.appListKeyFor(serial), m, Baseline{Res: ev.Spec.MaxSize, FPS: ev.Spec.FPS, Bitrate: ev.Spec.Mbps})
+		if identity == "" {
+			identity = a.appListKeyFor(serial)
+		}
+		a.updateBaseline(identity, m, Baseline{Res: ev.Spec.MaxSize, FPS: ev.Spec.FPS, Bitrate: ev.Spec.Mbps})
 	}
 }
 
@@ -359,6 +384,8 @@ func appWinPhaseText(k bridge.Kind) (string, bool) {
 		return "连接断开，自动重连中…", true
 	case bridge.KindVDCreating:
 		return "正在启动虚拟屏…", true
+	case bridge.KindRetryWait:
+		return "连续投屏失败，可重新投屏", true
 	}
 	return "", false
 }
@@ -489,7 +516,7 @@ func (a *App) appWinsListLocked() []AppWinItem {
 	sort.Slice(states, func(i, j int) bool { return states[i].startedAt.Before(states[j].startedAt) })
 	out := make([]AppWinItem, 0, len(states))
 	for _, st := range states {
-		out = append(out, AppWinItem{Serial: st.serial, Pkg: st.pkg, Name: st.name, Mode: st.mode, Closing: st.closing, Phase: st.phase, PhaseText: st.phaseText,
+		out = append(out, AppWinItem{Serial: st.serial, Identity: st.identity, Pkg: st.pkg, Name: st.name, Mode: st.mode, Closing: st.closing, Phase: st.phase, PhaseText: st.phaseText,
 			Log: append([]string{}, st.log...)})
 	}
 	return out
@@ -504,8 +531,9 @@ var (
 
 // devicePhys 查询并缓存设备物理参数（wm size 长边 + wm density；长 TTL）。
 func (a *App) devicePhys(serial string) devPhys {
+	identity := a.appListKeyFor(serial)
 	a.physMu.Lock()
-	if p, ok := a.physCache[serial]; ok && time.Since(p.at) < appWinPhysTTL {
+	if p, ok := a.physCache[identity]; ok && time.Since(p.at) < appWinPhysTTL {
 		a.physMu.Unlock()
 		return p
 	}
@@ -513,6 +541,7 @@ func (a *App) devicePhys(serial string) devPhys {
 
 	// v2.1.84：等 adb 服务就绪（缓存路径已排除——真正的 adb 查询不落在抢庄窗口里）
 	a.waitSrvReady(context.Background())
+	transport := a.bestEnumSerial(identity, serial)
 
 	p := devPhys{at: time.Now()}
 	// wm size 偶发失败（无线 adb 慢/设备忙——实测"长边=0"→ dpi 未注入跑 160）：
@@ -521,7 +550,7 @@ func (a *App) devicePhys(serial string) devPhys {
 		if attempt > 0 {
 			time.Sleep(400 * time.Millisecond)
 		}
-		if out, err := a.adbShell(serial, "wm", "size"); err == nil {
+		if out, err := a.adbShell(transport, "wm", "size"); err == nil {
 			if m := rePhysSize.FindStringSubmatch(out); m != nil {
 				w, _ := strconv.Atoi(m[1])
 				h, _ := strconv.Atoi(m[2])
@@ -538,15 +567,15 @@ func (a *App) devicePhys(serial string) devPhys {
 		if attempt > 0 {
 			time.Sleep(400 * time.Millisecond)
 		}
-		if out, err := a.adbShell(serial, "wm", "density"); err == nil {
+		if out, err := a.adbShell(transport, "wm", "density"); err == nil {
 			if m := rePhysDpi.FindStringSubmatch(out); m != nil {
 				p.dpi, _ = strconv.Atoi(m[1])
 			}
 		}
 	}
-	if p.longSide > 0 && p.dpi > 0 {
+	if p.longSide > 0 && p.dpi > 0 && identity == a.appListKeyFor(transport) {
 		a.physMu.Lock()
-		a.physCache[serial] = p
+		a.physCache[identity] = p
 		a.physMu.Unlock()
 	}
 	bridge.DebugLog("[appwin] 设备物理参数 serial=%s 长边=%d dpi=%d", serial, p.longSide, p.dpi)
@@ -570,9 +599,10 @@ func (a *App) adbShell(serial string, args ...string) (string, error) {
 // 用途：StartAppWin 等"必须在 GUI 消息循环线程上快速返回"的路径——慢查询一律
 // 交给 devicePhys（后台预热）跑，绝不在此阻塞。
 func (a *App) devicePhysCached(serial string) devPhys {
+	identity := a.appListKeyFor(serial)
 	a.physMu.Lock()
 	defer a.physMu.Unlock()
-	if p, ok := a.physCache[serial]; ok && time.Since(p.at) < appWinPhysTTL {
+	if p, ok := a.physCache[identity]; ok && time.Since(p.at) < appWinPhysTTL {
 		return p
 	}
 	return devPhys{}
@@ -680,14 +710,15 @@ func (a *App) appWinDefaults(serial string) AppWinParams {
 // nativeRes 设备原生分辨率（宽≥高 "WxH"）：档案持久化优先 → 设备流富化兜底 →
 // 空（空则 mdns10ProfileRes 按 16:9 兜底）。与 mdns10DecorateSpecs 同链。
 func (a *App) nativeRes(serial string) string {
-	if e, ok := a.profiles.Entry(a.appListKeyFor(serial)); ok && e.Res != "" {
+	key := a.appListKeyFor(serial)
+	if e, ok := a.profiles.Entry(key); ok && e.Res != "" {
 		return e.Res
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	for i := range a.devices {
 		d := &a.devices[i]
-		if d.Serial == serial || d.Wireless == serial {
+		if a.identityOf(d) == key {
 			if d.Res != "" {
 				return d.Res
 			}
@@ -840,22 +871,23 @@ func (a *App) GetAppWinParams(serial, pkg string) (AppWinParamsView, error) {
 	if serial == "" || pkg == "" {
 		return AppWinParamsView{}, errors.New("参数不完整（serial/pkg 为空）")
 	}
+	identity := a.appWinProfileKey(serial, pkg)
 	var raw AppWinParams
-	if e, ok := a.profiles.Entry(a.appListKeyFor(serial)); ok {
+	if e, ok := a.profiles.Entry(identity); ok {
 		if pr, ok2 := e.AppParams[pkg]; ok2 {
 			raw = pr
 		}
 	}
-	def := a.appWinDefaults(serial)
+	def := a.appWinDefaults(identity)
 	ap := normalizeAppWinParams(raw, def)
 	// 主屏物理参数（只读缓存——本 RPC 跑 GUI 消息循环线程，禁慢 IO）：未缓存时
 	// 返回 0（前端只显示「自动」）+ 后台预热（下次打开面板即可显示换算值）。
-	phys := a.devicePhysCached(serial)
-	if phys.dpi == 0 {
+	phys := a.devicePhysCached(identity)
+	if phys.dpi == 0 && a.appListKeyFor(serial) == identity {
 		go a.guard("appwin-phys-warm", func() { a.devicePhys(serial) })
 	}
 	// v2.1.95：编码生效值（应用级 ?? 设备级 ?? 默认）——chips 显示用。
-	lp := a.profiles.Get(serial)
+	lp := a.profiles.Get(identity)
 	effVC := func(appV, devV string) string {
 		if strings.TrimSpace(appV) != "" {
 			return NormalizeVCodec(appV)
@@ -950,8 +982,9 @@ func (a *App) SaveAppWinParams(serial, pkg, payload string) error {
 		np = AppWinModeParams{Size: strconv.Itoa(le), RatioW: in.RatioW, RatioH: in.RatioH, FPS: in.FPS, Bitrate: in.Bitrate, Dpi: in.Dpi, Flex: in.Flex, Audio: NormalizeAudioMode(in.Audio, "phone"),
 			LockFps: in.LockFps, LockBitrate: in.LockBitrate, VCodec: vc, ACodec: ac}
 	}
-	def := a.appWinDefaults(serial)
-	ap, _ := a.appWinParamsFor(serial, pkg)
+	identity := a.appWinProfileKey(serial, pkg)
+	def := a.appWinDefaults(identity)
+	ap, _ := a.appWinParamsFor(identity, pkg)
 	if in.Mode == "usb" {
 		ap.Usb = np
 	} else {
@@ -963,7 +996,7 @@ func (a *App) SaveAppWinParams(serial, pkg, payload string) error {
 	// 之后保存即删条目。
 	ap.Usb = compactAppWinMode(ap.Usb, def.Usb)
 	ap.Wifi = compactAppWinMode(ap.Wifi, def.Wifi)
-	if err := a.profiles.SetAppParams(a.appListKeyFor(serial), pkg, ap); err != nil {
+	if err := a.profiles.SetAppParams(identity, pkg, ap); err != nil {
 		return err
 	}
 	bridge.DebugLog("[appwin] 参数已保存 serial=%s pkg=%s mode=%s size=%q fps=%d bitrate=%d dpi=%d flex=%v audio=%s vcodec=%q acodec=%q",

@@ -30,11 +30,9 @@ func newAppWinParamsEnv(t *testing.T) *appWinEnv {
 		return e.f, nil
 	})
 	e.a.physMu.Lock()
-	e.a.physCache["K80"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
-	// 无线 serial 也预置（真实场景=设备就绪边沿预热该 serial）。
-	e.a.physCache["192.168.31.197:5555"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
+	e.a.physCache["device:K80"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
 	e.a.physMu.Unlock()
-	if err := e.a.profiles.Save("K80", DefaultProfile()); err != nil {
+	if err := saveLegacyFixture(e.a.profiles, "K80", DefaultProfile()); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -80,7 +78,7 @@ func TestAppWinDefaultInjectionTwoSets(t *testing.T) {
 	}
 
 	// 无线形态：Mode=wifi、旧字段同步无线套。
-	setDevices(e.a, []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "K80", Res: "3200x1440", FPS: 120}})
+	setDevices(e.a, []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: e.a.profiles.ResolveKey("K80"), Res: "3200x1440", FPS: 120}})
 	if err := e.a.StartAppWin("192.168.31.197:5555", "pkg.w", "W"); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +109,7 @@ func TestAppWinArchivedInjection(t *testing.T) {
 	// 长边 "1920" → 注入时按设备宽高比换算 WxH）/ 90fps / 16M / flex 开 / 声音=手机档（无线套留空=未设置）。
 	ap := AppWinParams{}
 	ap.Usb = AppWinModeParams{Size: "1920x1080", FPS: 90, Bitrate: 16, Flex: true, Audio: "phone"}
-	if err := e.a.profiles.SetAppParams("K80", "com.android.browser", ap); err != nil {
+	if err := e.a.profiles.SetAppParams(fixtureArchiveKey(e.a.profiles, "K80"), "com.android.browser", ap); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.a.StartAppWin("K80", "com.android.browser", "浏览器"); err != nil {
@@ -324,7 +322,7 @@ func TestAppWinDefaultsShareMainCastBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := e.f.waitParams(t, 1)
-	wantUsbSize := mdns10ProfileRes("2560x1708", 2560) // "2560x1708"
+	wantUsbSize := mdns10ProfileRes("2560x1708", 2560)  // "2560x1708"
 	wantWifiSize := mdns10ProfileRes("2560x1708", 1920) // "1920x1280"（截断 1281 → 取偶）
 	if p.VdUsb.Size != wantUsbSize || p.VdUsb.FPS != 120 || p.VdUsb.Bitrate != 60 {
 		t.Fatalf("有线套未共享 baseline: %+v（期望 %s/120/60）", p.VdUsb, wantUsbSize)
@@ -369,25 +367,25 @@ func TestDeleteDevicesCleansDeviceData(t *testing.T) {
 	e := newAppWinParamsEnv(t)
 	setDevices(e.a, []adb.Device{{Serial: "K80", State: "device", ConnType: "usb"}})
 	// 造数据：图标目录 + 虚拟屏参数档案。
-	dir := e.a.iconsDirFor("K80")
+	dir := e.a.iconsDirFor(fixtureArchiveKey(e.a.profiles, "K80"))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "com.android.browser.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.a.profiles.SetAppParams("K80", "com.android.browser",
+	if err := e.a.profiles.SetAppParams(fixtureArchiveKey(e.a.profiles, "K80"), "com.android.browser",
 		AppWinParams{Usb: AppWinModeParams{Size: "1920x1080", FPS: 90, Bitrate: 16, Flex: true}}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := e.a.DeleteDevices([]string{"K80"}); err != nil {
+	if err := e.a.DeleteDevices([]string{fixtureArchiveKey(e.a.profiles, "K80")}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("图标目录未级联清理: %v", err)
 	}
-	if _, ok := e.a.profiles.Entry("K80"); ok {
+	if _, ok := e.a.profiles.Entry(fixtureArchiveKey(e.a.profiles, "K80")); ok {
 		t.Fatal("设备档案条目未删除（AppParams 应随条目一并删除）")
 	}
 }
@@ -398,14 +396,14 @@ func TestAppWinSeedsBaselineOnFirstOpen(t *testing.T) {
 	e := newAppWinParamsEnv(t)
 	setDevices(e.a, []adb.Device{{Serial: "K80", State: "device", ConnType: "usb", Res: "3200x1440", FPS: 120}})
 	// 前置：档案 baseline 未记录。
-	if b := e.a.profiles.Get("K80").Usb.Baseline; b.Res != 0 {
+	if b := e.a.profiles.Get(fixtureArchiveKey(e.a.profiles, "K80")).Usb.Baseline; b.Res != 0 {
 		t.Fatalf("前置：baseline 应为空: %+v", b)
 	}
 	if err := e.a.StartAppWin("K80", "pkg.s", "S"); err != nil {
 		t.Fatal(err)
 	}
 	// 播种：有线套 baseline = 推导档（长边 3200 snap 2560 / 120fps / 60M）。
-	if b := e.a.profiles.Get("K80").Usb.Baseline; b.Res != 2560 || b.FPS != 120 || b.Bitrate != 60 {
+	if b := e.a.profiles.Get(fixtureArchiveKey(e.a.profiles, "K80")).Usb.Baseline; b.Res != 2560 || b.FPS != 120 || b.Bitrate != 60 {
 		t.Fatalf("播种值异常: %+v（期望 2560/120/60——长边 snap 后）", b)
 	}
 	// 实测更新后重开窗：不被推导覆盖（播种只写一次）。
@@ -413,18 +411,18 @@ func TestAppWinSeedsBaselineOnFirstOpen(t *testing.T) {
 	if err := e.a.StartAppWin("K80", "pkg.s2", "S2"); err != nil {
 		t.Fatal(err)
 	}
-	if b := e.a.profiles.Get("K80").Usb.Baseline; b.Res != 1920 {
+	if b := e.a.profiles.Get(fixtureArchiveKey(e.a.profiles, "K80")).Usb.Baseline; b.Res != 1920 {
 		t.Fatalf("已入档 baseline 不应被重播种覆盖: %+v", b)
 	}
 	// 无线形态：IP:port 会话归一进设备主档案（无孤儿档）。
-	setDevices(e.a, []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "K80", Res: "3200x1440", FPS: 120}})
+	setDevices(e.a, []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: e.a.profiles.ResolveKey("K80"), Res: "3200x1440", FPS: 120}})
 	if err := e.a.StartAppWin("192.168.31.197:5555", "pkg.w", "W"); err != nil {
 		t.Fatal(err)
 	}
-	if b := e.a.profiles.Get("K80").Wifi.Baseline; b.Res != 1920 || b.FPS != 60 || b.Bitrate != 15 {
+	if b := e.a.profiles.Get(fixtureArchiveKey(e.a.profiles, "K80")).Wifi.Baseline; b.Res != 1920 || b.FPS != 60 || b.Bitrate != 15 {
 		t.Fatalf("无线播种值异常: %+v（期望 1920/60/15）", b)
 	}
-	if _, ok := e.a.profiles.Entry("192.168.31.197:5555"); ok {
+	if _, ok := e.a.profiles.Entry(fixtureArchiveKey(e.a.profiles, "192.168.31.197:5555")); ok {
 		t.Fatal("不应产生 IP:port 孤儿档案（播种必须用归一键）")
 	}
 }
@@ -433,7 +431,7 @@ func TestAppWinSeedsBaselineOnFirstOpen(t *testing.T) {
 // onAppWinLine 统一分类器——规格行/切换行解除 closing；形态更新；规格入档（共享 baseline）。
 func TestAppWinLineSpecClearsClosingAndArchives(t *testing.T) {
 	e := newAppWinParamsEnv(t)
-	setDevices(e.a, []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: "K80", Res: "2136x3200", FPS: 120}})
+	setDevices(e.a, []adb.Device{{Serial: "192.168.31.197:5555", State: "device", ConnType: "wifi", Identity: e.a.profiles.ResolveKey("K80"), Res: "2136x3200", FPS: 120}})
 	if err := e.a.StartAppWin("192.168.31.197:5555", "pkg.t", "T"); err != nil {
 		t.Fatal(err)
 	}
@@ -459,10 +457,10 @@ func TestAppWinLineSpecClearsClosingAndArchives(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if b := e.a.profiles.Get("K80").Usb.Baseline; b.Res != 2560 || b.FPS != 120 || b.Bitrate != 80 {
+	if b := e.a.profiles.Get(fixtureArchiveKey(e.a.profiles, "K80")).Usb.Baseline; b.Res != 2560 || b.FPS != 120 || b.Bitrate != 80 {
 		t.Fatalf("规格未入档: %+v（期望 2560/120/80）", b)
 	}
-	if _, ok := e.a.profiles.Entry("192.168.31.197:5555"); ok {
+	if _, ok := e.a.profiles.Entry(fixtureArchiveKey(e.a.profiles, "192.168.31.197:5555")); ok {
 		t.Fatal("规格入档不应产生 IP:port 孤儿档案")
 	}
 }

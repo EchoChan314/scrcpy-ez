@@ -14,10 +14,10 @@ import (
 
 func TestAppWinOverlayFollowsSetting(t *testing.T) {
 	e := newAppWinEnv(t)
-	setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
+	setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
 
 	// 出厂默认（ShowParamOverlay=true）→ 显式注入可见。
-	if err := e.a.StartAppWin("MODEL123", "pkg.one", "一"); err != nil {
+	if err := e.a.StartAppWin("12345TESTA", "pkg.one", "一"); err != nil {
 		t.Fatal(err)
 	}
 	p := e.f.waitParams(t, 1)
@@ -29,7 +29,7 @@ func TestAppWinOverlayFollowsSetting(t *testing.T) {
 	if err := e.a.SetSettings(false, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.a.StartAppWin("MODEL123", "pkg.two", "二"); err != nil {
+	if err := e.a.StartAppWin("12345TESTA", "pkg.two", "二"); err != nil {
 		t.Fatal(err)
 	}
 	p2 := e.f.waitParams(t, 2)

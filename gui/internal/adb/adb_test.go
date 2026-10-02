@@ -12,9 +12,9 @@ import (
 
 func TestParseDevices(t *testing.T) {
 	out := `List of devices attached
-MODEL123	device
+12345TESTA	device
 192.0.2.45:5555	device
-MODEL123._adb-tls._tcp.local.	device
+12345TESTA._adb-tls._tcp.local.	device
 emulator-5554	offline
 ABCDEF0123456789	unauthorized
 
@@ -27,9 +27,9 @@ ABCDEF0123456789	unauthorized
 		state string
 		conn  string
 	}{
-		"MODEL123":                      {"device", "usb"},
+		"12345TESTA":                      {"device", "usb"},
 		"192.0.2.45:5555":                 {"device", "wifi"},
-		"MODEL123._adb-tls._tcp.local.": {"device", "other"},
+		"12345TESTA._adb-tls._tcp.local.": {"device", "other"},
 		"emulator-5554":                   {"offline", "other"},
 		"ABCDEF0123456789":                {"unauthorized", "usb"},
 	}
@@ -70,22 +70,13 @@ OLDUSB                 unauthorized
 
 // 同 model 的多 transport 合并为一组；不同 model 分组；无 model 各自成组。
 func TestGroupDevices(t *testing.T) {
-	raw := []RawDevice{
-		{Serial: "TEST0002", State: "device", ConnType: "usb", Model: "Xiaomi_Pad_8_Pro"},
-		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Model: "Xiaomi_Pad_8_Pro"},
-		{Serial: "ZYX987", State: "device", ConnType: "usb", Model: "Other_Phone"},
-		{Serial: "OLDUSB", State: "device", ConnType: "usb"},
-		{Serial: "10.0.0.9:5555", State: "device", ConnType: "wifi"},
-	}
-	g := GroupDevices(raw)
-	if len(g) != 4 {
-		t.Fatalf("应 4 组（同 model 合并）: %d", len(g))
-	}
-	if len(g[0]) != 2 {
-		t.Fatalf("同 model 未合并: %+v", g[0])
-	}
-	if len(g[1]) != 1 || g[1][0].Serial != "ZYX987" {
-		t.Fatalf("不同 model 不应合并: %+v", g[1])
+	raw := []RawDevice{{Serial: "PHONE_A", ConnType: "usb", Model: "SAME_MODEL"},
+		{Serial: "PHONE_B", ConnType: "usb", Model: "SAME_MODEL"},
+		{Serial: "192.0.2.10:5555", ConnType: "wifi", Model: "SAME_MODEL"},
+		{Serial: "adb-PHONE_A-Ab12Cd._adb-tls-connect._tcp", ConnType: "wifi", Model: "SAME_MODEL"}}
+	groups := GroupDevices(raw)
+	if len(groups) != 3 || len(groups[0]) != 2 {
+		t.Fatalf("expected confirmed A transport group and separate B/unknown: %+v", groups)
 	}
 }
 
@@ -131,7 +122,7 @@ func TestBuildDeviceMergeTransports(t *testing.T) {
 	}
 }
 
-// 无 model 条目按市场名二次合并：USB 优先，无线地址并入。
+// 无 model 条目仍须按身份分开；同市场名不能证明 USB/无线属于同机。
 func TestMergeDevice(t *testing.T) {
 	a := Device{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi", Name: "Xiaomi Pad 8 Pro"}
 	mergeDevice(&a, Device{Serial: "TEST0002", State: "device", ConnType: "usb", Name: "Xiaomi Pad 8 Pro"})
@@ -406,27 +397,29 @@ func TestManagerGetprop(t *testing.T) {
 
 // --- 设备档案 identity 规则 ---
 
-// marketname 非空优先；无市场名 → manufacturer+model；都无 → 首个 serial。
+// 完整序列号决定临时身份，展示字段变化不改变身份，无身份地址保持待确认。
 // 同一设备 USB/无线 transport 由此归并（IP 变化不分裂设备的前提）。
 func TestIdentityKey(t *testing.T) {
-	cases := []struct {
-		name string
-		man  string
-		mod  string
-		ser  string
-		want string
-	}{
-		{"Xiaomi Pad 8 Pro", "Xiaomi", "MODEL789", "TEST0002", "Xiaomi Pad 8 Pro"},
-		{"  ", "Xiaomi", "MODEL789", "TEST0002", "Xiaomi MODEL789"},
-		{"", "Xiaomi", "", "TEST0002", "TEST0002"},           // 只有厂商无型号 → serial
-		{"", "", "MODEL789", "TEST0002", "TEST0002"},       // 只有型号无厂商 → serial
-		{"", "", "", "TEST0002", "TEST0002"},                 // 都无 → serial
-		{"", "", "", "192.0.2.162:5555", "192.0.2.162:5555"}, // 无线设备回退到 IP:port
-		{" Mi 11 ", "", "", "abc", "Mi 11"},                  // marketname 去空白
+	for _, meta := range [][3]string{{"Same Phone", "Vendor", "Model"}, {"", "", ""}} {
+		if got := IdentityKey(meta[0], meta[1], meta[2], "PHONE_A"); got != "device:PHONE_A" {
+			t.Fatal(got)
+		}
+		if got := IdentityKey(meta[0], meta[1], meta[2], "PHONE_B"); got != "device:PHONE_B" {
+			t.Fatal(got)
+		}
 	}
-	for _, c := range cases {
-		if got := IdentityKey(c.name, c.man, c.mod, c.ser); got != c.want {
-			t.Errorf("IdentityKey(%q,%q,%q,%q) = %q, want %q", c.name, c.man, c.mod, c.ser, got, c.want)
+	if got := IdentityKey("Same Phone", "", "", "192.0.2.10:5555"); got != "pending:192.0.2.10:5555" {
+		t.Fatal(got)
+	}
+	if got := IdentityKey("Same Phone", "", "", ""); got != "" {
+		t.Fatal(got)
+	}
+}
+
+func TestStableSerialPreservesFullHardwareSerial(t *testing.T) {
+	for input, want := range map[string]string{"PHONE-Ab12Cd": "PHONE-Ab12Cd", "adb-PHONE_A-Ab12Cd._adb-tls-connect._tcp": "PHONE_A", "adb-PHONE_A._adb._tcp": "PHONE_A", "192.0.2.10:5555": "", "unknown": ""} {
+		if got := StableSerial(input); got != want {
+			t.Fatalf("%q: %q, want %q", input, got, want)
 		}
 	}
 }

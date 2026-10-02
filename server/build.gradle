@@ -8,7 +8,7 @@ android {
         minSdkVersion 21
         targetSdkVersion 36
         versionCode 40100
-        versionName "4.1"
+        versionName "4.1-ez2.2.2"
         testInstrumentationRunner = "android.support.test.runner.AndroidJUnitRunner"
     }
     buildTypes {

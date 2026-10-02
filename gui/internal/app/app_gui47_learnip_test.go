@@ -51,7 +51,7 @@ func gui47Setup(t *testing.T, addrs ...string) (*App, *int, *string) {
 	a, _ := newTestApp()
 	if len(addrs) > 0 {
 		seedProfiles(a, map[string]*DeviceEntry{
-			"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, addrs),
+			"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, addrs),
 		})
 	}
 	connects := 0
@@ -95,7 +95,7 @@ func TestGui47FixOrderReadIPBeforeTcpip(t *testing.T) {
 	if *connects != 0 {
 		t.Fatalf("学习路径不应调用 connect: %d", *connects)
 	}
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok || !gui47HasAddr(e, "192.168.1.100:5555", "tcpip") {
 		t.Fatalf("档案应已对齐: %+v", e.Addrs)
 	}
@@ -115,7 +115,7 @@ func TestGui47FixLearnAlignNoConnect(t *testing.T) {
 	if *connects != 0 {
 		t.Fatalf("学习路径不应调用 connect: %d", *connects)
 	}
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok || !gui47HasAddr(e, "192.0.2.77:5555", "tcpip") {
 		t.Fatalf("档案应写入读到的 IP: %+v", e.Addrs)
 	}
@@ -145,7 +145,7 @@ func TestGui47FixPort5555StillAlign(t *testing.T) {
 	if *connects != 0 {
 		t.Fatalf("学习路径不应调用 connect: %d", *connects)
 	}
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok || !gui47HasAddr(e, "192.168.1.100:5555", "tcpip") {
 		t.Fatalf("端口已 5555 也应无条件对齐: %+v", e.Addrs)
 	}
@@ -163,7 +163,7 @@ func TestGui47FixIPFailNoAlign(t *testing.T) {
 	if *connects != 0 {
 		t.Fatalf("学习路径不应调用 connect: %d", *connects)
 	}
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok || gui47HasAddr(e, "192.168.1.100:5555", "tcpip") {
 		t.Fatalf("读 IP 失败不应写档案: %+v", e.Addrs)
 	}
@@ -185,7 +185,7 @@ func TestGui47FixTcpipFailNoAlign(t *testing.T) {
 	if *connects != 0 {
 		t.Fatalf("学习路径不应调用 connect: %d", *connects)
 	}
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok || gui47HasAddr(e, "192.168.1.100:5555", "tcpip") {
 		t.Fatalf("tcpip 失败不应写档案: %+v", e.Addrs)
 	}
@@ -196,7 +196,7 @@ func TestGui47FixTcpipFailNoAlign(t *testing.T) {
 // TestGui47TlsSwitchZeroStale：adb_wifi_enabled=0 → TLS active 条目 Stale=true。
 func TestGui47TlsSwitchZeroStale(t *testing.T) {
 	a, _, _ := gui47Setup(t, "192.168.1.10:37199")
-	a.profiles.AddrSuccess("TEST0001", "192.168.1.11:5555")
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "TEST0001"), "192.168.1.11:5555")
 	a.teachOps.getpropFn = func(ctx context.Context, serial, prop string) (string, error) {
 		return "5554", nil
 	}
@@ -205,7 +205,7 @@ func TestGui47TlsSwitchZeroStale(t *testing.T) {
 		"192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.100\n",
 		"")
 	a.maybeTeachTcpip(context.Background(), []adb.Device{gui47UsbDev()})
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok {
 		t.Fatal("档案不存在")
 	}
@@ -240,7 +240,7 @@ func TestGui47TlsSwitchOneOrErrorNoStale(t *testing.T) {
 				return "", nil
 			}
 			a.maybeTeachTcpip(context.Background(), []adb.Device{gui47UsbDev()})
-			e, ok := a.profiles.Entry("TEST0001")
+			e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 			if !ok {
 				t.Fatal("档案不存在")
 			}
@@ -262,7 +262,7 @@ func TestGui47TlsSwitchZeroNoTlsEntry(t *testing.T) {
 		"192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.100\n",
 		"")
 	a.maybeTeachTcpip(context.Background(), []adb.Device{gui47UsbDev()})
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok {
 		t.Fatal("档案不存在")
 	}

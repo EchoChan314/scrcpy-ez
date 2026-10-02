@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"scrcpy-ez/gui/internal/bridge"
@@ -12,11 +13,12 @@ import (
 const usbLearnRetryDelay = 300 * time.Millisecond
 
 type usbLearningState struct {
-	id         string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	candidates []string
-	enabled    bool
+	id            string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	candidates    []string
+	enabled       bool
+	restartIssued atomic.Bool
 }
 
 func (a *App) stopUsbLearningLocked(id string) {
@@ -25,6 +27,7 @@ func (a *App) stopUsbLearningLocked(id string) {
 	for serial, state := range a.usbLearning {
 		if state.id == id {
 			state.cancel()
+			a.adb.EventHub().SetLearning(serial, false)
 			delete(a.usbLearning, serial)
 		}
 	}
@@ -41,6 +44,7 @@ func (a *App) startUsbLearning(_ context.Context, serial string) {
 	}
 	now := time.Now()
 	ctx, cancel := context.WithDeadline(context.Background(), now.Add(plugShieldTimeout))
+	a.adb.EventHub().SetLearning(serial, true)
 	state := &usbLearningState{id: id, ctx: ctx, cancel: cancel}
 	a.usbLearning[serial] = state
 	a.plugging[id] = now
@@ -88,6 +92,7 @@ func (a *App) usbLearnAttempt(serial string, state *usbLearningState) bool {
 		bridge.DebugLog("[app] 插线学习待重试：%s（%v）", serial, err)
 		return false
 	}
+	a.adb.EventHub().SetLearning(serial, false)
 	bridge.DebugLog("[app] 插线学习完成：%s（无线已验证并落盘）", serial)
 	a.plugStabilityCheck(state.id)
 	return true
@@ -107,6 +112,7 @@ func (a *App) teachTcpipAttempt(ctx context.Context, serial string, state *usbLe
 		a.checkTlsSwitch(ctx, serial)
 		state.candidates = a.learnWirelessIPCandidates(ctx, serial)
 		if strings.TrimSpace(port) != "5555" {
+			state.restartIssued.Store(true)
 			tctx, cancel := context.WithTimeout(ctx, teachTcpipTimeout)
 			err = a.teachOps.tcpipFn(tctx, serial, "5555")
 			cancel()

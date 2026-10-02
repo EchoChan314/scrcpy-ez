@@ -17,7 +17,7 @@ func TestGui48Mdns6fix3ForceAddedTurnsActive(t *testing.T) {
 
 	svc := mdnsTlsSvc("adb-TEST0001-KWqpio", "192.0.2.197", "45005")
 	// 先把该 TLS 地址打 stale（模拟此前 Goodbye/无信号）。
-	a.profiles.MarkAddrStale("REDMI K80", svc.Addr)
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), svc.Addr)
 	a.applyMdnsSnapshot([]discovery.MdnsService{svc}, true, nil, nil)
 
 	// A 层 QU 应答强制 emit：Snapshot 与上一份相同，但 Added=全量。

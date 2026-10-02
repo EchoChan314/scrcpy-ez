@@ -24,7 +24,7 @@ func TestBeginCloseStopsAppWins(t *testing.T) {
 	})
 	setDevices(a, []adb.Device{{Serial: "S1", State: "device", ConnType: "usb", Name: "X", Identity: "X"}})
 	a.physMu.Lock()
-	a.physCache["S1"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
+	a.physCache["device:S1"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
 	a.physMu.Unlock()
 
 	if err := a.StartCast("S1"); err != nil {

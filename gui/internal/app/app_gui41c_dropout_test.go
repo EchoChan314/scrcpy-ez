@@ -33,15 +33,15 @@ func TestGui41cAddrFailMarksStale(t *testing.T) {
 		Profiles: DefaultProfile(),
 	})
 
-	s.AddrFail("REDMI K80", "192.0.2.197:5555")
-	e, _ := s.Entry("REDMI K80")
+	s.AddrFail(fixtureArchiveKey(s, "REDMI K80"), "192.0.2.197:5555")
+	e, _ := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	a := gui24FindAddr(e, "192.0.2.197:5555")
 	if a == nil || a.State != AddrStateStale || a.Fail != 1 || a.LastFail == 0 {
 		t.Fatalf("失败应写 state=stale 并累计内存统计: %+v", a)
 	}
 
-	s.AddrSuccessWithMode("REDMI K80", "192.0.2.197:5555", ModeTcpip)
-	e, _ = s.Entry("REDMI K80")
+	s.AddrSuccessWithMode(fixtureArchiveKey(s, "REDMI K80"), "192.0.2.197:5555", ModeTcpip)
+	e, _ = s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	if a := gui24FindAddr(e, "192.0.2.197:5555"); a == nil || a.State != AddrStateActive {
 		t.Fatalf("成功应翻回 state=active（闭环）: %+v", a)
 	}

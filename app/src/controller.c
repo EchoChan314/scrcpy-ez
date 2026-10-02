@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "util/log.h"
+#include "clipboard_sync.h"
 
 // Drop droppable events above this limit
 #define SC_CONTROL_MSG_QUEUE_LIMIT 60
@@ -80,6 +81,9 @@ sc_controller_configure(struct sc_controller *controller,
 
 void
 sc_controller_destroy(struct sc_controller *controller) {
+#ifdef _WIN32
+    sc_clipboard_sync_disconnected();
+#endif
     sc_cond_destroy(&controller->msg_cond);
     sc_mutex_destroy(&controller->mutex);
 
@@ -98,6 +102,11 @@ sc_controller_push_msg(struct sc_controller *controller,
                        const struct sc_control_msg *msg) {
     // RESIZE_DISPLAY messages are handled separately
     assert(msg->type != SC_CONTROL_MSG_TYPE_RESIZE_DISPLAY);
+#ifdef _WIN32
+    struct sc_control_msg stamped = *msg;
+    if (!sc_clipboard_sync_stamp(&stamped)) { return false; }
+    msg = &stamped;
+#endif
 
     bool pushed = false;
 
@@ -150,6 +159,13 @@ process_msg(struct sc_controller *controller,
     size_t length;
     uint8_t *serialized_msg = sc_control_msg_serialize(msg, &length);
     if (!serialized_msg) {
+#ifdef _WIN32
+        if (msg->type == SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED) {
+            sc_clipboard_sync_failed(msg->set_clipboard.sequence);
+        } else if (msg->type == SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED) {
+            sc_clipboard_sync_failed(msg->set_image_clipboard.sequence);
+        }
+#endif
         *eos = false;
         return false;
     }

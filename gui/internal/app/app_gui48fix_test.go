@@ -12,12 +12,12 @@ import (
 
 func fixSeedK80Tls(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:45005"}),
 	})
 }
 
 func fixK80TlsStale(a *App) bool {
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		return false
 	}

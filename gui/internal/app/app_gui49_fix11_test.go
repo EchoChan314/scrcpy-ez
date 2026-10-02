@@ -44,7 +44,7 @@ func TestGui49Fix11SyncDevicesPersistsManufacturer(t *testing.T) {
 		Manufacturer: "HUAWEI", Model: "FLA-TL10",
 		Identity: adb.IdentityKey("", "HUAWEI", "FLA-TL10", "FLA123"),
 	}})
-	e, ok := a.profiles.Entry("HUAWEI FLA-TL10")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "HUAWEI FLA-TL10"))
 	if !ok {
 		t.Fatal("档案应按 manufacturer+model identity 建档")
 	}

@@ -33,7 +33,7 @@ func gui26SeedK80(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "REDMI K80"},
 	})
-	a.profiles.AddrSuccessWithMode("REDMI K80", "192.0.2.197:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555", ModeTcpip)
 }
 
 // gui26K80Card 现场 K80 无线卡：纯无线在线（serial=当前连接 197:5555）。
@@ -63,7 +63,7 @@ func gui26SetMdns(a *App, svcs []discovery.MdnsService) {
 func TestGui26TlsTagAndIpAppearTogether(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui26SeedK80(a)
-	a.profiles.AddrSuccessWithMode("REDMI K80", "192.0.2.197:35263", ModeTls)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:35263", ModeTls)
 
 	devs := gui26K80Card()
 	a.decorateTls(devs)
@@ -79,8 +79,8 @@ func TestGui26TlsTagAndIpAppearTogether(t *testing.T) {
 func TestGui26TlsTagAndIpDisappearTogether(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui26SeedK80(a)
-	a.profiles.AddrSuccessWithMode("REDMI K80", "192.0.2.197:35263", ModeTls)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:35263")
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:35263", ModeTls)
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:35263")
 
 	devs := gui26K80Card()
 	a.decorateTls(devs)
@@ -96,8 +96,8 @@ func TestGui26TlsTagAndIpDisappearTogether(t *testing.T) {
 func TestGui26NoBroadcastKeepsCurrentDisplay(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui26SeedK80(a)
-	a.profiles.AddrSuccessWithMode("REDMI K80", "192.0.2.197:35263", ModeTls)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:35263")
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:35263", ModeTls)
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:35263")
 
 	devs := gui26K80Card()
 	a.decorateTls(devs)

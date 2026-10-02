@@ -40,10 +40,10 @@ func TestGui52Fix3RuntimeCleanMergesOrphan(t *testing.T) {
 		t.Fatal("同 IP 存在主档案时事件入口应合并孤儿")
 	}
 	entries := s.Entries()
-	if _, ok := entries["192.0.2.162:42595"]; ok {
+	if _, ok := entries[fixtureEntriesKey(entries, "192.0.2.162:42595")]; ok {
 		t.Fatalf("事件驱动合卡后孤儿键应删除: %v", entries)
 	}
-	main, ok := entries["Xiaomi Pad 8 Pro"]
+	main, ok := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if !ok {
 		t.Fatalf("主档案应保留: %v", entries)
 	}
@@ -123,16 +123,17 @@ func TestGui52Fix3PairArchiveTriggersMerge(t *testing.T) {
 	s.mu.Unlock()
 
 	// 模拟 fix1 之前的坏路径：identity/serial 都空 → PairArchive 建 IP:port 过渡档
-	s.PairArchive("", "", "192.0.2.162:42595", "", "", "")
+	if err := s.PairArchive("", "", "192.0.2.162:42595", "", "", ""); err == nil { t.Fatal("unconfirmed pairing must not be archived") }
+	if err := s.Persist(); err != nil { t.Fatal(err) }
 
 	entries := s.Entries()
-	if _, ok := entries["192.0.2.162:42595"]; ok {
+	if _, ok := entries[fixtureEntriesKey(entries, "192.0.2.162:42595")]; ok {
 		t.Fatalf("PairArchive 后应立即合卡，不得残留过渡键: %v", entries)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("应只剩主档案: %v", entries)
 	}
-	main, ok := entries["Xiaomi Pad 8 Pro"]
+	main, ok := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if !ok {
 		t.Fatalf("主档案应保留: %v", entries)
 	}
@@ -163,7 +164,7 @@ func TestGui52Fix3TrackUpdateTriggerMerges(t *testing.T) {
 	a.applyTrackUpdate([]adb.Device{d})
 
 	entries := a.profiles.Entries()
-	if _, ok := entries["192.0.2.162:42595"]; ok {
+	if _, ok := entries[fixtureEntriesKey(entries, "192.0.2.162:42595")]; ok {
 		t.Fatalf("设备流建档后过渡 IP:port 键应被事件合卡清理: %v", entries)
 	}
 	if len(entries) != 1 {

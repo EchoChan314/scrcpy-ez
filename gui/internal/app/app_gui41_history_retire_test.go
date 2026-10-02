@@ -26,9 +26,9 @@ func TestGui41HistoryRetireDeletes(t *testing.T) {
 	})
 
 	// 对已存在的新 TLS 地址成功复位：B1 应删除同形态旧 33895
-	s.AddrSuccessWithMode("REDMI K80", "192.0.2.197:40000", ModeTls)
+	s.AddrSuccessWithMode(fixtureArchiveKey(s, "REDMI K80"), "192.0.2.197:40000", ModeTls)
 
-	e, ok := s.Entry("REDMI K80")
+	e, ok := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	if !ok {
 		t.Fatal("档案应可解析")
 	}
@@ -66,7 +66,7 @@ func TestGui41NormalizeClearsHistory(t *testing.T) {
 
 	s.normalizeLocked()
 
-	e, _ := s.Entry("REDMI K80")
+	e, _ := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	if len(e.Addrs) != 2 {
 		t.Fatalf("规整后应每条形态最多一条（TLS+5555），got %+v", e.Addrs)
 	}

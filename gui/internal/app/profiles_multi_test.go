@@ -36,19 +36,19 @@ func TestProfileStoreLegacyMigration(t *testing.T) {
 	}
 
 	// 迁移后档案可查：参数保留
-	if got := s.Get("TEST0002"); !got.Usb.Custom || got.Usb.Res != 2560 || got.Usb.FPS != 75 {
+	if got := s.Get(fixtureArchiveKey(s, "TEST0002")); !got.Usb.Custom || got.Usb.Res != 2560 || got.Usb.FPS != 75 {
 		t.Fatalf("旧 usb 档未迁移: %+v", got)
 	}
-	if got := s.Get("192.0.2.162:5555"); !got.Wifi.Custom || got.Wifi.FPS != 75 {
+	if got := s.Get(fixtureArchiveKey(s, "192.0.2.162:5555")); !got.Wifi.Custom || got.Wifi.FPS != 75 {
 		t.Fatalf("旧 wifi 档未迁移: %+v", got)
 	}
 
 	// 回退键结构：serial → serials；IP:port → addrs(active)
-	e, ok := s.Entry("TEST0002")
+	e, ok := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if !ok || len(e.Serials) != 1 || e.Serials[0] != "TEST0002" || len(e.Addrs) != 0 {
 		t.Fatalf("serial 回退键结构错误: %+v", e)
 	}
-	e2, ok := s.Entry("192.0.2.162:5555")
+	e2, ok := s.Entry(fixtureArchiveKey(s, "192.0.2.162:5555"))
 	if !ok || len(e2.Addrs) != 1 || e2.Addrs[0].Addr != "192.0.2.162:5555" ||
 		e2.Addrs[0].State != AddrStateActive {
 		t.Fatalf("addr 回退键结构错误: %+v", e2)
@@ -74,80 +74,24 @@ func TestProfileStoreLegacyMigration(t *testing.T) {
 // identity 归并（迁移的核心）：旧回退键档案按 adb 轮询的 marketname 重键归并，
 // serials 累积、addrs 追加、参数档按模式择优（custom 优先）。
 // 覆盖验收场景：平板（USB TEST0002 + 无线 192.0.2.162:5555）两键 → 一个 identity。
-func TestSyncDevicesMergeByMarketname(t *testing.T) {
-	dir := t.TempDir()
-	s := NewProfileStore(filepath.Join(dir, "profiles.json"))
-	_ = s.Load()
-
-	p1 := DefaultProfile()
-	p1.Usb = ModeProfile{Res: 2560, FPS: 75, Bitrate: 75, Custom: true}
-	if err := s.Save("TEST0002", p1); err != nil {
-		t.Fatal(err)
-	}
-	p2 := DefaultProfile()
-	p2.Wifi = ModeProfile{Res: 1920, FPS: 75, Bitrate: 20, Custom: true}
-	if err := s.Save("192.0.2.162:5555", p2); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(s.Entries()); got != 2 {
-		t.Fatalf("迁移前应 2 个回退键档案: %d", got)
-	}
-
-	// 第一次轮询：仅无线在线（marketname 已知）
-	changed := s.SyncDevices([]adb.Device{
-		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789"},
-	})
-	if !changed {
-		t.Fatal("归并应有改动")
-	}
-	entries := s.Entries()
-	if len(entries) != 2 {
-		t.Fatalf("首轮后应仍 2 档案（另一串口键待 USB 出现）: %d", len(entries))
-	}
-	e, ok := entries["Xiaomi Pad 8 Pro"]
-	if !ok {
-		t.Fatalf("无线键应重键为 marketname: %v", entries)
-	}
-	if e.Marketname != "Xiaomi Pad 8 Pro" || len(e.Addrs) != 1 ||
-		e.Addrs[0].Addr != "192.0.2.162:5555" || e.Addrs[0].State != AddrStateActive {
-		t.Fatalf("重键档案结构错误: %+v", e)
-	}
-	if !e.Profiles.Wifi.Custom || e.Profiles.Wifi.FPS != 75 {
-		t.Fatalf("重键后 wifi 自定义档丢失: %+v", e.Profiles)
-	}
-
-	// 第二次轮询：USB 在线（同 marketname）→ 归并进同一档案（不分裂）
-	changed = s.SyncDevices([]adb.Device{
-		{Serial: "TEST0002", State: "device", ConnType: "usb",
-			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789",
-			Wireless: "192.0.2.162:5555"},
-	})
-	if !changed {
-		t.Fatal("USB 归并应有改动")
-	}
-	entries = s.Entries()
-	if len(entries) != 1 {
-		t.Fatalf("两键应归并为 1 个 identity: %v", entries)
-	}
-	e = entries["Xiaomi Pad 8 Pro"]
-	if len(e.Serials) != 1 || e.Serials[0] != "TEST0002" {
-		t.Fatalf("serials 未累积: %+v", e)
-	}
-	if !e.Profiles.Usb.Custom || e.Profiles.Usb.FPS != 75 {
-		t.Fatalf("归并后 usb 自定义档丢失: %+v", e.Profiles)
-	}
-	if !e.Profiles.Wifi.Custom || e.Profiles.Wifi.FPS != 75 {
-		t.Fatalf("归并后 wifi 自定义档丢失: %+v", e.Profiles)
-	}
-	// 两个 identity（手机/平板并存）：再同步一个不同市场名设备 → 2 个档案
-	s.SyncDevices([]adb.Device{
-		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
-		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "Redmi K80", Model: "25053RT47C"},
-	})
-	if got := len(s.Entries()); got != 2 {
-		t.Fatalf("手机+平板并存应为 2 个 identity: %d", got)
-	}
+func TestSyncDevicesKeepsUnconfirmedLegacyParametersSeparate(t *testing.T) {
+    s := NewProfileStore(filepath.Join(t.TempDir(),"profiles.json"))
+    usb,wifi := DefaultProfile(),DefaultProfile()
+    usb.Usb.FPS,usb.Usb.Custom = 75,true
+    wifi.Wifi.FPS,wifi.Wifi.Custom = 75,true
+    if err:=saveLegacyFixture(s,"TEST0002",usb);err!=nil {t.Fatal(err)}
+    if err:=saveLegacyFixture(s,"192.0.2.162:5555",wifi);err!=nil {t.Fatal(err)}
+    devs:=[]adb.Device{{Serial:"TEST0002",State:"device",ConnType:"usb",Marketname:"Xiaomi Pad 8 Pro"},
+        {Serial:"192.0.2.162:5555",State:"device",ConnType:"wifi",Marketname:"Xiaomi Pad 8 Pro"}}
+    s.SyncDevices(devs)
+    if len(s.Entries())!=2 || devs[0].Identity==devs[1].Identity {t.Fatal("names merged unconfirmed archives")}
+    if s.Get("TEST0002").Usb.FPS!=75 || s.Get("192.0.2.162:5555").Wifi.FPS!=75 {t.Fatal("legacy parameters lost")}
+    devs[1].StableSerial="TEST0002"
+    s.SyncDevices(devs)
+    if devs[0].Identity!=devs[1].Identity || s.ResolveKey("192.0.2.162:5555")!=s.ResolveKey("TEST0002") {t.Fatal("confirmed transport failed to bind")}
+    if s.Get("TEST0002").Usb.FPS!=75 {t.Fatal("serial owner parameters overwritten")}
+    legacy,_:=s.Entry(devs[1].Serial) // current address now resolves to its confirmed owner
+    if !contains(legacy.Serials,"TEST0002") {t.Fatal("address ownership remained ambiguous")}
 }
 
 // IP 变化不分裂设备：无线 IP 变动 → 同一 marketname 档案记录新 addr（active），
@@ -171,14 +115,14 @@ func TestSyncDevicesIPChangeMerges(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("IP 变化不应分裂设备: %v", entries)
 	}
-	e := entries["Xiaomi Pad 8 Pro"]
+	e := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if len(e.Addrs) != 1 {
 		t.Fatalf("单记忆下应只保留新地址: %+v", e.Addrs)
 	}
 	if e.Addrs[0].Addr != "192.0.2.99:5555" || e.Addrs[0].State != AddrStateActive {
 		t.Fatalf("addrs 应只有新 active 地址: %+v", e.Addrs)
 	}
-	if got := s.BestAddr("TEST0002"); got != "192.0.2.99:5555" {
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0002")); got != "192.0.2.99:5555" {
 		t.Fatalf("BestAddr 应为最近成功地址: %q", got)
 	}
 }
@@ -194,14 +138,14 @@ func TestAddrFailPromotesToHistory(t *testing.T) {
 			Wireless: "192.0.2.162:5555"},
 	})
 
-	s.AddrFail("TEST0002", "192.0.2.162:5555")
-	s.AddrFail("TEST0002", "192.0.2.162:5555")
-	e, _ := s.Entry("TEST0002")
+	s.AddrFail(fixtureArchiveKey(s, "TEST0002"), "192.0.2.162:5555")
+	s.AddrFail(fixtureArchiveKey(s, "TEST0002"), "192.0.2.162:5555")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if e.Addrs[0].Fail != 2 || e.Addrs[0].State != AddrStateStale {
 		t.Fatalf("失败必须写 state=stale（fail 只作内存节流统计）: %+v", e.Addrs[0])
 	}
-	s.AddrFail("TEST0002", "192.0.2.162:5555")
-	e, _ = s.Entry("TEST0002")
+	s.AddrFail(fixtureArchiveKey(s, "TEST0002"), "192.0.2.162:5555")
+	e, _ = s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if e.Addrs[0].Fail != 3 || e.Addrs[0].State != AddrStateStale {
 		t.Fatalf("gui52 失败只二态：应保持 stale: %+v", e.Addrs[0])
 	}
@@ -210,13 +154,13 @@ func TestAddrFailPromotesToHistory(t *testing.T) {
 	}
 	// 内存态失败节流：刚失败（lastFail=now）→ 60s 内不再作候选；
 	// 节流超时后 stale 条目恢复为离线候选（永不拉黑）。
-	if got := s.BestAddr("TEST0002"); got != "" {
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0002")); got != "" {
 		t.Fatalf("刚失败（60s 节流内）的地址不应再作首选回退: %q", got)
 	}
 
 	// 再次成功 → state=active + 内存统计清零
-	s.AddrSuccess("TEST0002", "192.0.2.162:5555")
-	e, _ = s.Entry("TEST0002")
+	s.AddrSuccess(fixtureArchiveKey(s, "TEST0002"), "192.0.2.162:5555")
+	e, _ = s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if e.Addrs[0].Fail != 0 || e.Addrs[0].State != AddrStateActive || e.Addrs[0].LastOk == 0 {
 		t.Fatalf("成功后应 state=active+fail=0: %+v", e.Addrs[0])
 	}
@@ -232,7 +176,7 @@ func TestOfflineCandidates(t *testing.T) {
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
 			Wireless: "192.0.2.162:5555"},
 	})
-	s.AddrSuccess("Xiaomi Pad 8 Pro", "192.0.2.99:5555")
+	s.AddrSuccess(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.99:5555")
 
 	// 在线（USB）→ 无候选
 	if got := s.OfflineCandidates([]adb.Device{
@@ -253,14 +197,14 @@ func TestOfflineCandidates(t *testing.T) {
 	}
 
 	// 全 stale → 离线候选（单记忆只保留最新 99；162 已在成功时被替换删除）
-	if !s.MarkAddrStale("Xiaomi Pad 8 Pro", "192.0.2.99:5555") {
+	if !s.MarkAddrStale(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.99:5555") {
 		t.Fatal("MarkAddrStale 应有改动")
 	}
 	got := s.OfflineCandidates(nil)
 	if len(got) != 1 {
 		t.Fatalf("全 stale 时离线应有候选: %v", got)
 	}
-	list := got["Xiaomi Pad 8 Pro"]
+	list := got[fixtureArchiveKey(s, "Xiaomi Pad 8 Pro")]
 	if len(list) != 1 || list[0] != "192.0.2.99:5555" {
 		t.Fatalf("候选应只含最新 99（162 已出局）: %v", list)
 	}
@@ -278,14 +222,14 @@ func TestMatchMdns(t *testing.T) {
 	})
 
 	addrs := s.MatchMdns([]MdnsMatch{
-		{Name: "TEST0002", Addr: "192.0.2.77:5555"}, // 新 IP：归并并删除旧同形态
-		{Name: "unknown", Addr: "10.0.0.9:5555"},       // 无法匹配：忽略
+		{Name: "adb-TEST0002", Addr: "192.0.2.77:5555"}, // 新 IP：归并并删除旧同形态
+		{Name: "unknown", Addr: "10.0.0.9:5555"},    // 无法匹配：忽略
 		{Name: "x", Addr: "192.0.2.162:5555"},       // 旧地址已被删除 → 忽略
 	})
 	if len(addrs) != 1 || addrs[0] != "192.0.2.77:5555" {
 		t.Fatalf("mDNS 候选应只有新 IP（旧同形态已删除）: %v", addrs)
 	}
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	found := false
 	for _, a := range e.Addrs {
 		if a.Addr == "192.0.2.77:5555" && a.State == AddrStateActive {
@@ -314,7 +258,7 @@ func TestMatchMdnsAdbPrefixMergesNewIP(t *testing.T) {
 	if len(addrs) != 1 || addrs[0] != "192.0.2.183:5555" {
 		t.Fatalf("带 adb- 前缀的新 IP 应成为候选: %v", addrs)
 	}
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	found := false
 	for _, a := range e.Addrs {
 		if a.Addr == "192.0.2.183:5555" && a.State == AddrStateActive {
@@ -360,7 +304,7 @@ func TestMatchMdnsIgnoresUnrelatedName(t *testing.T) {
 	if len(addrs) != 0 {
 		t.Fatalf("无关名字不应匹配: %v", addrs)
 	}
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	for _, a := range e.Addrs {
 		if a.Addr == "192.0.2.183:5555" {
 			t.Fatalf("无关名字的地址不应归并入档案: %+v", e.Addrs)
@@ -378,9 +322,9 @@ func TestProfileStorePersistedShape(t *testing.T) {
 	_ = s.Load()
 	s.SyncDevices([]adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
-			Model: "MODEL789", Wireless: "192.0.2.162:5555"},
+			Model: "25091RP04C", Wireless: "192.0.2.162:5555"},
 	})
-	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.163:5555")
+	s.AddrFail(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.163:5555")
 
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -389,7 +333,7 @@ func TestProfileStorePersistedShape(t *testing.T) {
 	raw := string(b)
 	if !strings.Contains(raw, `"devices"`) ||
 		!strings.Contains(raw, `"marketname": "Xiaomi Pad 8 Pro"`) ||
-		!strings.Contains(raw, `"model": "MODEL789"`) ||
+		!strings.Contains(raw, `"model": "25091RP04C"`) ||
 		!strings.Contains(raw, `"TEST0002"`) ||
 		!strings.Contains(raw, `"state": "active"`) ||
 		!strings.Contains(raw, `"state": "stale"`) ||
@@ -418,7 +362,7 @@ func TestSyncDevicesKeepsExistingEntryOnUnknownWifiSerial(t *testing.T) {
 	s.mu.Lock()
 	s.data.Devices["Xiaomi Pad 8 Pro"] = &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "MODEL789",
+		Model:      "25091RP04C",
 		Serials:    []string{"TEST0002"},
 		Addrs: []AddrEntry{{
 			Addr: "192.0.2.162:5555", State: AddrStateHistory, Fail: 3, LastOk: 1750000000,
@@ -430,7 +374,7 @@ func TestSyncDevicesKeepsExistingEntryOnUnknownWifiSerial(t *testing.T) {
 	// 无线设备换 IP 上线（新 IP 不在档案）：按新 IP 解析失败 → else 分支
 	changed := s.SyncDevices([]adb.Device{
 		{Serial: "192.0.2.183:5555", State: "device", ConnType: "wifi",
-			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789"},
+			Name: "Xiaomi Pad 8 Pro", Marketname: "Xiaomi Pad 8 Pro", Model: "25091RP04C", StableSerial: "TEST0002"},
 	})
 	if !changed {
 		t.Fatal("新地址入档应有改动")
@@ -440,7 +384,7 @@ func TestSyncDevicesKeepsExistingEntryOnUnknownWifiSerial(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("不应分裂/新增档案: %v", entries)
 	}
-	e, ok := entries["Xiaomi Pad 8 Pro"]
+	e, ok := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if !ok {
 		t.Fatalf("档案键应保持 marketname identity: %v", entries)
 	}
@@ -486,7 +430,7 @@ func TestSyncDevicesNewIdentityKeepsCreating(t *testing.T) {
 		t.Fatal("新设备建档应有改动")
 	}
 	entries := s.Entries()
-	e, ok := entries["Redmi K80"]
+	e, ok := entries[fixtureEntriesKey(entries, "Redmi K80")]
 	if !ok {
 		t.Fatalf("新 identity 应建档: %v", entries)
 	}

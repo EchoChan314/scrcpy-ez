@@ -39,7 +39,25 @@ public final class ControlMessage {
     public static final int COPY_KEY_COPY = 1;
     public static final int COPY_KEY_CUT = 2;
 
+    public static final int TYPE_SET_CLIPBOARD_VERSIONED = 25;
+    public static final int TYPE_SET_IMAGE_CLIPBOARD_VERSIONED = 26;
+
     private int type;
+    private long clipboardEpoch;
+    private long clipboardVersion;
+
+    public ControlMessage withClipboardVersion(long epoch, long version) {
+        clipboardEpoch = epoch;
+        clipboardVersion = version;
+        return this;
+    }
+
+    public long getClipboardEpoch() {
+        return clipboardEpoch;
+    }
+    public long getClipboardVersion() {
+        return clipboardVersion;
+    }
     private String text;
     private int metaState; // KeyEvent.META_*
     private int action; // KeyEvent.ACTION_* or MotionEvent.ACTION_*

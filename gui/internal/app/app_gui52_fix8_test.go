@@ -46,9 +46,9 @@ func TestGui52Fix8TcpipAlreadyOpenSkips(t *testing.T) {
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
 	// 前置：配对尾段已完成建档（生产语义：PairArchive 先于 ensure）
-	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "MODEL123")
+	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "12345TESTA")
 
-	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
+	a.ensurePairTcpip5555(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.168.1.2", "192.168.1.2:33895")
 	time.Sleep(50 * time.Millisecond)
 
 	rec.mu.Lock()
@@ -60,7 +60,7 @@ func TestGui52Fix8TcpipAlreadyOpenSkips(t *testing.T) {
 		t.Fatalf("应执行一次 getprop 检测: %v", rec.getprop)
 	}
 	// gui52-fix9：已开 → 直接写档 ip:5555 active
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok || !gui50Fix45EntryHasAddr(e, "192.168.1.2:5555", ModeTcpip) {
 		t.Fatalf("已开 5555 应直写 ip:5555 入档: %+v", e)
 	}
@@ -76,9 +76,9 @@ func TestGui52Fix8TcpipNotOpenEnableOnce(t *testing.T) {
 	rec := &fix8Recorder{defaultPort: ""}
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
-	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "MODEL123")
+	a.profiles.PairArchive("REDMI K80", "TEST0001", "192.168.1.2:33895", "adb-TEST0001-KWqpio", "REDMI K80", "12345TESTA")
 
-	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
+	a.ensurePairTcpip5555(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.168.1.2", "192.168.1.2:33895")
 	time.Sleep(50 * time.Millisecond)
 
 	rec.mu.Lock()
@@ -87,7 +87,7 @@ func TestGui52Fix8TcpipNotOpenEnableOnce(t *testing.T) {
 		t.Fatalf("未开时应执行一次 adb tcpip 5555: %v", rec.tcpip)
 	}
 	// gui52-fix9：开启成功 → 直写 ip:5555 active
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok || !gui50Fix45EntryHasAddr(e, "192.168.1.2:5555", ModeTcpip) {
 		t.Fatalf("tcpip 成功应写 ip:5555 入档: %+v", e)
 	}
@@ -99,7 +99,7 @@ func TestGui52Fix8TcpipFailDoesNotBlock(t *testing.T) {
 	a.pairOps.getpropFn = rec.getpropFn
 	a.pairOps.tcpipFn = rec.tcpipFn
 
-	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895") // 不 panic 即通过；失败仅日志
+	a.ensurePairTcpip5555(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.168.1.2", "192.168.1.2:33895") // 不 panic 即通过；失败仅日志
 	time.Sleep(50 * time.Millisecond)
 
 	rec.mu.Lock()
@@ -112,7 +112,7 @@ func TestGui52Fix8TcpipFailDoesNotBlock(t *testing.T) {
 func TestGui52Fix8TcpipNilOpsNoop(t *testing.T) {
 	// Version=test 时 tcpipFn/getpropFn 不挂（newTestApp 默认）→ no-op 不 panic。
 	a, _ := newWirelessApp()
-	a.ensurePairTcpip5555("REDMI K80", "192.168.1.2", "192.168.1.2:33895")
+	a.ensurePairTcpip5555(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.168.1.2", "192.168.1.2:33895")
 }
 
 func TestGui52Fix8PairFlowTriggersTcpip(t *testing.T) {
@@ -157,7 +157,7 @@ func TestGui52Fix8PairFlowTriggersTcpip(t *testing.T) {
 		return len(rec.tcpip) == 1 && strings.HasPrefix(rec.tcpip[0], "192.168.1.2:")
 	}, "配对成功应触发 tcpip 5555 开启")
 	// gui52-fix9：配对成功 → 5555 立即入档 active
-	e2, ok2 := a.profiles.Entry("REDMI K80")
+	e2, ok2 := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok2 || !gui50Fix45EntryHasAddr(e2, "192.168.1.2:5555", ModeTcpip) {
 		t.Fatalf("配对成功后 5555 应立即入档: %+v", e2)
 	}

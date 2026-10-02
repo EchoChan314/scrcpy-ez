@@ -144,7 +144,7 @@ func TestGui52Fix14ShieldProbeStatus(t *testing.T) {
 
 	a.pairProbeAllAddrs("Xiaomi Pad 8 Pro")
 	waitFor(t, 3*time.Second, func() bool {
-		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 		if !ok {
 			return false
 		}

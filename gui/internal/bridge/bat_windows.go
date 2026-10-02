@@ -19,6 +19,7 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/windows"
+	"scrcpy-ez/gui/internal/sessioncontrol"
 )
 
 // syscallProcAttr 缩短 syscall.SysProcAttr 的引用（Windows 专属字段）。
@@ -30,41 +31,24 @@ type syscallProcAttr = syscall.SysProcAttr
 // 输入：仅当 bat 出现 choice/pause 提示（app 层判定）才写 stdin。
 type BatRunner struct {
 	batPath string
-	adbPath string
 	onLine  func(string)
 	onExit  func(code int)
 
-	// watchTag 是本会话 watcher 的唯一标记（Start 时生成，SCEZ_WATCH_TAG 注入 bat，
-	// bat 切换 flag 与 :stop_usb_watch 都按它区分——多会话互不误杀/互不误读）。
-	// serialCandidates 是本会话 scrcpy 的 --serial 匹配候选（会话键/SCEZ_SERIAL/
-	// SCEZ_ADDR 并集，Start 时定格）——Stop 残余 scrcpy 兜底复查按它判定"本会话的"，
-	// 不按进程名全局误杀其他会话投屏。
-	// CanKillServer 保留兼容占位（gui46 起 Stop 不再兜底 kill-server，此回调不再使用；
-	// 字段/SetCanKillServer 仍保留以兼容外部调用方，不影响新行为）。
-	watchTag         string
-	serialCandidates []string
-	// vdSize/startApp 是本会话的形态特征（虚拟屏判定，v2.1.30）：主投屏为空
-	// （VdSize==""），虚拟屏为"WxH"+启动包（如 "+com.android.browser"）——
-	// Stop 的残余 scrcpy 判定用它区分同设备并行的主投屏/虚拟屏会话
-	// （同设备会话 scrcpy --serial 相同，纯 serial 匹配会穿透误杀）。
-	vdSize           string
-	startApp         string
-	CanKillServer    func() bool
-	// skipNotifWait（v2.1.75）：跳过"等设备端通知撤下"——设备级单通知（固定 id）下，
-	// 非"本设备最后一个会话"停止时通知不会撤下（幸存者重发），等待必然超时；
-	// App 层在停止/重启前按"是否本设备最后一个会话"设置。默认 false=等待
-	// （最后一个会话必须等：server 优雅退出撤下通知，防滞留）。
-	skipNotifWait bool
+	// Unique event namespace; Stop never matches clients by serial or model.
+	watchTag      string
+	CanKillServer func() bool // API compatibility; server ownership is external.
+	skipNotifWait bool        // API compatibility; native cleanup is always awaited.
 
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	mu     sync.Mutex
-	code   int
-	exited bool
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	mu       sync.Mutex
+	code     int
+	exited   bool
+	waitDone chan struct{}
 }
 
 func NewBatRunner(batPath, adbPath string, onLine func(string), onExit func(int)) *BatRunner {
-	return &BatRunner{batPath: batPath, adbPath: adbPath, onLine: onLine, onExit: onExit, code: -1}
+	return &BatRunner{batPath: batPath, onLine: onLine, onExit: onExit, code: -1}
 }
 
 // Start 启动隐藏的 cmd.exe /c bat 子进程。
@@ -81,23 +65,26 @@ func (r *BatRunner) Start(serial string, params CastParams) error {
 	if r.cmd != nil {
 		return errors.New("bat 已在运行")
 	}
-	// 本会话 scrcpy --serial 匹配候选（Stop 残余兜底复查用，Start 时定格）
-	r.serialCandidates = serialCandidates(serial, params)
-	// 本会话形态特征（主投屏/虚拟屏区分，v2.1.30——Stop 残余判定防穿透）
-	r.vdSize = params.VdSize
-	r.startApp = params.StartApp
-
 	DebugLog("[start] cmd.exe /c %s (usb set=%v res=%d fps=%d bitrate=%d | wifi set=%v res=%d fps=%d bitrate=%d | serial=%q addr=%q addr2=%q nowatch=%v | overlay set=%v visible=%v)",
 		r.batPath, params.Usb.Set, params.Usb.Res, params.Usb.FPS, params.Usb.Bitrate,
 		params.Wifi.Set, params.Wifi.Res, params.Wifi.FPS, params.Wifi.Bitrate,
 		params.Serial, params.Addr, params.Addr2, params.NoWatch,
 		params.OverlayVisibleSet, params.OverlayVisible)
 	cmd := exec.Command("cmd.exe", "/c", r.batPath)
-	// 多会话 watcher 隔离：每会话唯一 tag（bat 未注入时用基标）
-	r.watchTag = fmt.Sprintf("%s_%d", WatchTag, time.Now().UnixNano())
+	// Batch starts need independent namespaces even with identical clock readings.
+	var err error
+	r.watchTag, err = sessioncontrol.NewTag(WatchTag)
+	if err != nil {
+		return fmt.Errorf("无法生成会话标识：%w", err)
+	}
+	DebugLog("[start] session tag=%s serial=%s", r.watchTag, serial)
 	// 注入环境变量（含 SCEZ_PARAM_OVERLAY 等）——组装逻辑在 params.go 的 castEnv，
 	// 平台无关、可单测（见 params_test.go）
 	env := castEnv(params, r.watchTag)
+	env = append(env, fmt.Sprintf("SCEZ_EVENT_PARENT_PID=%d", os.Getpid()))
+	if exe, err := os.Executable(); err == nil {
+		env = append(env, "SCEZ_EVENT_HELPER="+exe)
+	}
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -133,6 +120,7 @@ func (r *BatRunner) Start(serial string, params CastParams) error {
 	r.stdin = stdin
 	r.code = -1
 	r.exited = false
+	r.waitDone = make(chan struct{})
 
 	go r.readLoop(stdout, "out")
 	go r.readLoop(stderr, "err")
@@ -149,8 +137,9 @@ func (r *BatRunner) readLoop(rc io.ReadCloser, tag string) {
 		if line != "" {
 			n++
 			// 原始 GBK 解码后的行（调试日志含行号+时间，供卡死取证）
-			DebugLog("[%s:%d] %s", tag, n, strings.TrimRight(line, "\r\n"))
-			r.onLine(DecodeGBK([]byte(line)))
+			decoded := DecodeGBK([]byte(line))
+			DebugLog("[%s:%d] %s", tag, n, strings.TrimRight(decoded, "\r\n"))
+			r.onLine(decoded)
 		}
 		if err != nil {
 			DebugLog("[%s] 管道 EOF（err=%v，共 %d 行）", tag, err, n)
@@ -171,6 +160,8 @@ func (r *BatRunner) waitLoop() {
 	r.mu.Lock()
 	r.code = code
 	r.exited = true
+	_ = os.Remove(closedFlagPath(r.watchTag))
+	close(r.waitDone)
 	r.mu.Unlock()
 	r.onExit(code)
 }
@@ -179,125 +170,58 @@ func (r *BatRunner) waitLoop() {
 // （choice 有有效句柄时按 /t 超时 /d 默认自愈；死等菜单由用户在 GUI 点会话级按钮，
 // 经 app.RestartCast/StopCast 杀树处理），stdin 写端仅 Stop 时关闭。
 
-// Stop 按固定顺序停止会话（stopSteps 契约，修复"双投屏"）：
-//
-//	⓪ gui54 通知滞留修复：先只收本会话 scrcpy 客户端（adb.exe 保持存活）并等设备端
-//	   「正在投屏」通知撤下，再做整树清理。原因：① 里 taskkill /F /T 会把 scrcpy 与
-//	   它派生的 adb.exe 同帧杀掉 → 启动 server 的 adb shell 会话断开 → adbd 向
-//	   app_process(server) 发 SIGHUP → server 被信号杀死、不走 finally →
-//	   bgNotification.stop()/nm.cancel() 没执行 → 手机通知永久滞留（主人 09-16 复现）。
-//	   只杀客户端时 server 经数据 socket EOF 优雅退出，通知正常撤下。
-//	   注：⓪ 不改变 ①~⑤ 的既有顺序与语义——cmd 全程存活，① 的整树杀/防逃逸兜底照旧，
-//	   ⓪ 只是在它之前把客户端"请出去"，让 server 有机会自己撤通知。
-//
-//	① 先 taskkill /F /T <cmd pid> —— cmd 存活时整树杀（cmd+scrcpy+watcher 全灭，
-//	   scrcpy 不会因父进程先死而逃逸成孤儿——历史 bug 是先 Process.Kill 只杀 cmd、
-//	   再 taskkill 时 cmd 已死 → exit 128 → scrcpy 逃逸 → 保存重投后双窗口）；
-//	② 再 Process.Kill 兜底（taskkill 失败/未完全退出时确保 cmd 主进程死）；
-//	③ 按 WATCH_TAG 补杀 bat `start /b` 独立拉起的 watcher powershell
-//	   （bat 被强杀时 :stop_usb_watch 无机会执行——否则残留 watcher 会在停止后
-//	   继续写 flag 关 scrcpy，导致"停止后仍在重启"）；
-//	④ 等 500ms 后复查本会话 scrcpy：父链=本 cmd pid 或命令行含本会话 serial 的
-//	   残余进程 → taskkill /F 补杀（防 taskkill /T 128 失败后的孤儿窗口；
-//	   只按会话判定，绝不误杀其他会话的投屏）；
-//	⑤ 杀服门：仅当无其他活动会话才兜底 kill-server（共享 adb server 多会话保护）。
+// Stop cancels the event supervisor, waits for graceful client/server cleanup,
+// then uses only this owned process tree as a bounded last resort.
 func (r *BatRunner) Stop() error {
 	r.mu.Lock()
-	cmd := r.cmd
+	cmd, tag, done := r.cmd, r.watchTag, r.waitDone
+	if cmd == nil || cmd.Process == nil {
+		r.mu.Unlock()
+		return errors.New("bat 未在运行")
+	}
+	if r.exited {
+		r.mu.Unlock()
+		return nil
+	}
+	markSessionClosed(tag) // Covers Stop before the worker has created its event.
 	if r.stdin != nil {
 		_ = r.stdin.Close()
 		r.stdin = nil
 	}
-	tag := r.watchTag
-	serials := append([]string{}, r.serialCandidates...)
-	vdSize, startApp := r.vdSize, r.startApp
-	skipNotifWait := r.skipNotifWait
 	r.mu.Unlock()
-	if cmd == nil || cmd.Process == nil {
-		return errors.New("bat 未在运行")
-	}
-	pid := cmd.Process.Pid
-	DebugLog("[stop] 停止投屏 pid=%d（顺序：%s）", pid, strings.Join(stopSteps, "→"))
-
-	// ⓪ gui54 通知滞留修复：先单独收掉本会话客户端（保留 adb.exe），等设备端通知撤下
-	//    再做整树清理。写"复活门"标记在前：客户端若被强杀（退出码非 0），bat 也不会
-	//    在 2 秒后自动重连拉起新会话（新会话会重新挂通知，随后整树杀又让它滞留）。
-	//    v2.1.30：客户端判定带会话形态特征（vdSize/startApp）——同设备并行的
-	//    虚拟屏/主投屏互不误杀（穿透修复）。
-	markSessionClosed(tag)
-	r.stopClientFirst(pid, serials, vdSize, startApp, skipNotifWait)
-
-	// ① 整树杀优先：cmd 存活时 taskkill /T 把 cmd+scrcpy+watcher 一并清掉
-	treeKiller := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
-	treeKiller.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
-	if err := treeKiller.Run(); err != nil {
-		DebugLog("[stop] taskkill /T 失败: %v（cmd 可能已退出，转 Kill+残余兜底）", err)
-	}
-
-	// ② Kill 兜底：无论 taskkill 是否成功，确保 cmd 主进程死亡（幂等；已死则报错忽略）
-	if err := cmd.Process.Kill(); err != nil {
-		DebugLog("[stop] Kill 兜底: %v（cmd 已退出=正常）", err)
-	}
-
-	// ③ 补杀独立 watcher（按本会话 tag 精确匹配，防串线死循环残留；
-	// 未 Start 过/空 tag 退回基标兼容）
-	DebugLog("[stop] 按 WATCH_TAG(%s) 清理残留 watcher", tag)
-	watchKiller := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden",
-		"-Command", stopWatchPSCmd(tag))
-	watchKiller.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
-	if err := watchKiller.Run(); err != nil {
-		DebugLog("[stop] watcher 清理失败: %v", err)
-	}
-
-	// ④ 残余 scrcpy 兜底复查（500ms 后）：只杀本会话的（父链/命令行+形态判定）
-	time.Sleep(500 * time.Millisecond)
-	r.killResidualScrcpy(pid, serials, vdSize, startApp)
-
-	// ⑤ gui46：不再兜底 kill-server（原继承 bat :adb_cleanup 语义，杀服会断全部
-	// transport 引发离线卡窗口）——adb 清理由 GUI 退出时统一执行（见 App.ShouldKillServerOnExit）。
-	// bat 独立运行场景由 bat 自己的 :adb_cleanup 负责（不变）。
-	return nil
-}
-
-// listScrcpyProcs 枚举全部 scrcpy.exe 进程（pid/ppid/cmdline，powershell CIM）。
-// 输出行格式 "pid|ppid|cmdline"（cmdline 含管道符的概率可忽略，SplitN 兜底）。
-// 注意：powershell 是 console 程序，GUI（无控制台）直接启动会闪黑框——
-// 必须带 SysProcAttr（CREATE_NO_WINDOW+HideWindow），-WindowStyle Hidden 单独不足以防弹窗。
-// 命令带 6s 超时（实测正常 0.7-0.9s）：powershell 偶发卡死时不再让浮前点击无限挂起。
-func listScrcpyProcs() ([]scrcpyProc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	psCmd := "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'scrcpy.exe' } | " +
-		"ForEach-Object { [string]$_.ProcessId + '|' + [string]$_.ParentProcessId + '|' + [string]$_.CommandLine }"
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psCmd)
-	cmd.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return parseScrcpyProcs(string(out)), nil
-}
-
-// killResidualScrcpy 复查并补杀本会话残余 scrcpy（Stop ④）：
-// 只按"父链==本 cmd pid 或 命令行含本会话 serial+形态特征"判定本会话，多会话安全
-// （v2.1.30：带 vdSize/startApp 区分同设备并行的主投屏/虚拟屏，防穿透误杀）。
-func (r *BatRunner) killResidualScrcpy(cmdPid int, serials []string, vdSize, startApp string) {
-	procs, err := listScrcpyProcs()
-	if err != nil {
-		DebugLog("[stop] 残余 scrcpy 复查失败（跳过）: %v", err)
-		return
-	}
-	for _, p := range residualScrcpyCandidates(procs, cmdPid, serials, vdSize, startApp) {
-		DebugLog("[stop] 兜底补杀本会话残余 scrcpy pid=%d (ppid=%d, cmdline=%.120s)", p.pid, p.ppid, p.cmdline)
-		killer := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(p.pid))
-		killer.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
-		if err := killer.Run(); err != nil {
-			DebugLog("[stop] 补杀 scrcpy pid=%d 失败: %v", p.pid, err)
-		}
+	_ = sessioncontrol.SignalStop(tag)
+	timer := time.NewTimer(6 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		DebugLog("[stop] event supervisor timeout; terminating owned tree pid=%d", cmd.Process.Pid)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		c := exec.CommandContext(ctx, "taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid))
+		c.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
+		_ = c.Run()
+		_ = cmd.Process.Kill()
+		return nil
 	}
 }
 
 // ExitCode 返回 bat 最终退出码；运行中返回 -1。
+// Explicit window-focus actions still need a one-shot process inventory.
+func listScrcpyProcs() ([]scrcpyProc, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	ps := "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'scrcpy.exe' } | ForEach-Object { [string]$_.ProcessId + '|' + [string]$_.ParentProcessId + '|' + [string]$_.CommandLine }"
+	c := exec.CommandContext(ctx, "powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps)
+	c.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
+	b, err := c.Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseScrcpyProcs(string(b)), nil
+}
+
 func (r *BatRunner) ExitCode() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -312,34 +236,15 @@ func (r *BatRunner) SetCanKillServer(f func() bool) {
 	r.CanKillServer = f
 }
 
-// SetSkipNotifWait 设置"跳过等设备端通知撤下"（v2.1.75 设备级单通知配套）。
-// 调用方=App 层停止/重启会话前的"是否本设备最后一个会话"判定：非最后会话停止时，
-// 设备端通知不会被撤下（幸存者 server 收到 canceled 后自动重发），等待必然超时——
-// 跳过它（省一次 adb 查询 + 最长 4 秒）。默认 false=等待（最后一个会话必须等：
-// server 优雅退出撤下通知，防"通知滞留"回归）。
+// SetSkipNotifWait retains the Runner API. Native client/server cleanup is awaited.
 func (r *BatRunner) SetSkipNotifWait(v bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.skipNotifWait = v
 }
 
-
 // ---------------------------------------------------------------- gui54：通知滞留修复
 
-const (
-	// stopClientExitWait 是等客户端响应"关窗"（WM_CLOSE → SDL_QUIT → 完整退出流程，
-	// 含恢复设备屏幕状态/收尾写盘）的上限。窗口会话实测退出耗时 0.3~1.5s，取 2.5s
-	// 保证它走完正常退出（bat 记 code=0，不触发重连分支）；超时只可能是无窗口会话
-	// （--no-window），此时退化为强杀客户端单进程（仍保留 adb.exe）。
-	stopClientExitWait = 2500 * time.Millisecond
-	// stopNotifWaitMax 是等设备端通知撤下的上限。server 优雅退出耗时实测不稳定
-	// （0.4s~1.6s+，取决于 opengl/socket 收尾），因此必须轮询而不是固定 sleep。
-	stopNotifWaitMax = 4 * time.Second
-	// stopNotifPollPeriod 是设备端通知轮询间隔。
-	stopNotifPollPeriod = 200 * time.Millisecond
-)
-
-// markSessionClosed 写 bat 的"复活门"标记（best effort，失败不阻断停止）。
 func markSessionClosed(tag string) {
 	p := closedFlagPath(tag)
 	if p == "" {
@@ -352,77 +257,6 @@ func markSessionClosed(tag string) {
 	DebugLog("[stop] 已写关闭标记 %s（防 bat 自动重连）", filepath.Base(p))
 }
 
-// stopClientFirst 先单独收掉本会话的 scrcpy 客户端，并等设备端通知撤下。
-//
-// 为什么必须"先客户端、后进程树"（实测证据见 notify_stop.go 头注释）：
-//   - taskkill /F /T 会把 scrcpy.exe 与它派生的 adb.exe 客户端同帧杀掉 →
-//     启动 server 的 adb shell 会话断开 → adbd 向 app_process(server) 发 SIGHUP
-//     → server 不走 finally → finally 里的 nm.cancel() 没执行 → 通知滞留；
-//   - 只杀 scrcpy.exe（adb.exe 存活）时，server 通过数据 socket EOF 感知断开 →
-//     正常退出 → finally 撤通知。
-//
-// 步骤：优雅关窗（taskkill /PID 不带 /F，窗口 WM_CLOSE）→ 必要时强杀客户端单进程
-// （--no-window 场景）→ 轮询设备端通知确认撤下 → 交回原有整树清理（防逃逸语义不变）。
-// v2.1.30：客户端判定带会话形态特征（vdSize/startApp）——同设备的虚拟屏/主投屏
-// 互不误杀（修复"停止主投屏把虚拟屏一起杀掉"的穿透）。
-// v2.1.75：skipNotifWait=true（本设备还有其它会话）→ 跳过"等通知撤下"整段——
-// 设备级单通知（固定 id）下，非最后会话停止时通知不会被撤下（幸存者 server 收到
-// canceled 后自动重发），等待必然超时；最后一个会话保持等待（server 优雅退出的
-// 观测点，防"通知滞留"回归）。
-func (r *BatRunner) stopClientFirst(cmdPid int, serials []string, vdSize, startApp string, skipNotifWait bool) {
-	procs, err := listScrcpyProcs()
-	if err != nil {
-		DebugLog("[stop] scrcpy 枚举失败，跳过优雅收尾: %v", err)
-		return
-	}
-	targets := residualScrcpyCandidates(procs, cmdPid, serials, vdSize, startApp)
-	if len(targets) == 0 {
-		DebugLog("[stop] 未发现本会话 scrcpy 客户端，跳过优雅收尾")
-		return
-	}
-	// 关客户端之前先取设备端通知基线（客户端一死就取不到了）。
-	// v2.1.75：非最后会话跳过基线抓取（省一次 adb 调用 + 后续最长 4 秒等待）。
-	var baseline []string
-	if skipNotifWait {
-		DebugLog("[stop] 非本设备最后会话：跳过'等通知撤下'（设备级单通知由幸存者持有）")
-	} else {
-		baseline = r.shellNotifKeys(serials)
-		DebugLog("[stop] 优雅收尾：本会话客户端 %d 个，设备端基线通知 %d 条", len(targets), len(baseline))
-	}
-
-	// ① 优雅关窗：taskkill /PID 不带 /F → 向窗口发 WM_CLOSE → scrcpy 走 SDL_QUIT
-	//    → 退出码 0 + 打印 SCRCPY_EZ_USER_CLOSE（bat 走"窗口关闭"分支，不会重连）
-	alive := make([]int, 0, len(targets))
-	for _, p := range targets {
-		gracefulClosePID(p.pid)
-		alive = append(alive, p.pid)
-	}
-	// ② 等客户端退出；仍存活（--no-window 没有窗口可关）→ 强杀客户端单进程
-	deadline := time.Now().Add(stopClientExitWait)
-	for len(alive) > 0 && time.Now().Before(deadline) {
-		alive = alivePIDs(alive)
-		if len(alive) == 0 {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if len(alive) > 0 {
-		DebugLog("[stop] 客户端未响应关窗（无窗口会话），强杀单进程 %v（保留 adb.exe）", alive)
-		for _, pid := range alive {
-			forceKillPID(pid)
-		}
-	}
-
-	// ③ 等设备端通知撤下：server 经数据 socket EOF 优雅退出后再做整树清理
-	//    （v2.1.30：多会话并行时判据=本会话通知撤下，见 waitShellNotifReduced）
-	//    （v2.1.75：仅"本设备最后会话"会走到这里——skipNotifWait 时 baseline 为空自动跳过）
-	if len(baseline) > 0 {
-		gone, waited := r.waitShellNotifReduced(serials, baseline)
-		DebugLog("[stop] 设备端通知已撤下=%v（等待 %s）", gone, waited.Round(time.Millisecond))
-	}
-}
-
-// gracefulClosePID 向进程窗口发 WM_CLOSE（taskkill 不带 /F）。
 func gracefulClosePID(pid int) {
 	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid))
 	cmd.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
@@ -445,73 +279,3 @@ func GracefulClosePID(pid int) { gracefulClosePID(pid) }
 
 // ForceKillPID 导出包装：taskkill /F 强杀单个进程（不连带子进程，保留 adb.exe）。
 func ForceKillPID(pid int) { forceKillPID(pid) }
-
-
-// alivePIDs 用 tasklist 复查这些 pid 里还有哪些存活（无副作用，不会误发关窗）。
-func alivePIDs(pids []int) []int {
-	var alive []int
-	for _, pid := range pids {
-		cmd := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/NH")
-		cmd.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
-		out, err := cmd.Output()
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(out), strconv.Itoa(pid)) {
-			alive = append(alive, pid)
-		}
-	}
-	return alive
-}
-
-// shellNotifKeys 取设备端 com.android.shell 活跃通知 key 基线（失败返回 nil=不等待）。
-func (r *BatRunner) shellNotifKeys(serials []string) []string {
-	out, ok := r.adbShellOutput(serials, "cmd", "notification", "list")
-	if !ok {
-		return nil
-	}
-	return shellNotificationKeys(out)
-}
-
-// waitShellNotifReduced 轮询设备端，直到基线中至少一条通知消失（或超时）。
-// v2.1.30：判据从"全部消失"放宽为"至少一条消失"——多会话并行时只等本会话的
-// 通知撤下（见 notificationsReduced；server 侧通知 id 已会话唯一）。
-func (r *BatRunner) waitShellNotifReduced(serials, baseline []string) (bool, time.Duration) {
-	start := time.Now()
-	for {
-		if out, ok := r.adbShellOutput(serials, "cmd", "notification", "list"); ok {
-			if notificationsReduced(out, baseline) {
-				return true, time.Since(start)
-			}
-		}
-		if time.Since(start) >= stopNotifWaitMax {
-			return false, time.Since(start)
-		}
-		time.Sleep(stopNotifPollPeriod)
-	}
-}
-
-// adbShellOutput 用会话候选 serial 逐个尝试 `adb -s <serial> shell <args...>`，
-// 返回首个成功的输出（候选=会话键/SCEZ_SERIAL/SCEZ_ADDR 并集，覆盖 USB serial 与
-// 无线 host:port 两种形态）。全部失败返回 ok=false（调用方静默跳过等待）。
-func (r *BatRunner) adbShellOutput(serials []string, args ...string) (string, bool) {
-	if r.adbPath == "" {
-		return "", false
-	}
-	for _, s := range serials {
-		if s == "" {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		argv := append([]string{"-s", s, "shell"}, args...)
-		cmd := exec.CommandContext(ctx, r.adbPath, argv...)
-		cmd.SysProcAttr = &syscallProcAttr{CreationFlags: windows.CREATE_NO_WINDOW, HideWindow: true}
-		out, err := cmd.Output()
-		cancel()
-		if err == nil {
-			return string(out), true
-		}
-		DebugLog("[stop] adb -s %s shell %s 失败: %v", s, strings.Join(args, " "), err)
-	}
-	return "", false
-}

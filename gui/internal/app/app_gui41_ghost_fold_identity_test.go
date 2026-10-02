@@ -67,7 +67,7 @@ func TestGui41GhostFoldNoIpMerge(t *testing.T) {
 		t.Fatalf("active 地址=在线证据，不应有离线候选: %+v", offline)
 	}
 	// 翻 stale 后恢复离线候选（闭环验证）。
-	if !a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555") {
+	if !a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555") {
 		t.Fatal("MarkAddrStale 应有改动")
 	}
 	if _, ok := a.profiles.OfflineCandidateAddrs(folded)["REDMI K80"]; !ok {

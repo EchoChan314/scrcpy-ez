@@ -1,7 +1,7 @@
 package com.genymobile.scrcpy.control;
 
-import com.genymobile.scrcpy.util.StringUtils;
 import com.genymobile.scrcpy.util.Ln;
+import com.genymobile.scrcpy.util.StringUtils;
 
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
@@ -22,12 +22,25 @@ public class DeviceMessageWriter {
 
     public void write(DeviceMessage msg) throws IOException {
         int type = msg.getType();
+        // Validate before writing even the type, otherwise dropping an
+        // oversized image corrupts the following messages on this stream.
+        if ((type == DeviceMessage.TYPE_IMAGE_CLIPBOARD || type == DeviceMessage.TYPE_IMAGE_CLIPBOARD_SNAPSHOT)
+                && 17L + msg.getMimeType().getBytes(StandardCharsets.UTF_8).length
+                    + msg.getData().length > MESSAGE_MAX_SIZE) {
+            Ln.w("Image clipboard message too large, dropping before serialization");
+            return;
+        }
         dos.writeByte(type);
         switch (type) {
             case DeviceMessage.TYPE_CLIPBOARD:
+            case DeviceMessage.TYPE_CLIPBOARD_SNAPSHOT:
+                if (type == DeviceMessage.TYPE_CLIPBOARD_SNAPSHOT) {
+                    dos.writeLong(msg.getClipboardRevision());
+                }
                 String text = msg.getText();
                 byte[] raw = text.getBytes(StandardCharsets.UTF_8);
-                int len = StringUtils.getUtf8TruncationIndex(raw, CLIPBOARD_TEXT_MAX_LENGTH);
+                int maxText = CLIPBOARD_TEXT_MAX_LENGTH - (type == DeviceMessage.TYPE_CLIPBOARD_SNAPSHOT ? 8 : 0);
+                int len = StringUtils.getUtf8TruncationIndex(raw, maxText);
                 dos.writeInt(len);
                 dos.write(raw, 0, len);
                 break;
@@ -41,16 +54,14 @@ public class DeviceMessageWriter {
                 dos.write(data);
                 break;
             case DeviceMessage.TYPE_IMAGE_CLIPBOARD:
+            case DeviceMessage.TYPE_IMAGE_CLIPBOARD_SNAPSHOT:
+                if (type == DeviceMessage.TYPE_IMAGE_CLIPBOARD_SNAPSHOT) {
+                    dos.writeLong(msg.getClipboardRevision());
+                }
                 byte[] imageData = msg.getData();
                 String mimeType = msg.getMimeType();
 
                 byte[] mimeTypeBytes = mimeType.getBytes(StandardCharsets.UTF_8);
-                int messageSize = 1 + 4 + mimeTypeBytes.length + 4 + imageData.length;
-                if (messageSize > MESSAGE_MAX_SIZE) {
-                    Ln.w("Image clipboard message too large: " + messageSize + " bytes, dropping");
-                    return;
-                }
-
                 // Write fixed length fields first
                 // so client can easily detect whether they have received the whole message
                 dos.writeInt(mimeTypeBytes.length);

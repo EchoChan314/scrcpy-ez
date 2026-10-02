@@ -41,7 +41,7 @@ func TestSettingsPersistRoundTrip(t *testing.T) {
 	}
 }
 
-// 落盘内容只含两个开关（不混入设备档案），且不留 .tmp 残留。
+// 落盘内容只含全局设置（不混入设备档案），且不留 .tmp 残留。
 func TestSettingsFileContentIsolated(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
@@ -59,8 +59,8 @@ func TestSettingsFileContentIsolated(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("settings.json 非法 JSON: %v", err)
 	}
-	if len(m) != 2 || m["showParamOverlay"] != true || m["closeToTray"] != true {
-		t.Fatalf("settings.json 应只含两个开关: %v", m)
+	if len(m) != 3 || m["showParamOverlay"] != true || m["closeToTray"] != true || m["otherAppWinSystemDecorations"] != true {
+		t.Fatalf("settings.json 应只含全局设置: %v", m)
 	}
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("原子写不应留下 .tmp 残留: %v", err)
@@ -144,7 +144,7 @@ func TestStartCastInjectsParamOverlaySetting(t *testing.T) {
 			if err := a.SetSettings(tc.setting, false); err != nil {
 				t.Fatal(err)
 			}
-			if err := a.StartCast("MODEL123"); err != nil {
+			if err := a.StartCast("12345TESTA"); err != nil {
 				t.Fatal(err)
 			}
 			p := f.waitParams(t, 1)
@@ -180,7 +180,7 @@ func TestSettingsSeparateFromProfiles(t *testing.T) {
 		t.Fatalf("设备档案写入不应影响 settings.json: %v", err)
 	}
 	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil || len(m) != 2 {
+	if err := json.Unmarshal(b, &m); err != nil || len(m) != 3 {
 		t.Fatalf("settings.json 被设备档案污染: %s (err=%v)", b, err)
 	}
 }

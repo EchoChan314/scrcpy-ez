@@ -70,12 +70,12 @@ func TestGui32NewestOfClassActiveFirst(t *testing.T) {
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("TEST0001")
+	got := s.OrderedAddrs(fixtureArchiveKey(s, "TEST0001"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.197:42449" || got[1].Addr != "192.0.2.197:5555" {
 		t.Fatalf("TLS 类应选 active 42449 而非 history 35263（tls → tcpip 分层）: %+v", got)
 	}
-	if s.BestAddr("TEST0001") != "192.0.2.197:42449" {
-		t.Fatalf("BestAddr 应为 active 42449: %q", s.BestAddr("TEST0001"))
+	if s.BestAddr(fixtureArchiveKey(s, "TEST0001")) != "192.0.2.197:42449" {
+		t.Fatalf("BestAddr 应为 active 42449: %q", s.BestAddr(fixtureArchiveKey(s, "TEST0001")))
 	}
 
 	// gui52 二态：旧 history 归一为 stale=离线候选 → 取档案顺序第一条 stale
@@ -89,7 +89,7 @@ func TestGui32NewestOfClassActiveFirst(t *testing.T) {
 		},
 		Profiles: DefaultProfile(),
 	})
-	got2 := s2.OrderedAddrs("TEST0001")
+	got2 := s2.OrderedAddrs(fixtureArchiveKey(s2, "TEST0001"))
 	if len(got2) != 1 || got2[0].Addr != "192.0.2.197:35263" || got2[0].State != AddrStateStale {
 		t.Fatalf("旧 history 应归一为 stale 离线候选（第一条 35263）: %+v", got2)
 	}
@@ -101,7 +101,7 @@ func TestGui32NewestOfClassActiveFirst(t *testing.T) {
 func TestGui32StartCastBroadcastDirectNoVerify(t *testing.T) {
 	a, f := newWirelessApp()
 	k80Gui32Archive(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:42449")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:42449")
 	k80Gui32WifiCard(a)
 	var mu sync.Mutex
 	var calls []string
@@ -128,7 +128,7 @@ func TestGui32StartCastBroadcastDirectNoVerify(t *testing.T) {
 		t.Fatalf("广播命中不得触发档案候选验证: %v", calls)
 	}
 	// 不写档案：35263 死记忆状态原样（state/lastOk 不被触碰）
-	e, ok := a.profiles.Entry("192.0.2.197:5555")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "192.0.2.197:5555"))
 	if !ok {
 		t.Fatal("档案应可解析")
 	}
@@ -177,7 +177,7 @@ func TestGui32StartCastVerifyCandidatesOrderAndPickLive(t *testing.T) {
 		t.Fatalf("gui36 投屏不得触发 disc.Connect 验证: %v", gotCalls)
 	}
 	// 不写档案：35263/5555 原样（无验证成功回写）
-	e, ok := a.profiles.Entry("192.0.2.197:5555")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "192.0.2.197:5555"))
 	if !ok {
 		t.Fatal("档案应可解析")
 	}

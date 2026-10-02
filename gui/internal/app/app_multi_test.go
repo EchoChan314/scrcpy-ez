@@ -24,10 +24,10 @@ func TestStartCastInjectsSerialForUSB(t *testing.T) {
 	}
 	a.mu.Unlock()
 	// 档案：无线地址已探测成功（BestAddr 来源）
-	if err := a.profiles.Save("TEST0002", DefaultProfile()); err != nil {
+	if err := saveLegacyFixture(a.profiles, "TEST0002", DefaultProfile()); err != nil {
 		t.Fatal(err)
 	}
-	a.profiles.AddrSuccess("TEST0002", "192.0.2.162:5555")
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "TEST0002"), "192.0.2.162:5555")
 
 	if err := a.StartCast("TEST0002"); err != nil {
 		t.Fatal(err)
@@ -119,13 +119,13 @@ func TestStartCastInjectsAddrForWifi(t *testing.T) {
 	a.mu.Unlock()
 	// 档案：162 是最近成功 addr（历史成功），99 是当前在线新 addr（轮询归并后 active）
 	p := DefaultProfile()
-	if err := a.profiles.Save("192.0.2.99:5555", p); err != nil {
+	if err := saveLegacyFixture(a.profiles, "192.0.2.99:5555", p); err != nil {
 		t.Fatal(err)
 	}
 	a.profiles.SyncDevices(a.snapshotRaw().Devices)
 	// 162 先成功，99（当前在线 addr）后成功 → BestAddr=最近成功者 99
-	a.profiles.AddrSuccess("192.0.2.99:5555", "192.0.2.162:5555")
-	a.profiles.AddrSuccess("192.0.2.99:5555", "192.0.2.99:5555")
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "192.0.2.99:5555"), "192.0.2.162:5555")
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "192.0.2.99:5555"), "192.0.2.99:5555")
 	startVerifyAlwaysOK(a) // gui32 验证链：候选 99 验证通过才选用
 
 	if err := a.StartCast("192.0.2.99:5555"); err != nil {
@@ -153,13 +153,13 @@ func TestStartCastInjectsAddrForWifi(t *testing.T) {
 }
 
 // 设备列表外（未命中）→ 不注入 SCEZ_SERIAL/SCEZ_ADDR（bat 原逻辑，回归兼容）。
-func TestStartCastNoInjectionWithoutDevice(t *testing.T) {
+func TestStartCastPinsRequestedSerialWithoutDevice(t *testing.T) {
 	a, f := newTestApp()
 	if err := a.StartCast("X"); err != nil {
 		t.Fatal(err)
 	}
-	if p := f.waitParams(t, 1); p.Serial != "" || p.Addr != "" || p.NoWatch {
-		t.Fatalf("未命中设备不应注入锁定参数: %+v", p)
+	if p := f.waitParams(t, 1); p.Serial != "X" || p.ExpectedSerial != "X" || p.Addr != "" || p.NoWatch {
+		t.Fatalf("缺少卡片时仍应锁定用户请求的设备: %+v", p)
 	}
 }
 
@@ -297,9 +297,9 @@ func TestStartCastNativeResFromProfile(t *testing.T) {
 	// 真实流程：无线卡在线时 SyncDevices 建 identity 档案并持久化 Res
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "192.0.2.162:5555", State: "device", ConnType: "wifi",
-			Marketname: "Xiaomi Pad 8 Pro", Model: "MODEL789", Res: "3200x2136"},
+			Marketname: "Xiaomi Pad 8 Pro", Model: "25091RP04C", StableSerial: "TEST0002", Res: "3200x2136"},
 	})
-	if e, ok := a.profiles.Entry("192.0.2.162:5555"); !ok || e.Res != "3200x2136" {
+	if e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "192.0.2.162:5555")); !ok || e.Res != "3200x2136" {
 		t.Fatalf("SyncDevices 应持久化 Res: %+v", e)
 	}
 	_ = a.StartCast("192.0.2.162:5555") // 恢复期：设备列表为空
@@ -367,10 +367,10 @@ func TestStartCastInjectsSerialWhenCardRekeyed(t *testing.T) {
 			Identity: "Xiaomi Pad 8 Pro", Wireless: "192.0.2.162:5555", Res: "3200x2136"},
 	}
 	a.mu.Unlock()
-	if err := a.profiles.Save("TEST0002", DefaultProfile()); err != nil {
+	if err := saveLegacyFixture(a.profiles, "TEST0002", DefaultProfile()); err != nil {
 		t.Fatal(err)
 	}
-	a.profiles.AddrSuccess("TEST0002", "192.0.2.162:5555")
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "TEST0002"), "192.0.2.162:5555")
 
 	// 旧 IP 启动（RestartCast 场景）：目标经 Wireless 字段匹配 → USB transport 在线 → 注 SERIAL
 	_ = a.StartCast("192.0.2.162:5555")
@@ -398,10 +398,10 @@ func TestStartCastInjectsSerialFromUsbCard(t *testing.T) {
 			Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.mu.Unlock()
-	if err := a.profiles.Save("192.0.2.162:5555", DefaultProfile()); err != nil {
+	if err := saveLegacyFixture(a.profiles, "TEST0002", DefaultProfile()); err != nil {
 		t.Fatal(err)
 	}
-	a.profiles.AddrSuccess("192.0.2.162:5555", "192.0.2.162:5555")
+	a.profiles.AddrSuccess("TEST0002", "192.0.2.162:5555")
 	startVerifyAlwaysOK(a) // gui32 验证链：候选 162 验证通过才选用
 
 	_ = a.StartCast("192.0.2.162:5555")
@@ -424,10 +424,10 @@ func TestStartCastFindsTargetByIdentity(t *testing.T) {
 			Identity: "Xiaomi Pad 8 Pro"},
 	}
 	a.mu.Unlock()
-	if err := a.profiles.Save("TEST0002", DefaultProfile()); err != nil {
+	if err := saveLegacyFixture(a.profiles, "TEST0002", DefaultProfile()); err != nil {
 		t.Fatal(err)
 	}
-	a.profiles.AddrSuccess("TEST0002", "192.0.2.162:5555")
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "TEST0002"), "192.0.2.162:5555")
 
 	_ = a.StartCast("192.0.2.162:5555") // 旧 IP：卡片 Serial/Wireless 都不匹配
 	p := f.waitParams(t, 1)

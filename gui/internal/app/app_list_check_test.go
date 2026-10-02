@@ -8,8 +8,9 @@ import (
 	"scrcpy-ez/gui/internal/adb"
 )
 
-func TestAppListCheckDeduplicatesAndSuppressesBadge(t *testing.T) {
+func TestAppListCheckDeduplicatesAndKeepsInitialBadge(t *testing.T) {
 	a := New(Config{ProfilesPath: filepath.Join(t.TempDir(), "profiles.json")})
+	a.prepareInitialAppIconGate("K80")
 	a.mu.Lock()
 	a.devices = []adb.Device{{Serial: "K80", Identity: "K80"}}
 	a.appListBusy["K80"] = time.Now()
@@ -23,7 +24,7 @@ func TestAppListCheckDeduplicatesAndSuppressesBadge(t *testing.T) {
 		t.Fatal("ready-edge enumeration should keep its existing busy badge")
 	}
 
-	// A click during that enumeration joins it, hides the badge, and never starts a second run.
+	// A click joins it without bypassing the one-time empty-cache badge or starting a second run.
 	watching, err := a.CheckAppList("K80")
 	if err != nil || !watching {
 		t.Fatalf("click should join the active enumeration: watching=%v err=%v", watching, err)
@@ -37,8 +38,8 @@ func TestAppListCheckDeduplicatesAndSuppressesBadge(t *testing.T) {
 		t.Fatal("repeated click must join an existing device enumeration")
 	}
 	devs = a.devicesWithAppBusyLocked()
-	if devs[0].AppBusy {
-		t.Fatal("click-time check must suppress the busy badge")
+	if !devs[0].AppBusy {
+		t.Fatal("a silent check must not bypass the initial empty-cache badge")
 	}
 	firstBusy := a.appListBusy["K80"]
 	if started := a.beginAppListCheckLocked("K80"); started {

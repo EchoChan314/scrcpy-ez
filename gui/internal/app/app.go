@@ -1,4 +1,4 @@
-// Package app 组装设备轮询与投屏会话状态，是 UI 绑定层与底层（adb/bat 桥接）之间的中枢。
+// Package app 组装设备事件流与投屏会话状态，是 UI 绑定层与底层（adb/bat 桥接）之间的中枢。
 // 本包不依赖任何 Windows 专属 API，可在 WSL 下单测。
 //
 // 轮 B（多设备并行投屏）：App 从"单 runner"升级为 map[serial]*sessionState——
@@ -27,6 +27,7 @@ import (
 
 	"scrcpy-ez/gui/internal/adb"
 	"scrcpy-ez/gui/internal/bridge"
+	"scrcpy-ez/gui/internal/deviceevents"
 	"scrcpy-ez/gui/internal/discovery"
 )
 
@@ -215,19 +216,20 @@ var (
 // Snapshot 是 JS 每次轮询拿到的完整界面状态。
 // Cast 兼容字段 = 活动会话（多会话下取最近启动的活动会话）的内容。
 type Snapshot struct {
-	Version    string          `json:"version"`
-	BatPath    string          `json:"batPath"`
-	AdbOK      bool            `json:"adbOK"`
-	AdbFailing bool            `json:"adbFailing"` // 真空期去抖：adbOK 仍为 true 但当前有连续失败（前端展示"刷新中"软提示，不亮红条）
-	Devices    []adb.Device    `json:"devices"`
-	Pending    []PendingDevice `json:"pending"` // 待配对设备卡（mDNS tls 服务发现、档案无此 identity）
-	Discovery  DiscoveryStatus `json:"discovery"`
-	Cast       CastState       `json:"cast"`
-	Sessions   []Session       `json:"sessions"`   // 标签栏会话列表（按 StartCast 时间排序）
-	Profiles   []ProfileItem   `json:"profiles"`   // 设备参数管理页档案列表（全部设备，含离线）
-	DevOrder   []string        `json:"devOrder"`   // 设备卡顺序（gui45 后端持久化；空=未初始化，前端 merge 后写回）
-	NewDevice  *NewDeviceInfo  `json:"newDevice"`  // 新设备弹窗（非 nil = 需要弹）
-	PairStatus *PairStatus     `json:"pairStatus"` // 无线调试配对向导状态（非 idle = 前端弹窗展示步骤/结果）
+	ProfileSaveError string          `json:"profileSaveError,omitempty"`
+	Version          string          `json:"version"`
+	BatPath          string          `json:"batPath"`
+	AdbOK            bool            `json:"adbOK"`
+	AdbFailing       bool            `json:"adbFailing"` // 真空期去抖：adbOK 仍为 true 但当前有连续失败（前端展示"刷新中"软提示，不亮红条）
+	Devices          []adb.Device    `json:"devices"`
+	Pending          []PendingDevice `json:"pending"` // 待配对设备卡（mDNS tls 服务发现、档案无此 identity）
+	Discovery        DiscoveryStatus `json:"discovery"`
+	Cast             CastState       `json:"cast"`
+	Sessions         []Session       `json:"sessions"`   // 标签栏会话列表（按 StartCast 时间排序）
+	Profiles         []ProfileItem   `json:"profiles"`   // 设备参数管理页档案列表（全部设备，含离线）
+	DevOrder         []string        `json:"devOrder"`   // 设备卡顺序（gui45 后端持久化；空=未初始化，前端 merge 后写回）
+	NewDevice        *NewDeviceInfo  `json:"newDevice"`  // 新设备弹窗（非 nil = 需要弹）
+	PairStatus       *PairStatus     `json:"pairStatus"` // 无线调试配对向导状态（非 idle = 前端弹窗展示步骤/结果）
 	// AppWins 应用窗口列表（二期 Step 3；后端=真相源，前端据此校准卡片）。
 	AppWins []AppWinItem `json:"appWins"`
 	// Settings 全局设置（设置面板两个开关；独立 settings.json 持久化）。
@@ -246,12 +248,13 @@ type sessionState struct {
 	closing    bool      // 投屏窗口 X 已关闭、bat 清理中未退出（"正在关闭…"；onExit 复位）
 	lastLineAt time.Time // 最近一次 bat 输出行时间（无输出提示用）
 	// gui43 会话连接参数存证：供轮询按 adb 事实选举实际 transport。
-	castAddr  string    // 主连接地址（StartCast params.Addr；可能为空）
-	castAddr2 string    // 备连接地址（params.Addr2；可能为空）
-	usbSerial string    // USB transport serial（params.Serial；可能为空）
-	startedAt time.Time // StartCast 时间（标签排序；重启沿用保持位置）
-	endedAt   time.Time // bat 退出时间（结束态会话 GC 用）
-	identity  string    // 设备档案 identity（弹窗判重/前端绑定/防同设备双开会话）
+	castAddr      string                 // 主连接地址（StartCast params.Addr；可能为空）
+	castAddr2     string                 // 备连接地址（params.Addr2；可能为空）
+	usbSerial     string                 // USB transport serial（params.Serial；可能为空）
+	startedAt     time.Time              // StartCast 时间（标签排序；重启沿用保持位置）
+	endedAt       time.Time              // bat 退出时间（结束态会话 GC 用）
+	identityCheck *wirelessIdentityCheck // originating online transport epoch
+	identity      string                 // 设备档案 identity（弹窗判重/前端绑定/防同设备双开会话）
 }
 
 // popupState 是新设备弹窗的后端状态机（轮 B 目标 1）。
@@ -280,8 +283,10 @@ type App struct {
 	adbOK   bool
 	// applyTrackMu 串行化 applyTrackUpdateCtx（gui49-fix7）：track 读循环与
 	// 60s 校准轮不得并发进入显示合成，保证「置位→提交」顺序无乱序帧。
-	applyTrackMu sync.Mutex
-	adbFail      int // 连续 adb 失败轮数（真空期去抖：未达阈值前保持 adbOK=true 与上次设备列表）
+	applyTrackMu           sync.Mutex
+	wirelessIdentityEpoch  uint64                            // App.mu; monotonically increasing connection token
+	wirelessIdentityChecks map[string]*wirelessIdentityCheck // App.mu; cleared on transport offline
+	adbFail                int                               // 连续 adb 失败轮数（真空期去抖：未达阈值前保持 adbOK=true 与上次设备列表）
 	// adbHealTried 是「半死保险」每段连续失败只触发一次 kill/start 自愈的闩锁
 	// （gui49-fix3）；成功后清零。a.mu 保护。
 	adbHealTried bool
@@ -313,9 +318,11 @@ type App struct {
 	// 应用列表（二期 Step 1）：按设备 identity 缓存（USB/无线切换不重枚举）；
 	// busy=在跑防重；lastReady=就绪边沿检测（commitDisplay 末尾触发）。
 	// 均为 a.mu 保护；持久层在档案（profiles.json 的 apps 字段）。
+	appIconsChanged      map[string][]string
+	appIconInitial       map[string]initialAppIconGate
 	appListCache         map[string]appListEntry
-	appListBusy          map[string]time.Time // 值=枚举开始时刻（「应用」按钮遮罩 10s 兜底用）
-	appListSilent        map[string]bool      // 点击入口触发的静默检测/等待；禁止显示枚举遮罩
+	appListBusy          map[string]time.Time // 后台作业防重/进展时间；首次遮罩另用固定期限
+	appListSilent        map[string]bool      // 点击入口的静默检测/等待；首次空图标遮罩不受此标志影响
 	appListSilentChanged map[string]bool      // 最近一次点击检测是否发现列表变化（前端仅变化时替换）
 	appListLastReady     map[string]bool
 
@@ -366,6 +373,9 @@ type App struct {
 	teachMu         sync.Mutex
 	taughtTcpip     map[string]bool
 	usbLearning     map[string]*usbLearningState // serial → 当前插线学习周期（teachMu）
+	lastUSB         []adb.Device                 // 原始 USB 条目，独立于主卡归并（applyTrackMu）
+	lastUSBToken    map[string]deviceevents.Transport
+	lastUSBEpoch    uint64
 	plugLearned     map[string]bool
 	plugStableReady map[string]bool
 	// 「插线进行中」（gui47-fix F2'）：plugging[identity]=检测到插线的时刻。
@@ -514,10 +524,6 @@ const (
 	unplugConnectAttempts = 3
 	// dropDebounce 是 removed 事件的防抖窗口：2s 内设备再现 → 取消掉线处理。
 	dropDebounce = 2 * time.Second
-	// trackCalibrateInterval 是 60s 全量校准间隔：adb.List 与事件维护的列表
-	// diff 对账（防 track 流静默失效后设备列表失真）。低频一次性动作，不是
-	// 2s 采样轮询。
-	trackCalibrateInterval = 60 * time.Second
 )
 
 // unplugConnectRetryDelay 是拔线遮罩 connect 确认失败后的重试间隔
@@ -592,6 +598,7 @@ func New(cfg Config) *App {
 		deletedUsbKeys:    map[string][]string{},
 		mdnsProbeSeq:      map[string]int64{},
 	}
+	a.adb.SetIdentityResolver(a.confirmedADBIdentity)
 	// 配对向导操作真实实现（测试可注入替换）
 	a.pairOps = pairOps{
 		pairFn:     a.adb.Pair,
@@ -655,6 +662,12 @@ func (a *App) SetSettings(showParamOverlay, closeToTray bool) error {
 	return err
 }
 
+func (a *App) SetOtherAppWinSystemDecorations(enabled bool) error {
+	err := a.settings.SetOtherAppWinSystemDecorations(enabled)
+	bridge.DebugLog("[app] 其他品牌应用窗口系统界面 enabled=%v (err=%v)", enabled, err)
+	return err
+}
+
 // --- panic 防护与崩溃日志 ---
 // GUI 静默死是最恶劣的失败模式：所有桥接回调/轮询 goroutine 都经 guard 包裹，
 // panic 时恢复现场并落盘 crash-YYYYMMDD.log（含堆栈 + cast 状态 + 日志尾部 50 行）。
@@ -705,21 +718,25 @@ func (a *App) tailLog(n int) []string {
 	return append([]string{}, log...)
 }
 
-// StartDevicePolling 每 2 秒轮询一次 adb devices 并刷新设备信息。
-// 轮 B：多会话期间轮询**不暂停**——新设备弹窗依赖持续轮询发现
-// "在线但未创建会话"的设备；bat 已参数化（SCEZ_SERIAL/SCEZ_ADDR），
-// 不再需要暂停轮询规避 adb server 竞态。
+// StartDevicePolling retains its API name; transport discovery uses ADB events.
 func (a *App) StartDevicePolling(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	a.mu.Lock()
 	a.cancel = cancel
 	a.mu.Unlock()
 
+	endpoint, token, err := deviceevents.Serve(ctx, a.adb.EventHub())
+	if err == nil {
+		os.Setenv("SCEZ_EVENT_ENDPOINT", endpoint)
+		os.Setenv("SCEZ_EVENT_TOKEN", token)
+	} else {
+		bridge.DebugLog("[app] event broker unavailable: %v", err)
+	}
 	// track-devices 长连：设备列表变化由事件流驱动（替代 2s 轮询数据源）。
 	go a.guard("device-track-loop", func() {
 		err := a.adb.TrackDevices(ctx, func(ev adb.TrackEvents) {
 			a.guard("track-event", func() {
-				a.applyTrackUpdateCtx(ctx, ev.Devices)
+				a.applyDeviceSnapshot(ctx, ev.Devices, ev.Raw, "track")
 			})
 		})
 		if err != nil && ctx.Err() == nil {
@@ -745,22 +762,6 @@ func (a *App) StartDevicePolling(ctx context.Context) {
 				return
 			case <-tick.C:
 				a.promptTick()
-			}
-		}
-	})
-
-	// 60s 全量校准：adb.List 与事件维护的列表 diff 对账 + mdns 快照对账
-	// （低频 timer，不是采样轮询）。
-	go a.guard("device-calibrate-loop", func() {
-		tick := time.NewTicker(trackCalibrateInterval)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				a.pollOnce(ctx)
-				a.reconcileMdnsSnapshot(ctx)
 			}
 		}
 	})
@@ -851,7 +852,8 @@ func (a *App) applyMdnsServiceAdded(s *discovery.MdnsService) {
 	}
 	// gui52-fix17：已删除设备的广播不写档不翻 active——删除后 adb server
 	// mdns auto-connect 秒回时广播还在持续，不挡就会把档案写活（复活）。
-	if a.deletedUsbMarked("ip:"+ipOfAddr(s.Addr)) || a.deletedUsbMarked(s.Name) {
+	if a.deletedUsbMarked(s.Name) || a.deletedUsbMarked(SerialFromServiceName(s.Name)) ||
+		SerialFromServiceName(s.Name) == "" && a.deletedUsbMarked("ip:"+ipOfAddr(s.Addr)) {
 		bridge.DebugLog("[app] 删除集拦截 mDNS 入档：%s %s", s.Name, s.Addr)
 		return
 	}
@@ -871,23 +873,7 @@ func (a *App) mdnsServiceIdentity(s *discovery.MdnsService) string {
 	if s == nil {
 		return ""
 	}
-	if serial := TlsServiceIdentity(s.Name); serial != "" {
-		if k := a.profiles.ResolveKey(serial); k != "" {
-			return k
-		}
-	}
-	if s.Addr != "" {
-		if k := a.profiles.ResolveKey(s.Addr); k != "" {
-			return k
-		}
-		// gui55：短号与地址都不中 → IP 级兜底认领候选（同 IP 的残缺档案：
-		// 短号为空或与广播短号一致才认领；冲突则返回空 = 真新设备 → 待配对卡）。
-		if k := a.profiles.ResolveClaimableByIP(ipOfAddr(s.Addr), SerialFromServiceName(s.Name)); k != "" {
-			bridge.DebugLog("[app] mDNS 服务按 IP 认领候选：%s %s → %s", s.Name, s.Addr, k)
-			return k
-		}
-	}
-	return ""
+	return a.profiles.MdnsKey(SerialFromServiceName(s.Name), s.Addr, s.Name)
 }
 
 // profileHasActiveAddr 档案是否存在任一 state=active 的地址（gui52：判据只认
@@ -1261,7 +1247,16 @@ func (a *App) pollOnce(ctx context.Context) {
 
 		qctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
-		devs, err := a.adb.List(qctx)
+		raw := a.adb.EventHub().Current()
+		var devs []adb.Device
+		var err error
+		if raw.Available {
+			devs = a.adb.DevicesFromSnapshot(qctx, raw)
+		} else if raw.Epoch == 0 {
+			devs, err = a.adb.List(qctx) // startup only, before the event baseline
+		} else {
+			return // reconnecting event stream owns recovery; keep the last display
+		}
 		if err == nil && len(devs) == 0 {
 			// 无线自恢复：bat 退出时 kill-server 会清掉无线设备，
 			// 列表为空时按 config.txt 记忆地址 adb connect 一次（内部 30s 节流），
@@ -1270,7 +1265,7 @@ func (a *App) pollOnce(ctx context.Context) {
 		}
 		if err == nil {
 			// 全量列表经同一事件分发主函数处理：diff → 事件 → 动作 → 显示层。
-			a.applyTrackUpdateCtx(qctx, devs)
+			a.applyDeviceSnapshot(qctx, devs, &raw, "refresh")
 			// gui43：投屏会话实时 transport/TLS 判定（全量校准时刷新；无活动会话跳过）
 			a.refreshSessionTransports(qctx)
 		} else {
@@ -1487,10 +1482,12 @@ func (a *App) clearDeletedUsbForAdded(added []adb.Device) {
 		}
 		// 兜底：无索引（旧标记/测试直设）时按字段清
 		if id := a.identityOf(d); id != "" {
+			a.clearDeletedUsb("archive:" + id)
 			a.clearDeletedUsb(id)
 		}
 		a.clearDeletedUsb(d.Serial)
 		if d.Identity != "" {
+			a.clearDeletedUsb("archive:" + d.Identity)
 			a.clearDeletedUsb(d.Identity)
 		}
 		if d.Marketname != "" {
@@ -1553,6 +1550,7 @@ func (a *App) DeleteDevices(keys []string) error {
 		if key == "" {
 			continue
 		}
+		legacyIcons := a.legacyIconsDirFor(key)
 		e, ok := a.profiles.RemoveDevice(key)
 		if !ok {
 			continue
@@ -1575,7 +1573,14 @@ func (a *App) DeleteDevices(keys []string) error {
 				bridge.DebugLog("[app] 删除设备：图标目录已清理 %s", dir)
 			}
 		}
+		if legacyIcons != "" {
+			if err := os.RemoveAll(legacyIcons); err != nil {
+				bridge.DebugLog("[app] 旧图标目录清理失败：%v", err)
+			}
+		}
 		a.mu.Lock()
+		delete(a.appIconsChanged, key)
+		delete(a.appIconInitial, key)
 		delete(a.appListCache, key)
 		delete(a.appListBusy, key)
 		delete(a.appListSilent, key)
@@ -1620,16 +1625,7 @@ func (a *App) adbDisconnectAddr(addr string) {
 // gui52-fix17b：同时维护「按设备」索引（deletedUsbKeys：serial/短号 → 全键集），
 // 清除走索引（clearDeletedAllForSerial），不再按帧字段凑键。
 func (a *App) markDeletedAll(key string, e DeviceEntry) {
-	keys := []string{key}
-	if e.Marketname != "" {
-		keys = append(keys, e.Marketname)
-	}
-	if e.Manufacturer != "" && e.Model != "" {
-		keys = append(keys, e.Manufacturer+" "+e.Model)
-	}
-	if e.DisplayName != "" {
-		keys = append(keys, e.DisplayName)
-	}
+	keys := []string{"archive:" + key}
 	for _, s := range e.Serials {
 		if s != "" {
 			keys = append(keys, s)
@@ -1711,17 +1707,20 @@ func (a *App) deletedUsbMatch(d *adb.Device) bool {
 	if d == nil {
 		return false
 	}
-	if id := a.identityOf(d); id != "" && a.deletedUsbMarked(id) {
+	if serial := deviceShortSerial(d); serial != "" && a.deletedUsbMarked(serial) {
 		return true
 	}
-	if d.Identity != "" && a.deletedUsbMarked(d.Identity) {
+	if id := a.identityOf(d); id != "" && a.deletedUsbMarked("archive:"+id) {
+		return true
+	}
+	if d.Identity != "" && a.deletedUsbMarked("archive:"+d.Identity) {
 		return true
 	}
 	if d.Serial != "" {
 		if a.deletedUsbMarked(d.Serial) {
 			return true
 		}
-		if IsIPPort(d.Serial) && a.deletedUsbMarked("ip:"+ipOfAddr(d.Serial)) {
+		if deviceShortSerial(d) == "" && IsIPPort(d.Serial) && a.deletedUsbMarked("ip:"+ipOfAddr(d.Serial)) {
 			return true
 		}
 		// mDNS 令牌 transport（adb-<短号>-XXXX._adb-tls-connect._tcp）：短号级匹配
@@ -1729,14 +1728,11 @@ func (a *App) deletedUsbMatch(d *adb.Device) bool {
 			return true
 		}
 	}
-	if d.Marketname != "" && a.deletedUsbMarked(d.Marketname) {
-		return true
-	}
 	if d.Wireless != "" {
 		if a.deletedUsbMarked(d.Wireless) {
 			return true
 		}
-		if IsIPPort(d.Wireless) && a.deletedUsbMarked("ip:"+ipOfAddr(d.Wireless)) {
+		if deviceShortSerial(d) == "" && IsIPPort(d.Wireless) && a.deletedUsbMarked("ip:"+ipOfAddr(d.Wireless)) {
 			return true
 		}
 	}
@@ -1764,6 +1760,12 @@ func (a *App) filterDeletedUsb(devs []adb.Device) []adb.Device {
 func (a *App) RenameDevices(names map[string]string) error {
 	for key, name := range names {
 		if key == "" {
+			continue
+		}
+		if handled, err := a.renamePendingDevice(key, name); handled {
+			if err != nil {
+				return err
+			}
 			continue
 		}
 		if a.profiles.SetDisplayName(key, name) {
@@ -1795,11 +1797,26 @@ func (a *App) applyTrackUpdate(devs []adb.Device) {
 // 折叠幽灵条目 → 与上一份权威列表 diff → 事件动作（插线学习/遮罩/弹窗/掉线防抖）
 // → 档案同步 → 显示层合成（TLS 标注/离线卡/USB 遮罩）→ 提交 a.devices。
 func (a *App) applyTrackUpdateCtx(ctx context.Context, devs []adb.Device) {
-	// gui49-fix7：全流程串行化——track 读循环与 60s 校准轮（及 RefreshNow）
-	// 不得并发进入；提交顺序恒为「事件动作（置位）→ 显示提交」。
-	a.applyTrackMu.Lock()
-	defer a.applyTrackMu.Unlock()
+	a.applyDeviceSnapshot(ctx, devs, nil, "direct")
+}
 
+// applyTrackUpdateLocked consumes only a validated snapshot. The raw USB set
+// supplies plug/unplug actions; merged cards supply presentation and profiles.
+func (a *App) applyTrackUpdateLocked(ctx context.Context, devs, usb []adb.Device, rawAvailable bool, replacements map[string]bool) {
+	// Identity annotation owns its snapshot, including callers reusing UI slices.
+	devs = append([]adb.Device(nil), devs...)
+	usb = append([]adb.Device(nil), usb...)
+	a.annotateDeviceIdentities(usb)
+	addedUSB, removedUSB, changedUSB := adb.DiffDevices(a.lastUSB, usb)
+	for _, d := range usb {
+		if replacements[d.Serial] && a.resetReplacedUSBLearning(d.Serial) {
+			addedUSB = append(addedUSB, d)
+		}
+	}
+	a.lastUSB = append([]adb.Device(nil), usb...)
+
+	identityJobs := a.prepareWirelessIdentityChecks(devs)
+	a.annotateDeviceIdentities(devs)
 	// gui12/gui31 折叠（在 diff 之前：diff 基于折叠后的权威列表）
 	devs = a.foldGhostWireless(devs)
 	devs = a.foldGhostUsb(devs)
@@ -1847,7 +1864,7 @@ func (a *App) applyTrackUpdateCtx(ctx context.Context, devs []adb.Device) {
 
 	// gui51：新插线事件清删除标记（fix17b：USB added 任意状态帧按索引全清；
 	// 随后档案同步用过滤列表（已删除设备不重建档）。
-	a.clearDeletedUsbForAdded(added)
+	a.clearDeletedUsbForAdded(addedUSB)
 	syncDevs := a.devicesForSync(devs)
 	// 设备档案同步（identity 归并/重键、serials 累积、addrs 状态更新）。
 	// gui49-fix6：插线遮罩活跃 identity 进入离线观察豁免（removed 折腾期不误标）。
@@ -1859,30 +1876,22 @@ func (a *App) applyTrackUpdateCtx(ctx context.Context, devs []adb.Device) {
 
 	// 拔线遮罩（gui49）：清因优先处理（无线 device 恢复 / USB 再现），
 	// 再按 USB removed 启动拔线遮罩；与插线遮罩互斥由 unplugStart 内部吸收。
-	a.handleUnplugEvents(devs, removed)
+	if rawAvailable {
+		a.releaseDetachedUSBProtection(usb)
+	}
+	a.handleUnplugEvents(devs, removedUSB)
 
 	// 遮罩状态机（plugging 唯一状态机，事件驱动）
-	a.dispatchPlugEvents(devs, added, changed)
+	a.dispatchPlugEvents(usb, addedUSB, changedUSB)
 
 	// 插线学习（gui48-teachfix）：事件链必须覆盖完整插线状态曲线——
 	// USB added（任意状态）与状态翻转 changed（offline/unauthorized→device）
 	// 都进入学习触发；teachTcpipSerial 只在 State==device 时实际执行。
-	var addedUSB, changedUSB []adb.Device
-	for i := range added {
-		if added[i].ConnType == "usb" {
-			addedUSB = append(addedUSB, added[i])
-		}
-	}
-	for i := range changed {
-		if changed[i].ConnType == "usb" {
-			changedUSB = append(changedUSB, changed[i])
-		}
-	}
-	a.maybeTeachTcpipEvent(ctx, devs, addedUSB, changedUSB)
+	a.maybeTeachTcpipEvent(ctx, usb, addedUSB, changedUSB)
 
 	// gui49-fix6：插线遮罩稳定确认——USB 连续 device 满 2s 清遮罩；
 	// 非 device 波动/removed 重置计时。
-	a.plugStabilityUpdate(devs)
+	a.plugStabilityUpdate(usb)
 
 	// gui52-fix14：配对遮罩稳定确认——任一 transport 连续 device 满 2s 清遮罩；
 	// 无线 adbd 波动期 offline 反复（无单一 removed 信号）→ 状态判定+重置。
@@ -1896,6 +1905,9 @@ func (a *App) applyTrackUpdateCtx(ctx context.Context, devs []adb.Device) {
 	// 探测触发：档案中设备不在线且档案有 addrs → mDNS+并行 connect（15s 节流）
 	// 显示层提交
 	a.commitDisplay(devs, "applyTrackUpdate")
+	for _, job := range identityJobs {
+		go a.learnWirelessIdentity(job)
+	}
 }
 
 // commitDisplay 构建显示层列表并提交到 a.devices。
@@ -1917,7 +1929,15 @@ func (a *App) commitDisplay(devs []adb.Device, src ...string) {
 	// transport 卡套上孤儿键的 IP 名（36475 一闪），孤儿随后删除但名字已设置。
 	a.profiles.CleanOrphanIPPort()
 	bridge.DebugLog("[app] 显示提交：%s（插线遮罩活跃=%d，%s）", source, plugN, time.Now().Format("15:04:05.000"))
+	a.annotateDeviceIdentities(devs)
 	applyProfileNames(devs, a.profiles)
+	a.mu.RLock()
+	for i := range devs {
+		if check := a.wirelessIdentityChecks[devs[i].Serial]; check != nil && check.nameSet && check.name != "" && strings.HasPrefix(devs[i].Identity, "pending:") {
+			devs[i].Name = check.name
+		}
+	}
+	a.mu.RUnlock()
 	a.buildPending(devs)
 	devs = a.unifyProfileCards(devs)
 	devs = a.shieldUsbLearning(devs)
@@ -2875,6 +2895,7 @@ func (a *App) clearDeletedUsbForSerial(serial string) {
 			a.clearDeletedUsb(mName)
 		}
 		if ident != "" {
+			a.clearDeletedUsb("archive:" + ident)
 			a.clearDeletedUsb(ident)
 		}
 		return
@@ -2895,9 +2916,11 @@ func (a *App) clearDeletedUsbForSerial(serial string) {
 		a.clearDeletedUsb(mName)
 	}
 	if ident != "" {
+		a.clearDeletedUsb("archive:" + ident)
 		a.clearDeletedUsb(ident)
 	}
 	if id := a.profiles.ResolveKey(serial); id != "" {
+		a.clearDeletedUsb("archive:" + id)
 		a.clearDeletedUsb(id)
 		// gui52-fix17：顺带清该档案全部无线地址 IP 键（防学习回来后 mDNS
 		// 广播按 IP 命中删除集被拦截，设备「又没了」）。
@@ -2930,13 +2953,11 @@ func (a *App) clearDeletedForProfile(ip, serial, tlsGuid string) {
 		a.clearDeletedUsb(tlsGuid)
 	}
 	key := ""
-	if ip != "" {
-		key = a.profiles.ResolveKeyByIP(ip)
-	}
-	if key == "" && serial != "" {
+	if serial != "" {
 		key = a.profiles.ResolveKey(serial)
 	}
 	if key != "" {
+		a.clearDeletedUsb("archive:" + key)
 		a.clearDeletedUsb(key)
 		if e, ok := a.profiles.Entry(key); ok {
 			if e.Marketname != "" {
@@ -3268,6 +3289,14 @@ func (a *App) plugStabilityCheck(id string) {
 	a.mu.RLock()
 	base := append([]adb.Device(nil), a.lastTrack...)
 	a.mu.RUnlock()
+	if raw := a.adb.EventHub().Current(); raw.Available {
+		base = nil
+		for _, t := range raw.Transports {
+			if t.Kind == "usb" {
+				base = append(base, adb.Device{Serial: t.Serial, State: t.State, ConnType: "usb"})
+			}
+		}
+	}
 	if !a.plugUSBStable(base, id) {
 		a.teachMu.Lock()
 		a.plugStableReady[id] = false
@@ -3638,10 +3667,7 @@ func (a *App) shieldPairing(devs []adb.Device) []adb.Device {
 
 	drop := map[int]bool{}
 	for i := range devs {
-		key := a.profiles.ResolveKey(devs[i].Serial)
-		if key == "" && devs[i].Wireless != "" {
-			key = a.profiles.ResolveKey(devs[i].Wireless)
-		}
+		key := a.profiles.DeviceKey(&devs[i])
 		if key == "" || !pairing[key] {
 			continue
 		}
@@ -3955,6 +3981,9 @@ func (a *App) decorateTls(devs []adb.Device) {
 // （gui48-mdns9 统一装饰入口）：decorateTls 的档案命中路径与 unifyProfileCards
 // 的修复/补齐路径共用同一函数，杜绝「IP 有标无 / 标有 IP 无」双判据割裂。
 func (a *App) mdns9DecorateCard(d *adb.Device, key string, e DeviceEntry) {
+	if d.StableSerial == "" && len(e.Serials) == 1 {
+		d.StableSerial = e.Serials[0]
+	}
 	// 前端副行专用显示地址：档案 active 排序取（TLS 优先 → 5555）；与 TLS 标
 	// 同一档案判据现算。
 	d.WirelessIP = a.wirelessStartAddr(key)
@@ -4226,10 +4255,7 @@ func (a *App) foldGhostWireless(devs []adb.Device) []adb.Device {
 			}
 			for j := range kept {
 				c := &kept[j]
-				ck := a.profiles.ResolveKey(c.Serial)
-				if ck == "" && c.Wireless != "" {
-					ck = a.profiles.ResolveKey(c.Wireless)
-				}
+				ck := a.profiles.DeviceKey(c)
 				if ck != key {
 					continue
 				}
@@ -4256,7 +4282,13 @@ func (a *App) foldGhostWireless(devs []adb.Device) []adb.Device {
 		// 跨设备归并（实测：K80 关机 197:5555 幽灵被并进平板 Wireless 副行 →
 		// K80 离线卡消失 + OfflineCandidateAddrs 误判在线 → 永不找回）。
 		ownKeys := map[string]bool{}
-		if k := a.profiles.ResolveKey(d.Serial); k != "" {
+		ownKey := ""
+		if deviceShortSerial(&d) != "" {
+			ownKey = a.profiles.DeviceKey(&d)
+		} else {
+			ownKey = a.profiles.ResolveKey(d.Serial)
+		}
+		if k := ownKey; k != "" {
 			ownKeys[k] = true
 		}
 		keys := map[string]bool{}
@@ -4279,10 +4311,7 @@ func (a *App) foldGhostWireless(devs []adb.Device) []adb.Device {
 		merged := false
 		for j := range kept {
 			c := &kept[j]
-			ck := a.profiles.ResolveKey(c.Serial)
-			if ck == "" && c.Wireless != "" {
-				ck = a.profiles.ResolveKey(c.Wireless)
-			}
+			ck := a.profiles.DeviceKey(c)
 			if ck == "" || !ownKeys[ck] {
 				continue
 			}
@@ -4325,7 +4354,7 @@ func (a *App) foldGhostUsb(devs []adb.Device) []adb.Device {
 		if (u.State != "device" && u.State != "offline") || u.ConnType != "usb" {
 			continue
 		}
-		key := a.profiles.ResolveKey(u.Serial)
+		key := a.profiles.DeviceKey(u)
 		if key != "" {
 			for j := range devs {
 				if j == i || drop[j] {
@@ -4335,10 +4364,7 @@ func (a *App) foldGhostUsb(devs []adb.Device) []adb.Device {
 				if w.State != "device" || w.ConnType != "wifi" {
 					continue
 				}
-				wk := a.profiles.ResolveKey(w.Serial)
-				if wk == "" && w.Wireless != "" {
-					wk = a.profiles.ResolveKey(w.Wireless)
-				}
+				wk := a.profiles.DeviceKey(w)
 				if wk != key {
 					continue
 				}
@@ -4486,7 +4512,7 @@ func (a *App) appendProfileOfflineCards(devs []adb.Device) []adb.Device {
 		for j := range cleaned {
 			c := &cleaned[j]
 			if c.State == "device" && c.ConnType == "wifi" {
-				k1 := a.profiles.ResolveKey(c.Serial)
+				k1 := a.profiles.DeviceKey(c)
 				k2 := a.profiles.ResolveKey(d.Serial)
 				if k1 != "" && k1 == k2 {
 					if c.Wireless == "" {
@@ -4591,26 +4617,7 @@ type mdns9CardSlot struct {
 // gui52fix2：精确链全部失败后，Serial 为 IP:port 时按 IP 回退到已有档案——
 // adb 自动连接的瞬时旧端口 transport 与主卡归并展示，不独立成卡。
 func (a *App) mdns9ProfileKey(d *adb.Device) string {
-	if d == nil {
-		return ""
-	}
-	if k := a.profiles.ResolveKey(d.Serial); k != "" {
-		return k
-	}
-	if d.Wireless != "" {
-		if k := a.profiles.ResolveKey(d.Wireless); k != "" {
-			return k
-		}
-	}
-	if d.Identity != "" {
-		if k := a.profiles.ResolveKey(d.Identity); k != "" {
-			return k
-		}
-	}
-	if IsIPPort(d.Serial) {
-		return a.profiles.ResolveKeyByIP(ipOfAddr(d.Serial))
-	}
-	return ""
+	return a.profiles.DeviceKey(d)
 }
 
 // unifyProfileCards 把设备流卡按档案 identity 归并成唯一卡，再为档案中缺失的
@@ -4886,10 +4893,7 @@ func (a *App) shieldUsbLearning(devs []adb.Device) []adb.Device {
 	// 身份分类：liveWifi（在线无线地址并入遮罩卡副行）。
 	liveWifi := map[string]string{}
 	for i := range devs {
-		key := a.profiles.ResolveKey(devs[i].Serial)
-		if key == "" && devs[i].Wireless != "" {
-			key = a.profiles.ResolveKey(devs[i].Wireless)
-		}
+		key := a.profiles.DeviceKey(&devs[i])
 		if key == "" {
 			continue
 		}
@@ -4906,10 +4910,7 @@ func (a *App) shieldUsbLearning(devs []adb.Device) []adb.Device {
 	// 重启必掉 device，真卡露出只允许经「USB 连续 device 满 2s」清因判定）。
 	drop := map[int]bool{}
 	for i := range devs {
-		key := a.profiles.ResolveKey(devs[i].Serial)
-		if key == "" && devs[i].Wireless != "" {
-			key = a.profiles.ResolveKey(devs[i].Wireless)
-		}
+		key := a.profiles.DeviceKey(&devs[i])
 		if key == "" || info[key].serial == "" {
 			continue
 		}
@@ -5032,6 +5033,9 @@ func findTargetDevice(serial string, devices []adb.Device) *adb.Device {
 func findTargetByIdentity(e DeviceEntry, devices []adb.Device) *adb.Device {
 	for i := range devices {
 		d := &devices[i]
+		if serial := deviceShortSerial(d); serial != "" && len(e.Serials) > 0 && !contains(e.Serials, serial) {
+			continue
+		}
 		if contains(e.Serials, d.Serial) || contains(e.Serials, d.Wireless) ||
 			addrInList(e.Addrs, d.Serial) || addrInList(e.Addrs, d.Wireless) {
 			return d
@@ -5064,42 +5068,34 @@ func deviceIdentity(d *adb.Device) string {
 // （不在档案 addrs 里）——精确失败后按 IP 回退到已有档案（active 优先），
 // 任意端口不再判新设备。精确匹配严格优先于 IP 回退。
 func (a *App) deviceEntry(d *adb.Device) (DeviceEntry, bool) {
-	if d == nil {
-		return DeviceEntry{}, false
-	}
-	if e, ok := a.profiles.Entry(d.Serial); ok {
-		return e, true
-	}
-	if d.Wireless != "" {
-		if e, ok := a.profiles.Entry(d.Wireless); ok {
-			return e, true
-		}
-	}
-	if IsIPPort(d.Serial) {
-		if k := a.profiles.ResolveKeyByIP(ipOfAddr(d.Serial)); k != "" {
-			if e, ok := a.profiles.Entry(k); ok {
-				return e, true
-			}
-		}
+	if key := a.profiles.DeviceKey(d); key != "" {
+		return a.profiles.Entry(key)
 	}
 	return DeviceEntry{}, false
 }
 
-// identityOf 取设备 identity：档案 marketname 优先（稳定）→ adb 富化回退链。
-// 弹窗"新设备"判定与会话绑定的判据统一走这里（同设备任一 transport 同 identity）。
+// Identity is always the immutable archive key; the name is resolved separately.
 func (a *App) identityOf(d *adb.Device) string {
-	if e, ok := a.deviceEntry(d); ok {
-		if e.Marketname != "" {
-			return e.Marketname
-		}
+	if d == nil {
+		return ""
 	}
-	return deviceIdentity(d)
+	if key := a.profiles.DeviceKey(d); key != "" {
+		return key
+	}
+	if strings.HasPrefix(d.Identity, "pending:") {
+		return d.Identity
+	}
+	serial := deviceShortSerial(d)
+	if serial == "" {
+		serial = d.Serial
+	}
+	return adb.IdentityKey("", "", "", serial)
 }
 
 // displayNameOf 设备展示名（市场名优先）：档案 marketname → adb marketname →
 // Name（富化名，marketname 优先、man+model 兜底）→ serial。
 // 弹窗文本必须用市场名：档案有 "REDMI K80" 而本轮 getprop 失败时，
-// Name 会是 "Xiaomi MODEL123"（厂商+型号），禁止拿它当弹窗文本。
+// Name 会是 "Xiaomi 12345TESTA"（厂商+型号），禁止拿它当弹窗文本。
 func (a *App) displayNameOf(d *adb.Device) string {
 	if e, ok := a.deviceEntry(d); ok {
 		if n := profileCardName(e, ""); n != "" {
@@ -5162,7 +5158,9 @@ func (a *App) hasSessionForDeviceLocked(d *adb.Device) bool {
 	id := a.identityOf(d)
 	for _, st := range a.sessions {
 		if st.cast.Serial == d.Serial || (d.Wireless != "" && st.cast.Serial == d.Wireless) {
-			return true
+			if id == "" || st.identity == "" || st.identity == id {
+				return true
+			}
 		}
 		if id != "" && st.identity != "" && st.identity == id {
 			return true
@@ -5250,6 +5248,8 @@ func (a *App) listProfiles() []ProfileItem {
 			item.Addrs = append(item.Addrs, e.Addrs[i].Addr)
 		}
 		switch {
+		case e.DisplayNameSet && e.DisplayName != "":
+			item.Name = e.DisplayName
 		case e.Marketname != "":
 			item.Name = e.Marketname
 		case e.Model != "":
@@ -5321,21 +5321,22 @@ func (a *App) snapshotRaw() Snapshot {
 		pair = &c
 	}
 	return Snapshot{
-		Version:    a.cfg.Version,
-		BatPath:    a.cfg.BatPath,
-		AdbOK:      a.adbOK,
-		AdbFailing: a.adbOK && a.adbFail > 0,     // 真空期去抖：可用但正在连续失败 → 前端"刷新中"软提示
-		Devices:    a.devicesWithAppBusyLocked(), // 二期：填充「应用」按钮枚举遮罩态（锁内）
-		Pending:    append([]PendingDevice{}, a.pending...),
-		Discovery:  disc,
-		Cast:       a.activeCastLocked(),
-		Sessions:   sessions,
-		Profiles:   a.listProfiles(),
-		DevOrder:   a.profiles.DeviceOrder(),
-		NewDevice:  a.popup.info,
-		PairStatus: pair,
-		AppWins:    a.appWinsListLocked(),
-		Settings:   a.settings.Get(), // 设置面板两个开关的当前值
+		Version:          a.cfg.Version,
+		BatPath:          a.cfg.BatPath,
+		AdbOK:            a.adbOK,
+		AdbFailing:       a.adbOK && a.adbFail > 0,     // 真空期去抖：可用但正在连续失败 → 前端"刷新中"软提示
+		Devices:          a.devicesWithAppBusyLocked(), // 二期：填充「应用」按钮枚举遮罩态（锁内）
+		Pending:          append([]PendingDevice{}, a.pending...),
+		Discovery:        disc,
+		Cast:             a.activeCastLocked(),
+		Sessions:         sessions,
+		Profiles:         a.listProfiles(),
+		DevOrder:         a.profiles.DeviceOrder(),
+		NewDevice:        a.popup.info,
+		PairStatus:       pair,
+		AppWins:          a.appWinsListLocked(),
+		ProfileSaveError: a.profiles.SaveError(),
+		Settings:         a.settings.Get(), // 设置面板两个开关的当前值
 	}
 }
 
@@ -5404,9 +5405,8 @@ func callerChain(skip int) string {
 }
 
 // StartCastParallel 并行会话启动入口（轮 B 目标 1【开始投屏】）：
-// 与 StartCast 同路径（NO_WATCH 已废弃——watcher 会话化后每会话独立
-// WATCH_TAG/flag/只关本会话 scrcpy，"对上才切"按市场名比对，并行会话各自
-// watcher 互不干扰，无需再禁用）。serial 无会话时创建新会话；
+// 与 StartCast 同路径：各会话订阅共享事件流，由完整设备串号确认身份，
+// 通过独立停止/路由事件只管理本会话客户端。serial 无会话时创建新会话；
 // 已有会话（同 serial/同 identity 活动会话）→ 返回错误"投屏已在运行"。
 func (a *App) StartCastParallel(serial string) error {
 	bridge.DebugLog("[app] StartCastParallel 进入 serial=%q 调用链=%s", serial, callerChain(1))
@@ -5450,11 +5450,15 @@ func (a *App) StartCast(serial string) error {
 		return errors.New("bat 桥接未初始化")
 	}
 	name := serial
-	target := findTargetDevice(serial, a.devices)
+	lookupKey := serial
+	if previous := a.sessions[serial]; previous != nil && previous.restarting && previous.identity != "" {
+		lookupKey = previous.identity
+	}
+	target := findTargetDevice(lookupKey, a.devices)
 	if target == nil {
 		// 卡片重键兜底：serial 可能是过期的旧键（会话启动后设备 USB/无线
 		// transport 切换 → 卡片 Serial 重键），按档案 identity（serials+addrs）再找一次
-		if e, ok := a.profiles.Entry(serial); ok {
+		if e, ok := a.profiles.Entry(lookupKey); ok {
 			target = findTargetByIdentity(e, a.devices)
 		}
 	}
@@ -5464,10 +5468,8 @@ func (a *App) StartCast(serial string) error {
 	identity := ""
 	if target != nil {
 		identity = a.identityOf(target)
-	} else if e, ok := a.profiles.Entry(serial); ok && e.Marketname != "" {
-		// 设备卡不在线（恢复期/结束态重投）：档案市场名兜底身份——
-		// 会话 identity 稳定，弹窗判重与防同设备双开会话不随轮询抖动
-		identity = e.Marketname
+	} else {
+		identity = a.profiles.ResolveKey(lookupKey)
 	}
 	// 同 identity 已有活动会话 → 拒绝（同一设备不能开两个会话）
 	if identity != "" {
@@ -5498,20 +5500,26 @@ func (a *App) StartCast(serial string) error {
 		}
 	}
 	if nativeRes == "" {
-		if e, ok := a.profiles.Entry(serial); ok {
+		profileKey := identity
+		if profileKey == "" {
+			profileKey = serial
+		}
+		if e, ok := a.profiles.Entry(profileKey); ok {
 			nativeRes = e.Res
 		}
 	}
 
-	// NO_WATCH 已废弃（watcher 会话化后不再需要）：普通/并行会话一律注入
-	// SCEZ_WATCH_TAG（每会话独立 watcher），不再生成 SCEZ_NO_WATCH=1——
-	// watcher 按 WATCH_TAG/flag 隔离 + 市场名"对上才切"，并行会话互不干扰，
-	// 插线切换对每个会话都生效（v3 修复"插线不切有线"）。
+	// 普通/并行会话均使用独立 SCEZ_WATCH_TAG 标识停止/路由事件；
+	// 监督器按完整设备串号核验路由，插拔线事件对各会话分别生效。
 
 	// 参数装配：参数浮窗保存后的覆盖（按 serial）+ 档案自定义记忆（按模式独立注入）
 	params := a.nextParams[serial]
 	delete(a.nextParams, serial)
-	p := a.profiles.Get(serial)
+	profileKey := identity
+	if profileKey == "" {
+		profileKey = serial
+	}
+	p := a.profiles.Get(profileKey)
 	// v2.1.79：锁定态也需注入（锁定=固定当前生效值，值随注入传给 bat）。
 	if !params.Usb.Set && (p.Usb.Custom || p.Usb.LockFps || p.Usb.LockBitrate) {
 		params.Usb = bridge.ModeParams{Res: p.Usb.Res, FPS: p.Usb.FPS, Bitrate: p.Usb.Bitrate, Set: true,
@@ -5538,8 +5546,9 @@ func (a *App) StartCast(serial string) error {
 	params.OverlayVisible = ov
 	params.OverlayVisibleSet = true
 	// 主投屏与应用投屏使用相同的稳定身份与当前档案地址。
-	locked := a.deviceLockParams(serial, a.devices)
+	locked := a.deviceLockParams(lookupKey, a.devices)
 	params.Serial, params.Addr, params.Addr2 = locked.Serial, locked.Addr, locked.Addr2
+	params.ExpectedSerial = locked.ExpectedSerial
 	params.Market, params.Model = locked.Market, locked.Model
 	tlsFlag := params.Addr != "" && isTlsFormAddr(params.Addr)
 
@@ -5583,10 +5592,11 @@ func (a *App) StartCast(serial string) error {
 			Log:       []string{},
 			ExitCode:  -1,
 		},
-		runner:     r,
-		lastLineAt: time.Now(), // 无输出提示计时从启动开始
-		startedAt:  startedAt,
-		identity:   identity,
+		runner:        r,
+		lastLineAt:    time.Now(), // 无输出提示计时从启动开始
+		startedAt:     startedAt,
+		identity:      identity,
+		identityCheck: a.wirelessIdentityChecks[params.Addr],
 		// gui43：保存注入参数，供 pollOnce 按 adb 实时事实选举实际 transport。
 		castAddr:  params.Addr,
 		castAddr2: params.Addr2,
@@ -5613,6 +5623,7 @@ func (a *App) StartCast(serial string) error {
 		locked := a.appWinLockParams(serial)
 		params.Serial, params.Addr, params.Addr2 = locked.Serial, locked.Addr, locked.Addr2
 		params.Market, params.Model = locked.Market, locked.Model
+		params.ExpectedSerial = locked.ExpectedSerial
 		a.mu.Lock()
 		if st := a.sessions[serial]; st != nil && st.runner == r {
 			st.castAddr, st.castAddr2, st.usbSerial = params.Addr, params.Addr2, params.Serial
@@ -6237,15 +6248,14 @@ func (a *App) completePairFlowAfterConnect(ctx context.Context, p PendingDevice,
 			identity = byIP
 		}
 	}
-	if hintSerial == "" || identity == "" {
-		if byIP := a.profiles.ResolveKeyByIP(ip); byIP != "" {
-			identity = byIP
-		}
-	}
 	if identity == "" {
 		identity = adb.IdentityKey(marketname, manufacturer, model, ip+":"+connPort)
 	}
-	a.profiles.PairArchive(identity, hintSerial, ip+":"+connPort, guid, marketname, model)
+	if err := a.profiles.PairArchive(identity, hintSerial, ip+":"+connPort, guid, marketname, model); err != nil {
+		a.setPairFailed(PairErrInternal, "设备已连接，但档案保存失败："+err.Error(), devKey, ip)
+		return
+	}
+	identity = a.profiles.ResolveKey(hintSerial)
 
 	// ⑥ 结果：成功设备卡（含 TLS 形态）；待配对卡即时移除（下一轮 mDNS 重扫前不再出现）
 	d := &adb.Device{
@@ -6257,6 +6267,7 @@ func (a *App) completePairFlowAfterConnect(ctx context.Context, p PendingDevice,
 		Manufacturer: manufacturer,
 		Model:        model,
 		Identity:     identity,
+		StableSerial: hintSerial,
 		Tls:          true,
 		WirelessForm: ModeTls,
 	}
@@ -6401,29 +6412,30 @@ func serialFromMdnsServices(svcs []discovery.MdnsService, addr string) (serial, 
 	if addr == "" {
 		return "", ""
 	}
-	ip := ipOfAddr(addr)
-	fallback := -1
-	for i := range svcs {
-		s := svcs[i]
-		if s.Addr == "" || s.Mode == discovery.MdnsModePairing {
-			continue
+	for _, exact := range []bool{true, false} {
+		serial, guid = "", ""
+		for _, sv := range svcs {
+			if sv.Mode == discovery.MdnsModePairing || sv.Addr == "" {
+				continue
+			}
+			if exact && sv.Addr != addr || !exact && ipOfAddr(sv.Addr) != ipOfAddr(addr) {
+				continue
+			}
+			id := SerialFromServiceName(sv.Name)
+			if id == "" {
+				continue
+			}
+			if serial != "" && serial != id {
+				return "", ""
+			}
+			serial = id
+			if sv.Mode == discovery.MdnsModeTls {
+				guid = sv.Name
+			}
 		}
-		if s.Addr != addr && (ip == "" || ipOfAddr(s.Addr) != ip) {
-			continue
+		if serial != "" {
+			return serial, guid
 		}
-		id := SerialFromServiceName(s.Name)
-		if id == "" {
-			continue
-		}
-		if s.Mode == discovery.MdnsModeTls {
-			return id, s.Name
-		}
-		if fallback < 0 || s.Addr == addr {
-			fallback = i
-		}
-	}
-	if fallback >= 0 {
-		return SerialFromServiceName(svcs[fallback].Name), ""
 	}
 	return "", ""
 }
@@ -6461,7 +6473,15 @@ func (a *App) readDeviceSerials(ctx context.Context, addr string) []string {
 			add(s)
 		}
 	}
-	if a.pairOps.serialFn != nil {
+	if len(out) == 0 && a.pairOps.getpropFn != nil && ctx.Err() == nil {
+		cctx, cancel := context.WithTimeout(ctx, serialReadTimeout)
+		s, err := a.pairOps.getpropFn(cctx, addr, "ro.boot.serialno")
+		cancel()
+		if err == nil {
+			add(s)
+		}
+	}
+	if a.pairOps.serialFn != nil && ctx.Err() == nil {
 		cctx, cancel := context.WithTimeout(ctx, serialReadTimeout)
 		s, err := a.pairOps.serialFn(cctx, addr)
 		cancel()
@@ -6655,7 +6675,17 @@ func (a *App) NotifyLineFor(serial string, r Runner, line string) {
 		if st == nil || (r != nil && st.runner != r) {
 			return
 		}
-		a.applyEventLocked(st, bridge.ClassifyLine(line))
+		ev := bridge.ClassifyLine(line)
+		a.applyEventLocked(st, ev)
+		if st.cast.Active && (ev.Kind == bridge.KindWifiOK || ev.Kind == bridge.KindTexture) {
+			previous := st.identity
+			st.identity = a.bindPendingCastIdentityLocked(st.identity, &st.identityCheck, st.castAddr)
+			if st.identity != previous && st.cast.Spec != nil && !st.cast.Spec.Custom {
+				spec := st.cast.Spec
+				a.updateBaseline(st.identity, st.cast.Mode, Baseline{Res: spec.MaxSize, FPS: spec.FPS, Bitrate: spec.Mbps})
+			}
+			a.retryWirelessIdentityLocked(st.identityCheck)
+		}
 	})
 }
 
@@ -6695,7 +6725,7 @@ func (a *App) applyEventLocked(st *sessionState, ev bridge.Event) {
 	}
 
 	// 输入状态机：仅展示——解析到 prompt 显示菜单按钮（会话级操作，不写 stdin）
-	if ev.Kind == bridge.KindPrompt {
+	if ev.Kind == bridge.KindPrompt || ev.Kind == bridge.KindRetryWait {
 		c.WaitingInput = true
 		c.Prompt = ev.Prompt
 	} else if ev.Kind != bridge.KindNone {
@@ -6707,6 +6737,9 @@ func (a *App) applyEventLocked(st *sessionState, ev bridge.Event) {
 	switch ev.Kind {
 	case bridge.KindPrompt:
 		// 保留 prompt，不覆盖 phase
+	case bridge.KindRetryWait:
+		c.Phase, c.PhaseText = ev.Kind.String(), "连续投屏失败，等待连接变化或重新投屏"
+		c.Spec = nil
 	case bridge.KindSpec:
 		// 新规格行到达即整体替换旧规格（有线/无线分支都从这里刷新）；
 		// 同时记录当前投屏模式（参数浮窗按此自动定位有线/无线参数套）。
@@ -6723,7 +6756,11 @@ func (a *App) applyEventLocked(st *sessionState, ev bridge.Event) {
 			}
 			// bat 自动规格行 → 更新该设备该模式的动态默认值（[custom] 回显不更新）
 			if !ev.Spec.Custom {
-				a.updateBaseline(c.Serial, c.Mode, Baseline{Res: ev.Spec.MaxSize, FPS: ev.Spec.FPS, Bitrate: ev.Spec.Mbps})
+				key := st.identity
+				if key == "" {
+					key = c.Serial
+				}
+				a.updateBaseline(key, c.Mode, Baseline{Res: ev.Spec.MaxSize, FPS: ev.Spec.FPS, Bitrate: ev.Spec.Mbps})
 			}
 		}
 	case bridge.KindTexture:
@@ -6743,6 +6780,7 @@ func (a *App) applyEventLocked(st *sessionState, ev bridge.Event) {
 		st.closing = false
 		st.stopping = false
 		c.Spec = nil
+		c.LastError = ""
 		if txt, ok := phaseText(ev.Kind); ok {
 			c.Phase, c.PhaseText = ev.Kind.String(), txt
 		}
@@ -6812,17 +6850,8 @@ func (a *App) OnBatExitFor(serial string, r Runner, code int) {
 		st.closing = false  // "正在关闭…"同样由 bat 退出统一复位
 		st.runner = nil     // 允许该 serial 下次投屏
 		st.endedAt = time.Now()
-		// gui38：bat 退出（最后投屏会话退出时 :adb_cleanup kill-server）→
-		// 立即恢复无线探测，不等下一轮 15s 节流，缩短离线窗口。
-		// 锁内只发异步 goroutine：ForceDiscover 自取锁，不能在 mu 持有时直接调。
-		// gui40：bat 退出 → stop 进程兜底 kill-server 还有 ~2s 才执行（实测
-		// [exit] → [stop] adbserver）——立即 ForceDiscover 时设备仍显示在线、
-		// 候选为空=空跑。延迟 2s 后设备已断，OfflineCandidateAddrs 才返回真实
-		// 离线设备 → 探测真正起飞。
-		go a.guard("post-cast-recover", func() {
-			time.Sleep(2 * time.Second)
-			a.ForceDiscover()
-		})
+		// Event workers never reset the shared ADB server on session exit.
+		// Transport recovery belongs to the raw event stream, not a delayed list.
 	})
 }
 
@@ -6931,14 +6960,13 @@ func (a *App) promptTick() {
 
 // --- 会话级操作（Stop / Restart / Reset / Forget） ---
 
-// StopCast 停止指定会话（杀 bat 进程树）。幂等：会话不存在/已结束时静默成功。
+// StopCast 停止指定会话（信号通知正常退出，超时清理本会话进程树）。幂等：会话不存在/已结束时静默成功。
 // serial 可直查；卡片重键后按 identity 兜底定位。
 // 状态反馈（"正在终止…"）：受理即置 stopping=true 并透传 Snapshot（前端按钮立即
 // 变禁用态）；bat 退出后 OnBatExitFor 统一复位；Stop 报错复位（可重试）；
 // Stop 成功但 bat 超时未退出 → stopResetTimeout 兜底复位（会话状态不变）。
-// 性能（gui5 修复）：杀树链路（taskkill /F /T + powershell 残余枚举 +
-// 兜底 kill-server，约 1-2s）在 goroutine 异步执行——webview RPC 回调在 GUI
-// 主线程，同步执行会冻结消息循环（"点停止卡一下"）。受理即返回 nil，
+// 停止和超时兜底在 goroutine 异步执行——webview RPC 回调在 GUI
+// 主线程，同步等待会冻结消息循环。受理即返回 nil，
 // 前端靠快照轮询（~700ms）拿 stopping/报错复位，无需新推送机制。
 func (a *App) StopCast(serial string) error {
 	a.mu.Lock()
@@ -7128,7 +7156,9 @@ func mainAudioMode(a string) string {
 //   - 默认码率 60M，无线=bat 固定档 1920/60/15M；
 //   - 未自定义时 Res/FPS/Bitrate 跟随 baseline（浮窗默认显示与重置都回这里）。
 func (a *App) effectiveProfile(serial string) DeviceProfile {
-	p := a.profiles.Get(serial)
+	lookupKey := a.profileKeyForSession(serial)
+	key := a.appListKeyFor(lookupKey)
+	p := a.profiles.Get(key)
 
 	a.mu.RLock()
 	devices := append([]adb.Device{}, a.devices...)
@@ -7136,8 +7166,13 @@ func (a *App) effectiveProfile(serial string) DeviceProfile {
 
 	if p.Usb.Baseline.Res == 0 {
 		long, fps := 2560, 120
+		if e, ok := a.profiles.Entry(key); ok {
+			if v := ParseLongEdge(e.Res); v > 0 {
+				long = v
+			}
+		}
 		for _, d := range devices {
-			if d.Serial == serial {
+			if a.identityOf(&d) == key {
 				if v := ParseLongEdge(d.Res); v > 0 {
 					long = v
 				}
@@ -7207,7 +7242,7 @@ func (a *App) saveProfileOnly(serial, mode string, res, fps, bitrate int, custom
 		mp.Baseline = p.Usb.Baseline
 		p.Usb = mp
 	}
-	return a.profiles.Save(serial, p)
+	return a.profiles.Save(a.profileKeyForSession(serial), p)
 }
 
 // SaveProfileAndRestart 参数浮窗保存：写入该设备该模式的参数档，

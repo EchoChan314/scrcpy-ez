@@ -10,6 +10,10 @@
 #include "events.h"
 #include "fps_overlay.h"
 #include "input_manager.h"
+#include "clipboard_sync.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "util/log.h"
 #include "util/str.h"
 #include "util/thread.h"
@@ -63,6 +67,7 @@ sc_receiver_init(struct sc_receiver *receiver, sc_socket control_socket,
     }
 
     receiver->control_socket = control_socket;
+    receiver->clipboard_pc_sequence = 0;
     receiver->acksync = NULL;
     receiver->uhid_devices = NULL;
 
@@ -82,7 +87,14 @@ static void
 task_set_clipboard(void *userdata) {
     assert(sc_thread_is_main());
 
-    char *text = userdata;
+    struct sc_device_msg *msg = userdata;
+    char *text = msg->clipboard.text;
+#ifdef _WIN32
+    if (sc_clipboard_sync_receive_text(text, msg->clipboard_revision, msg->clipboard_pc_sequence)) {
+        sc_input_manager_mark_clipboard_reverse_sync();
+        LOGI("Device clipboard snapshot applied");
+    }
+#else
 
     char *current = SDL_GetClipboardText();
     bool same = current && !strcmp(current, text);
@@ -101,7 +113,9 @@ task_set_clipboard(void *userdata) {
         }
     }
 
+#endif
     free(text);
+    free(msg);
 }
 
 static void
@@ -109,6 +123,17 @@ task_set_image_clipboard(void *userdata) {
     assert(sc_thread_is_main());
 
     struct sc_device_msg *msg = userdata;
+#ifdef _WIN32
+    if (sc_clipboard_sync_receive_image(msg->image_clipboard.mimetype,
+            msg->image_clipboard.data, msg->image_clipboard.size,
+            msg->clipboard_revision, msg->clipboard_pc_sequence)) {
+        sc_input_manager_mark_clipboard_reverse_sync();
+        LOGI("Device image clipboard snapshot applied (%u bytes)", msg->image_clipboard.size);
+    }
+    sc_device_msg_destroy(msg);
+    free(msg);
+    return;
+#endif
 
     struct sc_image_clipboard_data *image_data =
         malloc(sizeof(struct sc_image_clipboard_data));
@@ -173,14 +198,21 @@ task_set_abr_state(void *userdata) {
 static void
 process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
     switch (msg->type) {
+        case DEVICE_MSG_TYPE_CLIPBOARD_SNAPSHOT:
+        case DEVICE_MSG_TYPE_IMAGE_CLIPBOARD_SNAPSHOT:
+            // The deserializer normalizes versioned snapshots above.
+            assert(false);
+            return;
         case DEVICE_MSG_TYPE_CLIPBOARD: {
-            // Take ownership of the text (do not destroy the msg)
-            char *text = msg->clipboard.text;
+            struct sc_device_msg *copy = malloc(sizeof(*copy));
+            if (!copy) { sc_device_msg_destroy(msg); return; }
+            *copy = *msg; // transfer ownership, avoid an extra large copy
 
-            bool ok = sc_run_on_main_thread(task_set_clipboard, text, false);
+            bool ok = sc_run_on_main_thread(task_set_clipboard, copy, false);
             if (!ok) {
                 LOGW("Could not post clipboard to main thread");
-                free(text);
+                sc_device_msg_destroy(copy);
+                free(copy);
                 return;
             }
 
@@ -195,28 +227,7 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
                 return;
             }
 
-            msg_copy->type = DEVICE_MSG_TYPE_IMAGE_CLIPBOARD;
-            msg_copy->image_clipboard.data = malloc(msg->image_clipboard.size);
-            if (!msg_copy->image_clipboard.data) {
-                LOG_OOM();
-                free(msg_copy);
-                sc_device_msg_destroy(msg);
-                return;
-            }
-            memcpy(msg_copy->image_clipboard.data, msg->image_clipboard.data, msg->image_clipboard.size);
-            msg_copy->image_clipboard.size = msg->image_clipboard.size;
-
-            // Duplicate the mimetype string
-            size_t mimetype_len = strlen(msg->image_clipboard.mimetype);
-            msg_copy->image_clipboard.mimetype = malloc(mimetype_len + 1);
-            if (!msg_copy->image_clipboard.mimetype) {
-                LOG_OOM();
-                free(msg_copy->image_clipboard.data);
-                free(msg_copy);
-                sc_device_msg_destroy(msg);
-                return;
-            }
-            strcpy(msg_copy->image_clipboard.mimetype, msg->image_clipboard.mimetype);
+            *msg_copy = *msg; // take ownership without copying the payload
 
             bool ok = sc_run_on_main_thread(task_set_image_clipboard, msg_copy, false);
             if (!ok) {
@@ -224,17 +235,17 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
                 free(msg_copy->image_clipboard.data);
                 free(msg_copy->image_clipboard.mimetype);
                 free(msg_copy);
-                sc_device_msg_destroy(msg);
                 return;
             }
 
-            // The original message buffers are not transferred (a copy was
-            // posted to the main thread), so destroy them here
-            sc_device_msg_destroy(msg);
+            // Buffers were transferred to the main-thread task.
 
             break;
         }
         case DEVICE_MSG_TYPE_ACK_CLIPBOARD:
+#ifdef _WIN32
+            if (sc_clipboard_sync_ack(msg->ack_clipboard.sequence)) { break; }
+#endif
             LOGD("Ack device clipboard sequence=%" PRIu64_,
                  msg->ack_clipboard.sequence);
 
@@ -338,10 +349,16 @@ process_msgs(struct sc_receiver *receiver, const uint8_t *buf, size_t len) {
             return head;
         }
 
+        msg.clipboard_pc_sequence = receiver->clipboard_pc_sequence;
+
         process_msg(receiver, &msg);
         // the device msg must be destroyed by process_msg()
 
         head += r;
+        // Next complete message in a burst starts from the current PC state.
+#ifdef _WIN32
+        receiver->clipboard_pc_sequence = GetClipboardSequenceNumber();
+#endif
         assert(head <= len);
         if (head == len) {
             return head;
@@ -400,6 +417,10 @@ run_receiver(void *data) {
             // device disconnected: keep error=false
             break;
         }
+
+#ifdef _WIN32
+        if (!head) { receiver->clipboard_pc_sequence = GetClipboardSequenceNumber(); }
+#endif
 
         head += r;
         ssize_t consumed = process_msgs(receiver, buf, head);

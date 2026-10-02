@@ -21,7 +21,7 @@ func fix2Seed(a *App, addr string) {
 }
 
 func fix2Addr(a *App, addr string) *AddrEntry {
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		return nil
 	}
@@ -79,7 +79,7 @@ func TestGui48Mdns5ColdSearchAllAddrs(t *testing.T) {
 	if len(got) != 2 || !(contains(got, "192.0.2.197:5555") && contains(got, "192.0.2.197:45005")) {
 		t.Fatalf("冷启动应全量搜索全部地址（含 TLS 随机端口）: %v", got)
 	}
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if ae := gui24FindAddr(e, "192.0.2.197:5555"); ae == nil || ae.State != AddrStateActive || ae.Stale {
 		t.Fatalf("冷启动 5555 connect 成功应 active: %+v", ae)
 	}
@@ -102,7 +102,7 @@ func TestGui48Mdns5ColdSearchFailureStale(t *testing.T) {
 	}
 
 	a.coldSearch5555(context.Background())
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	ae := gui24FindAddr(e, "192.0.2.197:5555")
 	if ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("冷启动 connect 失败应 stale（gui52fix4 硬事实降级）: %+v", ae)
@@ -149,7 +149,7 @@ func TestGui48Mdns5WirelessIPFilled(t *testing.T) {
 		t.Fatalf("WirelessIP 应填档案 active 排序地址: %+v", devs[0])
 	}
 
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:45005")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:45005")
 	devs = []adb.Device{
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
 			Marketname: "REDMI K80", Identity: "REDMI K80"},

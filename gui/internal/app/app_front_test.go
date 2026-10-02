@@ -95,7 +95,7 @@ func TestFrontCandidateSerials(t *testing.T) {
 // → 与 scrcpy 命令行匹配。
 func TestFrontCandidateSerialsProfileAddrs(t *testing.T) {
 	profiles := map[string]*DeviceEntry{
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789",
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C",
 			[]string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	}
 	entryOf := entryOfMap(profiles)

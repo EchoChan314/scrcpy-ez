@@ -38,6 +38,7 @@ const (
 	KindPrompt
 	KindTexture    // scrcpy-server INFO: Texture: WxH（真实纹理尺寸，徽标优先数据源）
 	KindVDCreating // [窗口] 虚拟屏 ...（应用窗口虚拟屏启动步骤；主投屏不产生此事件）
+	KindRetryWait  // 连续失败预算耗尽，等待本设备事件或手动重投
 )
 
 // PromptKind 表示 bat 正在等待的 stdin 输入类型（choice/pause）。
@@ -102,6 +103,8 @@ func (k Kind) String() string {
 		return "texture"
 	case KindVDCreating:
 		return "vd-creating"
+	case KindRetryWait:
+		return "retry-wait"
 	default:
 		return "none"
 	}
@@ -301,6 +304,8 @@ func ClassifyLine(line string) Event {
 		ev.Kind = KindWatchOn
 	case strings.Contains(t, "检测到 USB 插线，切换至有线投屏"):
 		ev.Kind = KindSwitchUSB
+	case strings.Contains(t, "SCRCPY_EZ_ROUTE_SWITCH") || strings.Contains(t, "[自动切换] 启动 ") || strings.Contains(t, "[自动切换] 切换至 "):
+		ev.Kind = KindReconnect
 	case strings.Contains(t, "检测到连接断开"):
 		ev.Kind = KindReconnect
 	case strings.Contains(t, "SCRCPY_EZ_USER_CLOSE"):
@@ -312,8 +317,10 @@ func ClassifyLine(line string) Event {
 		ev.Kind = KindDone
 	case strings.Contains(t, "已离线，投屏连接已断开") || strings.Contains(t, "退出投屏循环"):
 		ev.Kind = KindOfflineExit
-	case strings.Contains(t, "[失败]"):
+	case strings.Contains(t, "[失败]") || strings.HasPrefix(t, "[错误]"):
 		ev.Kind = KindError
+	case t == "SCRCPY_EZ_RETRY_WAIT" || t == "[提示] 本次连接连续失败，等待设备状态变化或手动重投":
+		ev.Kind, ev.Prompt = KindRetryWait, PromptRetryQR
 	}
 
 	// choice / pause 提示行（等待 stdin 输入）

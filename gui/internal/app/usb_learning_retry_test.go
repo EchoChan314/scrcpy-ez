@@ -18,6 +18,7 @@ func learningTestApp(t *testing.T) (*App, adb.Device) {
 	t.Cleanup(a.Close)
 	d := adb.Device{Serial: "TEST0930", State: "device", ConnType: "usb", Marketname: "DIAG PHONE", Identity: "DIAG PHONE"}
 	a.profiles.SyncDevices([]adb.Device{d})
+	d.Identity = a.profiles.ResolveKey(d.Serial)
 	a.lastTrack = []adb.Device{d}
 	a.appListBusy[d.Identity] = time.Now() // 本组只测试学习，不启动应用枚举
 	a.teachOps.getpropFn = func(context.Context, string, string) (string, error) { return "0", nil }
@@ -160,7 +161,7 @@ func TestWirelessLearningReportsPersistenceError(t *testing.T) {
 func TestMdnsAddressSurvivesOldSnapshotAndBothLaunches(t *testing.T) {
 	a, f := newTestApp()
 	t.Cleanup(a.Close)
-	const identity, serial = "DIAG PHONE", "TEST0930"
+	const identity, serial = "device:TEST0930", "TEST0930"
 	const oldAddr, newAddr = "192.0.2.10:41000", "192.0.2.20:42000"
 	a.profiles.SyncDevices([]adb.Device{{Serial: serial, State: "device", ConnType: "usb", Marketname: identity}})
 	a.profiles.AddrSuccessMode(identity, oldAddr, ModeTls)
@@ -187,13 +188,13 @@ func TestMdnsAddressSurvivesOldSnapshotAndBothLaunches(t *testing.T) {
 func TestOldSessionAliasDoesNotHijackReusedDHCPAddress(t *testing.T) {
 	a, _ := learningTestApp(t)
 	const oldAddr, newAddr = "192.0.2.10:41000", "192.0.2.20:42000"
-	a.profiles.AddrSuccessMode("DIAG PHONE", oldAddr, ModeTls)
+	a.profiles.AddrSuccessMode("device:TEST0930", oldAddr, ModeTls)
 	a.profiles.MatchMdnsModes([]MdnsMatch{{Name: "adb-TEST0930-AbCdEf", Addr: newAddr, Mode: discovery.MdnsModeTls}})
-	a.profiles.SyncDevices([]adb.Device{{Serial: oldAddr, State: "device", ConnType: "wifi", Marketname: "OTHER PHONE", Model: "other"}})
-	if got := a.profiles.ResolveKey(oldAddr); got != "OTHER PHONE" {
+	a.profiles.SyncDevices([]adb.Device{{Serial: oldAddr, State: "device", ConnType: "wifi", Marketname: "OTHER PHONE", Model: "other", StableSerial: "OTHER_SERIAL"}})
+	if got := a.profiles.ResolveKey(oldAddr); got != "device:OTHER_SERIAL" {
 		t.Fatalf("current DHCP owner must override session alias: %s", got)
 	}
-	if a.wirelessStartAddr("DIAG PHONE") != newAddr {
+	if a.wirelessStartAddr("device:TEST0930") != newAddr {
 		t.Fatal("DHCP reuse corrupted original device")
 	}
 }

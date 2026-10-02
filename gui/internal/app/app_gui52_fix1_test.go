@@ -23,7 +23,7 @@ func TestGui55PairSerialUnknownRefusesArchive(t *testing.T) {
 	// 已配对档案：serial + tlsGuid + 同 IP 的 5555/旧 TLS 地址
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "MODEL789",
+		Model:      "25091RP04C",
 		Serials:    []string{"TEST0002"},
 		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
@@ -71,7 +71,7 @@ func TestGui55PairSerialUnknownRefusesArchive(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("短号学不到时不得新建档案: %v", entries)
 	}
-	e, ok := entries["Xiaomi Pad 8 Pro"]
+	e, ok := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if !ok {
 		t.Fatalf("主档案应保留: %v", entries)
 	}
@@ -120,7 +120,7 @@ func TestGui55PairClaimMergesIncompleteProfileByIP(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("残缺档案应被认领并入，不得新建第二档: %v", entries)
 	}
-	e, ok := entries["REDMI K80"]
+	e, ok := entries[fixtureEntriesKey(entries, "REDMI K80")]
 	if !ok {
 		t.Fatalf("主档案应保留（按 IP 认领）: %v", entries)
 	}
@@ -139,7 +139,7 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui15Seed(a.profiles, "Xiaomi Pad 8 Pro", &DeviceEntry{
 		Marketname: "Xiaomi Pad 8 Pro",
-		Model:      "MODEL789",
+		Model:      "25091RP04C",
 		Serials:    []string{"TEST0002"},
 		TlsGuid:    "adb-TEST0002-KWqpio",
 		Addrs: []AddrEntry{
@@ -170,7 +170,7 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "MODEL789", nil
+			return "25091RP04C", nil
 		}
 		return "", nil
 	}
@@ -184,17 +184,17 @@ func TestGui52Fix1PairKnownSerialBehaviorUnchanged(t *testing.T) {
 	waitPairPhase(t, a, PairPhaseSuccess)
 
 	waitFor(t, 3*time.Second, func() bool {
-		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 		return ok && gui50Fix45EntryHasAddr(e, "192.0.2.183:38167", ModeTls)
 	}, "TLS 地址应归并完成")
 	entries := a.profiles.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("hintSerial 正常时行为不应变化: %v", entries)
 	}
-	if _, ok := entries["192.0.2.183:38167"]; ok {
+	if _, ok := entries[fixtureEntriesKey(entries, "192.0.2.183:38167")]; ok {
 		t.Fatalf("不应出现 IP:port 键档案: %v", entries)
 	}
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if e.TlsGuid != "adb-TEST0002-Ab12Cd" {
 		t.Fatalf("tlsGuid 应更新: %+v", e)
 	}
@@ -213,7 +213,7 @@ func TestGui52Fix1LoadCleansOrphanIPPortArchive(t *testing.T) {
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "model": "MODEL789",
+      "model": "25091RP04C",
       "serials": ["TEST0002"],
       "tlsGuid": "adb-TEST0002-KWqpio",
       "addrs": [
@@ -234,10 +234,10 @@ func TestGui52Fix1LoadCleansOrphanIPPortArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := s.Entries()
-	if _, ok := entries["192.0.2.183:38167"]; ok {
+	if _, ok := entries[fixtureEntriesKey(entries, "192.0.2.183:38167")]; ok {
 		t.Fatalf("孤儿 IP:port 键应被删除: %v", entries)
 	}
-	main, ok := entries["Xiaomi Pad 8 Pro"]
+	main, ok := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if !ok {
 		t.Fatalf("主档案应保留: %v", entries)
 	}
@@ -303,7 +303,7 @@ func TestGui52Fix1LoadKeepsOrphanWithoutSameIPMain(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := s.Entries()
-	if _, ok := entries["192.0.2.184:38167"]; !ok {
+	if _, ok := entries[fixtureEntriesKey(entries, "192.0.2.184:38167")]; !ok {
 		t.Fatalf("无同 IP 主档案的孤儿应保留: %v", entries)
 	}
 	if len(entries) != 2 {
@@ -330,8 +330,8 @@ func TestGui52Fix1ResolveKeyByIPActivePriority(t *testing.T) {
 	}
 	// 全 stale 时仍有确定性命中
 	s.mu.Lock()
-	s.data.Devices["ActiveDevice"].Addrs[0].State = AddrStateStale
-	s.data.Devices["ActiveDevice"].Addrs[0].Stale = true
+	s.data.Devices[fixtureArchiveKeyLocked(s, "ActiveDevice")].Addrs[0].State = AddrStateStale
+	s.data.Devices[fixtureArchiveKeyLocked(s, "ActiveDevice")].Addrs[0].Stale = true
 	s.mu.Unlock()
 	if got := s.ResolveKeyByIP("192.0.2.183"); got == "" {
 		t.Fatal("无 active 时 stale 档案仍应按 IP 命中")

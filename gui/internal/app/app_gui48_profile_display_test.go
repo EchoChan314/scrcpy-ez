@@ -55,7 +55,7 @@ func TestGui48ProfileDisplayAllStaleNoTls(t *testing.T) {
 		{Addr: "192.0.2.99:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip},
 		{Addr: "192.0.2.99:35263", State: AddrStateStale, LastOk: 200, Mode: ModeTls, Stale: true},
 	})
-	a.profiles.MarkAddrStale("Xiaomi Pad 8 Pro", "192.0.2.99:5555")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.99:5555")
 	devs := profileDisplayCard()
 	a.decorateTls(devs)
 	if devs[0].Tls || devs[0].WirelessForm != "" {

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"scrcpy-ez/gui/internal/deviceevents"
 )
 
 // Device 是设备列表中的一个条目。
@@ -23,20 +25,22 @@ import (
 // 不做方向检测——主人拍板）；WirelessRes 是按 bat 无线档（--max-size 1920）
 // 等比换算的无线投屏分辨率（同样宽≥高），仅无线卡片展示（无线固定 60fps）。
 type Device struct {
-	Serial       string `json:"serial"`
-	State        string `json:"state"`    // device / unauthorized / offline
-	ConnType     string `json:"connType"` // usb / wifi / other
-	Name         string `json:"name"`     // 展示名：市场名，回退 厂商+型号，再回退序列号
-	Model        string `json:"model"`
-	Marketname   string `json:"marketname"`   // ro.product.marketname（设备档案 identity 主键来源）
-	Manufacturer string `json:"manufacturer"` // ro.product.manufacturer（identity 回退来源）
-	Identity     string `json:"identity"`     // 设备档案 identity（IdentityKey 规则）
-	Wireless     string `json:"wireless"`     // 同设备无线地址（USB+无线并存时），否则为空
-	WirelessIP   string `json:"wirelessIP"`   // 前端副行显示用无线地址（档案 active 排序取；无 active 为空）
-	WirelessRes  string `json:"wirelessRes"`  // 无线投屏分辨率（长边 1920 等比换算），未知为空
-	Battery      int    `json:"battery"`      // 0 表示未知
-	Res          string `json:"res"`          // 原生分辨率，宽≥高（大数字在前），未知为空
-	FPS          int    `json:"fps"`          // 0 表示未知
+	Serial        string `json:"serial"`
+	State         string `json:"state"`    // device / unauthorized / offline
+	ConnType      string `json:"connType"` // usb / wifi / other
+	Name          string `json:"name"`     // 展示名：市场名，回退 厂商+型号，再回退序列号
+	Model         string `json:"model"`
+	Marketname    string `json:"marketname"`              // ro.product.marketname（展示信息）
+	Manufacturer  string `json:"manufacturer"`            // ro.product.manufacturer（展示信息）
+	Identity      string `json:"identity"`                // 设备档案 identity（IdentityKey 规则）
+	IdentityEpoch uint64 `json:"identityEpoch,omitempty"` // current online connection token for provisional operations
+	StableSerial  string `json:"stableSerial,omitempty"`  // 已确认完整短号；空值不会清除档案身份
+	Wireless      string `json:"wireless"`                // 同设备无线地址（USB+无线并存时），否则为空
+	WirelessIP    string `json:"wirelessIP"`              // 前端副行显示用无线地址（档案 active 排序取；无 active 为空）
+	WirelessRes   string `json:"wirelessRes"`             // 无线投屏分辨率（长边 1920 等比换算），未知为空
+	Battery       int    `json:"battery"`                 // 0 表示未知
+	Res           string `json:"res"`                     // 原生分辨率，宽≥高（大数字在前），未知为空
+	FPS           int    `json:"fps"`                     // 0 表示未知
 	// Tls = 该设备有 TLS 无线形态可用（档案 mode=tls 地址 / mDNS tls 服务在播）。
 	// WirelessForm = 档案记录的最新无线形态（tls/tcpip/空），前端"已入档"副行标注用。
 	Tls          bool   `json:"tls"`
@@ -50,13 +54,14 @@ type Device struct {
 	// 的「连接中…」遮罩卡为 true；前端据此区分拔线遮罩（wifi+connecting→断开中…）
 	// 与配对遮罩（wifi+connecting+pairing→连接中…）。
 	Pairing bool `json:"pairing,omitempty"`
-	// AppBusy = 应用列表枚举进行中（二期）：前端「应用」按钮显示「读取中…」遮罩态
-	// （禁用+半透明）。由快照生成时按设备 identity 填充；最长显示 10s（兜底：
-	// 即使枚举仍在重试，遮罩到时自动清）。
+	// AppBusy = 该设备完全无图标缓存、正在首次读取。按不可变 identity 填充，
+	// 完成或固定 8s 后解除；普通列表检测/差分补图不禁用入口。
 	AppBusy bool `json:"appBusy,omitempty"`
 }
 
 type cachedSpec struct {
+	mu           sync.Mutex // refresh and track can enrich the same device concurrently
+	identity     string
 	name         string
 	marketname   string
 	manufacturer string
@@ -72,10 +77,13 @@ type cachedSpec struct {
 // Manager 缓存每台设备的重查询结果（市场名永不过期，电量/规格带 TTL），
 // 并在设备列表为空时按 config.txt 记忆地址尝试无线自恢复（30s 节流）。
 type Manager struct {
-	adbPath    string
-	configPath string
-	mu         sync.Mutex
-	cache      map[string]*cachedSpec
+	eventOnce        sync.Once
+	eventHub         *deviceevents.Hub
+	identityResolver func(string) (string, string)
+	adbPath          string
+	configPath       string
+	mu               sync.Mutex
+	cache            map[string]*cachedSpec
 
 	connectMu   sync.Mutex
 	lastConnect time.Time
@@ -90,6 +98,11 @@ type Manager struct {
 	srvKillFn  func(ctx context.Context) error
 	srvStartFn func(ctx context.Context) error
 	srvCheckFn func(ctx context.Context) string
+}
+
+func (m *Manager) EventHub() *deviceevents.Hub {
+	m.eventOnce.Do(func() { m.eventHub = deviceevents.NewLearningHub() })
+	return m.eventHub
 }
 
 const (
@@ -377,8 +390,8 @@ func (m *Manager) Shell(ctx context.Context, serial string, args ...string) (str
 }
 
 // List 返回当前 adb devices -l 的合并列表（一台设备一栏）：
-// 同 model 的 USB/无线 transport 合并（USB 优先展示与查询，无线地址并入 Wireless）；
-// 无 model 字段的条目按市场名二次合并；并为在线设备填充展示名/型号/电量/分辨率。
+// 只合并已确认同身份的 USB/无线 transport（USB 优先展示与查询）；
+// 并为在线设备填充展示名/型号/电量/分辨率。
 func (m *Manager) List(ctx context.Context) ([]Device, error) {
 	out, err := m.run(ctx, "devices", "-l")
 	if err != nil {
@@ -391,18 +404,31 @@ func (m *Manager) List(ctx context.Context) ([]Device, error) {
 // track-devices 的列表块与 devices -l 同格式，track 解析复用同一套构建逻辑。
 func (m *Manager) devicesFromOutput(ctx context.Context, out string) []Device {
 	raw := ParseDevicesL(out)
-	groups := GroupDevices(raw)
+	// Group only confirmed transports; model/name grouping loses same-model phones.
+	idx := map[string]int{}
+	groups := make([][]RawDevice, 0, len(raw))
+	for _, r := range raw {
+		key := IdentityKey("", "", "", r.Serial)
+		if m.identityResolver != nil {
+			if confirmed, _ := m.identityResolver(r.Serial); confirmed != "" {
+				key = confirmed
+			}
+		}
+		if j, ok := idx[key]; ok {
+			groups[j] = append(groups[j], r)
+		} else {
+			idx[key] = len(groups)
+			groups = append(groups, []RawDevice{r})
+		}
+	}
 	devs := make([]Device, 0, len(groups))
-	idxByName := map[string]int{} // 无 model 条目按市场名二次合并
 	for _, g := range groups {
 		d := m.buildDevice(ctx, g)
-		hasModel := g[0].Model != ""
-		if !hasModel && d.State == "device" && d.Name != "" && d.Name != d.Serial {
-			if j, ok := idxByName[d.Name]; ok {
-				mergeDevice(&devs[j], d)
-				continue
+		d.StableSerial = StableSerial(d.Serial)
+		if m.identityResolver != nil {
+			if key, stable := m.identityResolver(d.Serial); key != "" {
+				d.Identity, d.StableSerial = key, stable
 			}
-			idxByName[d.Name] = len(devs)
 		}
 		devs = append(devs, d)
 	}
@@ -458,7 +484,7 @@ func BuildDevice(g []RawDevice) Device {
 	return d
 }
 
-// mergeDevice 把 b 并入 a（无 model 条目按市场名二次合并）：
+// mergeDevice 把已确认同身份的 b 并入 a：
 // USB 优先作主 transport；无线地址并入 Wireless。
 func mergeDevice(a *Device, b Device) {
 	if b.ConnType == "usb" && a.ConnType != "usb" {
@@ -474,19 +500,29 @@ func mergeDevice(a *Device, b Device) {
 }
 
 func (m *Manager) enrich(ctx context.Context, d *Device) {
+	identity := IdentityKey("", "", "", d.Serial)
+	if m.identityResolver != nil {
+		if confirmed, _ := m.identityResolver(d.Serial); confirmed != "" {
+			identity = confirmed
+		} else if strings.HasPrefix(identity, "pending:") {
+			identity = "" // a missing broadcast must not repeatedly invalidate a known owner
+		}
+	}
 	m.mu.Lock()
 	c, ok := m.cache[d.Serial]
-	if !ok {
-		c = &cachedSpec{}
+	if !ok || identity != "" && c.identity != identity {
+		c = &cachedSpec{identity: identity}
 		m.cache[d.Serial] = c
+		d.Name = "" // failed enrichment of a new owner must not retain an old display name
 	}
 	m.mu.Unlock()
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	now := time.Now()
 	if c.name != "" {
 		// 市场名补采（多会话竞态自愈）：首次 getprop 失败用 man+model 兜底缓存后，
-		// 周期性重试 marketname——不重试则 identity 永久停在回退值（如 "Xiaomi
-		// MODEL123" 而非 "REDMI K80"），档案分裂、弹窗误判"新设备"随之而来。
+		// 周期性重试 marketname，让展示名恢复；身份不依赖该字段。
 		if c.marketname == "" && now.Sub(c.at) >= specTTL {
 			if v, err := m.run(ctx, "-s", d.Serial, "shell", "getprop", "ro.product.marketname"); err == nil {
 				if n := strings.TrimSpace(v); n != "" {
@@ -554,20 +590,6 @@ func (m *Manager) enrich(ctx context.Context, d *Device) {
 	d.WirelessRes = ScaleForWireless(c.res)
 }
 
-// IdentityKey 计算设备档案 identity（设备唯一化规则）：
-// marketname 非空优先；无市场名 → manufacturer+model（两者均非空）；
-// 都无 → 首个 serial（含无线 IP:port）。同一设备的 USB/无线 transport 由此归并。
-func IdentityKey(marketname, manufacturer, model, serial string) string {
-	if t := strings.TrimSpace(marketname); t != "" {
-		return t
-	}
-	man, mod := strings.TrimSpace(manufacturer), strings.TrimSpace(model)
-	if man != "" && mod != "" {
-		return man + " " + mod
-	}
-	return strings.TrimSpace(serial)
-}
-
 // SortWideFirst 把 "WxH" 归一化为宽≥高顺序（大数字在前）。解析失败原样返回。
 func SortWideFirst(res string) string {
 	wStr, hStr, ok := strings.Cut(res, "x")
@@ -626,7 +648,7 @@ type RawDevice struct {
 	Serial   string
 	State    string
 	ConnType string
-	Model    string // adb devices -l 的 model: 字段；空=未知（按市场名二次合并）
+	Model    string // adb devices -l 的 model: 展示字段；空=未知
 }
 
 // connTypeOf 判定 serial 的 transport 类型。
@@ -685,17 +707,13 @@ func ParseDevicesL(output string) []RawDevice {
 	return out
 }
 
-// GroupDevices 按 model 分组去重（一台设备一栏的前提）：
-// model 相同的条目（同设备的 USB/无线 transport）归一组，保持首次出现顺序；
-// 无 model 条目各自成组，由 List 在市场名富化后二次合并。
+// GroupDevices 按完整序列号分组，保持首次出现顺序。
+// 未确认身份的无线地址各自成组，市场名和型号不参与分组。
 func GroupDevices(raw []RawDevice) [][]RawDevice {
 	idx := map[string]int{}
 	var groups [][]RawDevice
 	for _, r := range raw {
-		key := r.Model
-		if key == "" {
-			key = "serial:" + r.Serial
-		}
+		key := IdentityKey("", "", "", r.Serial)
 		if i, ok := idx[key]; ok {
 			groups[i] = append(groups[i], r)
 			continue

@@ -36,7 +36,7 @@ func TestGui52Fix16DeletedUsbHiddenUntilReplug(t *testing.T) {
 		t.Fatalf("删除前应显示华为卡")
 	}
 
-	if err := a.DeleteDevices([]string{"HUAWEI FLA-TL10"}); err != nil {
+	if err := a.DeleteDevices([]string{fixtureArchiveKey(a.profiles, "HUAWEI FLA-TL10")}); err != nil {
 		t.Fatalf("DeleteDevices: %v", err)
 	}
 	a.applyTrackUpdate(usb) // 线还插着：设备流继续推送
@@ -79,10 +79,10 @@ func TestGui52Fix16dLearnClearsAllKeys(t *testing.T) {
 
 	// 删除（USB 在线）→ 标记双键
 	a.applyTrackUpdate([]adb.Device{{Serial: "TEST0003", State: "device", ConnType: "usb"}})
-	if err := a.DeleteDevices([]string{"HUAWEI FLA-TL10"}); err != nil {
+	if err := a.DeleteDevices([]string{fixtureArchiveKey(a.profiles, "HUAWEI FLA-TL10")}); err != nil {
 		t.Fatalf("DeleteDevices: %v", err)
 	}
-	if !a.deletedUsbMarked("HUAWEI FLA-TL10") || !a.deletedUsbMarked("TEST0003") {
+	if !a.deletedUsbMarked("archive:HUAWEI FLA-TL10") || !a.deletedUsbMarked("TEST0003") {
 		t.Fatalf("删除标记应双键在档")
 	}
 
@@ -91,7 +91,7 @@ func TestGui52Fix16dLearnClearsAllKeys(t *testing.T) {
 	offline := []adb.Device{{Serial: "TEST0003", State: "offline", ConnType: "usb"}}
 	a.applyTrackUpdate(offline)
 	// gui52-fix17b：added 帧按索引全清——offline 首帧即清身份键（不再需要等学习完成）
-	if a.deletedUsbMarked("HUAWEI FLA-TL10") {
+	if a.deletedUsbMarked("archive:HUAWEI FLA-TL10") {
 		t.Fatalf("fix17b 后 offline added 帧应已按索引全清（含市场名键）")
 	}
 
@@ -105,7 +105,7 @@ func TestGui52Fix16dLearnClearsAllKeys(t *testing.T) {
 	a.profiles.mu.Unlock()
 	// 模拟学习完成（alignWirelessIP 路径）：档案键就绪后清全部
 	a.alignWirelessIP("TEST0003", "192.0.2.242")
-	if a.deletedUsbMarked("HUAWEI FLA-TL10") || a.deletedUsbMarked("TEST0003") {
+	if a.deletedUsbMarked("archive:HUAWEI FLA-TL10") || a.deletedUsbMarked("TEST0003") {
 		t.Fatalf("学习完成后应清空全部删除标记")
 	}
 

@@ -31,8 +31,11 @@
   // 返回会话对象或 null。
   function matchSession(d, castMap) {
     if (!d || !castMap) return null;
-    if (d.serial && castMap[d.serial]) return castMap[d.serial];
-    if (d.wireless && castMap[d.wireless]) return castMap[d.wireless];
+    function compatible(s) {
+      return !d.identity || !s.identity || d.identity === s.identity;
+    }
+    if (d.serial && castMap[d.serial] && compatible(castMap[d.serial])) return castMap[d.serial];
+    if (d.wireless && castMap[d.wireless] && compatible(castMap[d.wireless])) return castMap[d.wireless];
     if (d.identity) {
       var keys = Object.keys(castMap);
       for (var i = 0; i < keys.length; i++) {

@@ -22,9 +22,9 @@ func TestGui41bAddrFailKeepsActive(t *testing.T) {
 	})
 
 	for i := 0; i < 4; i++ {
-		s.AddrFail("REDMI K80", "192.0.2.197:39419")
+		s.AddrFail(fixtureArchiveKey(s, "REDMI K80"), "192.0.2.197:39419")
 	}
-	e, _ := s.Entry("REDMI K80")
+	e, _ := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	a := gui24FindAddr(e, "192.0.2.197:39419")
 	if a == nil || a.State != AddrStateStale {
 		t.Fatalf("gui52 失败必须写 state=stale（不转 history 也不保持 active）: %+v", a)
@@ -48,11 +48,11 @@ func TestGui41bAddrFailThenNormalizeKeeps(t *testing.T) {
 	})
 
 	for i := 0; i < 3; i++ {
-		s.AddrFail("REDMI K80", "192.0.2.197:5555")
+		s.AddrFail(fixtureArchiveKey(s, "REDMI K80"), "192.0.2.197:5555")
 	}
 	s.normalizeLocked()
 
-	e, _ := s.Entry("REDMI K80")
+	e, _ := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	a := gui24FindAddr(e, "192.0.2.197:5555")
 	if a == nil || a.State != AddrStateStale {
 		t.Fatalf("normalizeLocked 后唯一 stale 记忆不得被删除: %+v", e.Addrs)
@@ -63,8 +63,8 @@ func TestGui41bAddrFailThenNormalizeKeeps(t *testing.T) {
 func TestGui41bAddrFailUnknownAppends(t *testing.T) {
 	s := NewProfileStore("")
 	gui15Seed(s, "X", &DeviceEntry{Marketname: "X", Profiles: DefaultProfile()})
-	s.AddrFail("X", "10.0.0.1:5555")
-	e, _ := s.Entry("X")
+	s.AddrFail(fixtureArchiveKey(s, "X"), "10.0.0.1:5555")
+	e, _ := s.Entry(fixtureArchiveKey(s, "X"))
 	a := gui24FindAddr(e, "10.0.0.1:5555")
 	if a == nil || a.State != AddrStateStale || a.Fail != 1 || a.LastFail == 0 {
 		t.Fatalf("未知地址失败应 append state=stale 并记内存统计: %+v", e.Addrs)

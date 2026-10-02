@@ -52,7 +52,7 @@ func TestGui29OfflineCardAppendedOnlyForMissingProfileDevice(t *testing.T) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Model:      "MODEL123",
+			Model:      "12345TESTA",
 			Serials:    []string{"TEST0001"},
 			Addrs: []AddrEntry{
 				{Addr: "192.0.2.197:5555", State: AddrStateActive, LastOk: 1750000010, Mode: ModeTcpip},
@@ -62,7 +62,7 @@ func TestGui29OfflineCardAppendedOnlyForMissingProfileDevice(t *testing.T) {
 		},
 		"Xiaomi Pad 8 Pro": {
 			Marketname: "Xiaomi Pad 8 Pro",
-			Model:      "MODEL789",
+			Model:      "25091RP04C",
 			Serials:    []string{"TEST0002"},
 			Addrs: []AddrEntry{
 				{Addr: "192.0.2.162:5555", State: AddrStateActive, LastOk: 1750000030, Mode: ModeTcpip},
@@ -298,7 +298,7 @@ func TestPollOnceGui29OfflineCardWhenDeviceGone(t *testing.T) {
 	fake := filepath.Join(dir, "adb")
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"devices\" ]; then printf 'List of devices attached\\n%s\\n' \"$FAKE_DEV\"; exit 0; fi\n" +
-		"if [ \"$3\" = \"shell\" ]; then case \"$5\" in ro.product.marketname) echo 'REDMI K80';; ro.product.manufacturer) echo 'Xiaomi';; ro.product.model) echo 'MODEL123';; esac; exit 0; fi\n" +
+		"if [ \"$3\" = \"shell\" ]; then case \"$5\" in ro.product.marketname) echo 'REDMI K80';; ro.product.manufacturer) echo 'Xiaomi';; ro.product.model) echo '12345TESTA';; esac; exit 0; fi\n" +
 		"if [ \"$1\" = \"mdns\" ]; then printf 'List of discovered mdns services\\n'; exit 0; fi\n" +
 		"if [ \"$1\" = \"connect\" ]; then exit 1; fi\n" +
 		"exit 0\n"

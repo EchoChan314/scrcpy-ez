@@ -9,6 +9,7 @@
 #include "android/keycodes.h"
 #include "events.h"
 #include "image_convert.h"
+#include "clipboard_sync.h"
 #include "input_events.h"
 #include "screen.h"
 #include "shortcut_mod.h"
@@ -120,9 +121,11 @@ clipboard_watch_timer_cb(void *userdata, SDL_TimerID timer_id, Uint32 interval) 
         clipboard_poll_sequence = seq;
         // Post to the main thread (the timer callback runs on a SDL timer
         // thread, and SDL_PushEvent is thread-safe)
-        if (!sc_push_event(SC_EVENT_CLIPBOARD_CHANGED)) {
-            LOGW("Could not post clipboard changed event");
-        }
+    }
+    // A transaction may fail or its sending process may exit without changing
+    // the clipboard sequence. Rechecking metadata permits bounded recovery.
+    if (!sc_push_event(SC_EVENT_CLIPBOARD_CHANGED)) {
+        LOGW("Could not post clipboard changed event");
     }
 
     return interval;
@@ -629,6 +632,7 @@ clipboard_has_hdrop_image(void) {
 static bool
 clipboard_push_hdrop_image(struct sc_input_manager *im, bool paste,
                            uint64_t sequence) {
+    uint32_t snapshot_sequence = GetClipboardSequenceNumber();
     const char *hdrop_mime = NULL;
     uint8_t *hdrop_data = NULL;
     size_t hdrop_size = 0;
@@ -644,7 +648,7 @@ clipboard_push_hdrop_image(struct sc_input_manager *im, bool paste,
     uint64_t sdl_alt = 0;
     bool sdl_alt_ok = clipboard_sdl_data_fingerprint(&sdl_alt);
     size_t mimetype_len = strlen(hdrop_mime);
-    size_t msg_size = 18 + mimetype_len + hdrop_size;
+    size_t msg_size = 34 + mimetype_len + hdrop_size;
     if (msg_size > SC_CONTROL_MSG_MAX_SIZE) {
         LOGW("HDROP image message too large: %u bytes, dropping", (unsigned) msg_size);
         free(hdrop_data);
@@ -653,6 +657,7 @@ clipboard_push_hdrop_image(struct sc_input_manager *im, bool paste,
     struct sc_control_msg msg;
     msg.type = SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD;
     msg.set_image_clipboard.sequence = sequence;
+    msg.clipboard_pc_sequence = snapshot_sequence;
     msg.set_image_clipboard.data = hdrop_data;
     msg.set_image_clipboard.size = hdrop_size;
     msg.set_image_clipboard.mimetype = strdup(hdrop_mime);
@@ -695,6 +700,23 @@ sc_input_manager_set_device_image_clipboard(struct sc_input_manager *im, bool pa
     // retry the HDROP path before pushing the (possibly thumbnail)
     // SDL bitmap data.
 #ifdef _WIN32
+    uint32_t snapshot_sequence = GetClipboardSequenceNumber();
+    uint8_t *original;
+    size_t original_size;
+    char *original_mime;
+    if (sc_clipboard_sync_get_image(&original, &original_size, &original_mime)) {
+        struct sc_control_msg msg = {.type = SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD};
+        msg.set_image_clipboard.sequence = sequence;
+        msg.clipboard_pc_sequence = snapshot_sequence;
+        msg.set_image_clipboard.data = original;
+        msg.set_image_clipboard.size = original_size;
+        msg.set_image_clipboard.mimetype = original_mime;
+        msg.set_image_clipboard.paste = paste;
+        if (sc_controller_push_msg(im->controller, &msg)) { return true; }
+        free(original);
+        free(original_mime);
+        return false;
+    }
     if (clipboard_push_hdrop_image(im, paste, sequence)) {
         return true;
     }
@@ -746,7 +768,7 @@ sc_input_manager_set_device_image_clipboard(struct sc_input_manager *im, bool pa
             size_t mimetype_len = strlen(mime_type);
 
             // Check if message exceeds max size
-            size_t msg_size = 18 + mimetype_len + size;
+            size_t msg_size = 34 + mimetype_len + size;
             if (msg_size > SC_CONTROL_MSG_MAX_SIZE) {
                 LOGW("Image clipboard message too large: %u bytes, dropping",
                      (unsigned) msg_size);
@@ -760,6 +782,9 @@ sc_input_manager_set_device_image_clipboard(struct sc_input_manager *im, bool pa
             struct sc_control_msg msg;
             msg.type = SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD;
             msg.set_image_clipboard.sequence = sequence;
+#ifdef _WIN32
+            msg.clipboard_pc_sequence = snapshot_sequence;
+#endif
             msg.set_image_clipboard.data = malloc(size);
             if (msg.set_image_clipboard.data) {
                 memcpy(msg.set_image_clipboard.data, data, size);
@@ -801,6 +826,8 @@ sc_input_manager_set_device_image_clipboard(struct sc_input_manager *im, bool pa
     return false;
 }
 
+static bool clipboard_has_image(void);
+
 static bool
 set_device_clipboard(struct sc_input_manager *im, bool paste,
                      uint64_t sequence) {
@@ -811,7 +838,19 @@ set_device_clipboard(struct sc_input_manager *im, bool paste,
         return true;
     }
 
+    // Failed image reads must not clear the device clipboard with empty text.
+    if (clipboard_has_image()
+#ifdef _WIN32
+            || clipboard_has_hdrop_image()
+#endif
+            ) {
+        return false;
+    }
+
     // Fallback to text clipboard
+#ifdef _WIN32
+    uint32_t snapshot_sequence = GetClipboardSequenceNumber();
+#endif
     char *text = SDL_GetClipboardText();
     if (!text) {
         LOGW("Could not get clipboard text: %s", SDL_GetError());
@@ -828,6 +867,9 @@ set_device_clipboard(struct sc_input_manager *im, bool paste,
     struct sc_control_msg msg;
     msg.type = SC_CONTROL_MSG_TYPE_SET_CLIPBOARD;
     msg.set_clipboard.sequence = sequence;
+#ifdef _WIN32
+    msg.clipboard_pc_sequence = snapshot_sequence;
+#endif
     msg.set_clipboard.text = text_dup;
     msg.set_clipboard.paste = paste;
 
@@ -893,57 +935,30 @@ sc_input_manager_process_clipboard_update(struct sc_input_manager *im) {
         // present before scrcpy started) and it must be suppressed.
         // If the sequence number changed, the user copied something
         // new right after startup: push it normally.
+        if (GetClipboardSequenceNumber() == clipboard_start_suppress_seq
+                && !sc_clipboard_sync_needs_recovery(clipboard_start_suppress_seq)) {
+            return;
+        }
         im->suppress_start_push = false;
-        if (GetClipboardSequenceNumber() == clipboard_start_suppress_seq) {
-            LOGI("Startup clipboard push suppressed (--no-clipboard-push-on-start)");
-            return;
-        }
     }
-    // Deduplicate: on Windows, the same clipboard change may be reported
-    // twice (SDL_EVENT_CLIPBOARD_UPDATE event and the polling timer both
-    // post a clipboard update). Both trigger
-    // sc_input_manager_process_clipboard_update(), and without this check
-    // the same content would be pushed twice, creating two identical
-    // clipboard entries on the device.
-    uint32_t seq = GetClipboardSequenceNumber();
-    if (clipboard_last_pushed_seq && seq == clipboard_last_pushed_seq) {
-        // Same sequence number as the last pushed update: normally this
-        // is the double trigger (SDL event + polling timer) of a single
-        // clipboard change. However, some applications (Explorer with
-        // preview extensions) write their clipboard formats in several
-        // steps within one sequence number (e.g. a thumbnail bitmap
-        // first, then CF_HDROP): the later step has the same sequence
-        // number but different content. In that case push again so the
-        // HDROP original overrides the previously pushed thumbnail.
-        bool same_content = false;
-        if (clipboard_last_pushed_fp_valid) {
-            uint64_t fp;
-            if (!clipboard_current_fingerprint(&fp)
-                    || fp == clipboard_last_pushed_fp
-                    || (clipboard_last_pushed_fp_alt_valid
-                        && fp == clipboard_last_pushed_fp_alt)) {
-                same_content = true;
-            }
-        }
-        if (same_content) {
-            LOGD("Clipboard update ignored (already pushed, seq=%u)", seq);
-            return;
-        }
-        LOGD("Clipboard sequence unchanged but content changed "
-             "(multi-step clipboard write), pushing again");
-    }
-    if (clipboard_reverse_sync_seq
-            && GetClipboardSequenceNumber() == clipboard_reverse_sync_seq) {
-        // The computer clipboard still contains the content set by a reverse
-        // synchronization (device -> computer): ignore the update, otherwise
-        // the content would be pushed back to the device, triggering an
-        // infinite loop.
-        LOGD("Clipboard update ignored (reverse synchronization)");
+    char *startup_text = SDL_GetClipboardText();
+    bool empty_snapshot = !startup_text || !*startup_text;
+    SDL_free(startup_text);
+    if (empty_snapshot && !clipboard_has_image() && !clipboard_has_hdrop_image()) {
         return;
     }
-    // The clipboard changed since the reverse synchronization: release the
-    // suppression, the new content is a genuine user copy.
-    clipboard_reverse_sync_seq = 0;
+    uint32_t current_sequence = GetClipboardSequenceNumber();
+    uint64_t transaction;
+    if (!sc_clipboard_sync_begin(current_sequence, &transaction)) {
+        return;
+    }
+    // Claim covers the snapshot read and queue insertion. A copy occurring
+    // during this read is retried as a newer transaction after the ACK.
+    if (!set_device_clipboard(im, false, transaction)) {
+        sc_clipboard_sync_failed(transaction);
+        LOGW("Clipboard transaction could not be queued");
+    }
+    return;
 #else
     if (clipboard_reverse_sync_pending) {
         // The computer clipboard change comes from a reverse synchronization
@@ -970,32 +985,7 @@ sc_input_manager_process_clipboard_update(struct sc_input_manager *im) {
         return;
     }
 
-#ifdef _WIN32
-    // Content fingerprint dedup: WeChat writes the clipboard twice with
-    // identical content but different sequence numbers (the 2-1 cycle:
-    // one copy = two updates). The seq-based dedup above cannot catch
-    // that, so skip the update if the content is identical to the last
-    // pushed one.
-    if (clipboard_last_pushed_fp_valid) {
-        uint64_t fp;
-        if (!clipboard_current_fingerprint(&fp)
-                || fp == clipboard_last_pushed_fp
-                || (clipboard_last_pushed_fp_alt_valid
-                    && fp == clipboard_last_pushed_fp_alt)) {
-            // Fingerprint unavailable (clipboard open race) is treated
-            // conservatively as "same content": the polling timer will
-            // re-check on the next round and push if the content
-            // actually changed (multi-step write).
-            LOGD("Clipboard update ignored (same content as last push)");
-            // WeChat writes the clipboard twice with the same content:
-            // the sequence number already advanced. Synchronize it so a
-            // later Ctrl+v does not wrongly conclude "not pushed yet"
-            // and push the same content a second time.
-            clipboard_last_pushed_seq = GetClipboardSequenceNumber();
-            return;
-        }
-    }
-#endif
+
 
     // Synchronize the computer clipboard (text or image) to the device
     // clipboard without pasting (nopaste), so the user can paste it manually

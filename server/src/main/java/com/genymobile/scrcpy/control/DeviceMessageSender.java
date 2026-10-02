@@ -3,24 +3,43 @@ package com.genymobile.scrcpy.control;
 import com.genymobile.scrcpy.util.Ln;
 
 import java.io.IOException;
-import java.util.concurrent.ArrayBlockingQueue;
+import java.util.Iterator;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 public final class DeviceMessageSender {
 
     private final ControlChannel controlChannel;
 
     private Thread thread;
-    private final BlockingQueue<DeviceMessage> queue = new ArrayBlockingQueue<>(16);
+    private final BlockingQueue<DeviceMessage> queue = new LinkedBlockingQueue<>();
 
     public DeviceMessageSender(ControlChannel controlChannel) {
         this.controlChannel = controlChannel;
     }
 
-    public void send(DeviceMessage msg) {
-        if (!queue.offer(msg)) {
-            Ln.w("Device message dropped: " + msg.getType());
+    public synchronized void send(DeviceMessage msg) {
+        int type = msg.getType();
+        if (isClipboard(type)) {
+            // Keep only the newest waiting snapshot, without dropping ACKs.
+            // Iterator.remove() also works before Android API 24, where the
+            // Collection.removeIf() default method is unavailable.
+            Iterator<DeviceMessage> iterator = queue.iterator();
+            while (iterator.hasNext()) {
+                if (isClipboard(iterator.next().getType())) {
+                    iterator.remove();
+                }
+            }
+        } else if (type == DeviceMessage.TYPE_UHID_OUTPUT && queue.size() >= 64) {
+            Ln.w("Device message dropped: " + type);
+            return;
         }
+        queue.offer(msg);
+    }
+
+    private static boolean isClipboard(int type) {
+        return type == DeviceMessage.TYPE_CLIPBOARD || type == DeviceMessage.TYPE_IMAGE_CLIPBOARD
+                || type == DeviceMessage.TYPE_CLIPBOARD_SNAPSHOT || type == DeviceMessage.TYPE_IMAGE_CLIPBOARD_SNAPSHOT;
     }
 
     private void loop() throws IOException, InterruptedException {

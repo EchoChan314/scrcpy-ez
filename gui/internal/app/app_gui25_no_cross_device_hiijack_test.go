@@ -26,8 +26,8 @@ func seedGui25TabletArchive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.162:5555", ModeTcpip)
 }
 
 // seedGui25K80Archive 播种 K80 档案：TLS 42449（在线设备的常驻广播地址）。
@@ -35,7 +35,7 @@ func seedGui25K80Archive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "K80SERXXX", State: "device", ConnType: "usb", Marketname: "Redmi K80"},
 	})
-	a.profiles.AddrSuccessWithMode("Redmi K80", "192.0.2.197:42449", ModeTls)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Redmi K80"), "192.0.2.197:42449", ModeTls)
 }
 
 // gui25TabletCands 手工构建探测候选：仅平板（K80 在线，不在候选内）。
@@ -66,8 +66,8 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 	seedGui25K80Archive(a)
 	// gui55：纯探测写 active 现在要验身（直读设备自报短号）——按地址注入"设备是谁"。
 	a.pairOps.serialFn = gui55SerialByAddr(map[string]string{
-		"192.0.2.183:5555": "T7000PAD",
-		"192.0.2.162:5555": "T7000PAD",
+		"192.0.2.183:5555":  "T7000PAD",
+		"192.0.2.162:5555":  "T7000PAD",
 		"192.0.2.197:42449": "K80SERXXX",
 	}, "")
 
@@ -94,7 +94,7 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 		return gui25HiijackMdns(), nil
 	}
 
-	a.runDiscovery(context.Background(), gui25TabletCands())
+	a.runDiscovery(context.Background(), fixtureCandidateKeys(a.profiles, gui25TabletCands()))
 
 	st := waitDiscStatus(t, a, "found")
 	if st.Found != "192.0.2.162:5555" {
@@ -117,7 +117,7 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 		t.Fatalf("Tried 不应含在线设备广播 42449: %+v", st)
 	}
 	// K80 档案不被污染（42449 未参与本轮：fail 不增、状态不动）
-	k80, ok := a.profiles.Entry("Redmi K80")
+	k80, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Redmi K80"))
 	if !ok {
 		t.Fatal("K80 档案应存在")
 	}
@@ -126,7 +126,7 @@ func TestGui25NoCrossDeviceHiijack(t *testing.T) {
 		t.Fatalf("K80 42449 档案不应被动（未参与探测）: %+v", k80.Addrs)
 	}
 	// 平板：162 兜底成功 → active+fail=0（成功路径不回填失败）
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	a162 := gui24FindAddr(e, "192.0.2.162:5555")
 	if a162 == nil || a162.Fail != 0 || a162.State != AddrStateActive {
 		t.Fatalf("162 兜底成功应保持 active+fail=0: %+v", e.Addrs)
@@ -141,7 +141,7 @@ func TestGui25CandidateOwnBroadcastStillFirst(t *testing.T) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555", ModeTcpip)
 	seedGui25K80Archive(a)
 
 	var mu sync.Mutex
@@ -163,7 +163,7 @@ func TestGui25CandidateOwnBroadcastStillFirst(t *testing.T) {
 	}
 
 	a.runDiscovery(context.Background(), map[string][]AddrEntry{
-		"Xiaomi Pad 8 Pro": {
+		a.profiles.ResolveKey("TEST0002"): {
 			{Addr: "192.0.2.183:5555", Mode: ModeTcpip, State: AddrStateActive, Fail: 0, LastOk: 100},
 		},
 	})
@@ -185,7 +185,7 @@ func TestGui25CandidateOwnBroadcastStillFirst(t *testing.T) {
 		t.Fatalf("Tried 不应含 K80 广播 42449: %+v", st)
 	}
 	// MatchMdnsModes 入档副作用保持：37201 mode=tls 已归并进平板档案
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	a37201 := gui24FindAddr(e, "192.0.2.183:37201")
 	if a37201 == nil || a37201.Mode != ModeTls {
 		t.Fatalf("候选设备 TLS 新端口应保持同步入档（mode=tls）: %+v", e.Addrs)

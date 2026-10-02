@@ -23,7 +23,7 @@ func TestGui52Fix4ProbeActiveAllFailToStale(t *testing.T) {
 	}
 
 	a.probeProfileActiveAddrs(context.Background(), "Xiaomi Pad 8 Pro")
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if ae := gui24FindAddr(e, "192.0.2.162:44125"); ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("缺席验尸：TLS 探测不通应 stale: %+v", ae)
 	}
@@ -52,7 +52,7 @@ func TestGui52Fix4ProbeActiveMixed(t *testing.T) {
 	}
 
 	a.probeProfileActiveAddrs(context.Background(), "Xiaomi Pad 8 Pro")
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if ae := gui24FindAddr(e, "192.0.2.162:44125"); ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("缺席验尸：44125 探测不通应 stale: %+v", ae)
 	}

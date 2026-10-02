@@ -230,12 +230,12 @@ func testUSBIPOutput(a *App, serial string) string {
 
 func TestCastFlow(t *testing.T) {
 	a, f := newTestApp()
-	if err := a.StartCast("MODEL123"); err != nil {
+	if err := a.StartCast("12345TESTA"); err != nil {
 		t.Fatal(err)
 	}
 	// Start 在独立 goroutine 调用：等待异步传递完成
 	f.waitStarts(t, 1)
-	if got := f.startedSerial(); got != "MODEL123" {
+	if got := f.startedSerial(); got != "12345TESTA" {
 		t.Fatalf("serial 未传递: %q", got)
 	}
 
@@ -243,13 +243,13 @@ func TestCastFlow(t *testing.T) {
 	lines := []string{
 		"[1] 重置 adb 服务...",
 		"[2] 检测 USB 设备...",
-		"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（MODEL123）",
-		"===== 开始投屏：Xiaomi Pad 8 Pro（MODEL123） =====",
+		"[OK] 检测到 USB 设备：Xiaomi Pad 8 Pro（12345TESTA）",
+		"===== 开始投屏：Xiaomi Pad 8 Pro（12345TESTA） =====",
 		"[高清] 有线模式：检测到设备 2560x1708@120Hz，有线规格 h264/50M/2560/120fps（低延迟优化）",
 		"[键盘模式] Android SDK=34 -> uhid legacy=",
 	}
 	for _, l := range lines {
-		a.NotifyLine("MODEL123", l)
+		a.NotifyLine("12345TESTA", l)
 	}
 
 	s := a.Snapshot().Cast
@@ -267,7 +267,7 @@ func TestCastFlow(t *testing.T) {
 	}
 
 	// 无线规格行 → 模式切换 wifi（参数浮窗自动定位依据）
-	a.NotifyLine("MODEL123", "[流畅] 无线模式：带宽有限，已启用低延迟串流（h264/15M/1920/60fps）")
+	a.NotifyLine("12345TESTA", "[流畅] 无线模式：带宽有限，已启用低延迟串流（h264/15M/1920/60fps）")
 	s = a.Snapshot().Cast
 	if s.Mode != "wifi" {
 		t.Fatalf("无线规格行未切换模式: %q", s.Mode)
@@ -806,17 +806,17 @@ func TestProfileStoreRoundtrip(t *testing.T) {
 	path := filepath.Join(dir, "profiles.json")
 	s := NewProfileStore(path)
 	_ = s.Load()
-	if got := s.Get("A"); got != DefaultProfile() {
+	if got := s.Get(fixtureArchiveKey(s, "A")); got != DefaultProfile() {
 		t.Fatalf("未配置应为默认档: %+v", got)
 	}
-	p := s.Get("A")
+	p := s.Get(fixtureArchiveKey(s, "A"))
 	p.Usb = ModeProfile{Res: 2400, FPS: 75, Bitrate: 55, Custom: true}
-	if err := s.Save("A", p); err != nil {
+	if err := saveLegacyFixture(s, "A", p); err != nil {
 		t.Fatal(err)
 	}
 	s2 := NewProfileStore(path)
 	_ = s2.Load()
-	got := s2.Get("A")
+	got := s2.Get(fixtureArchiveKey(s2, "A"))
 	if got.Usb != p.Usb || got.Wifi != DefaultProfile().Wifi {
 		t.Fatalf("重载后参数丢失: %+v", got)
 	}
@@ -838,6 +838,7 @@ func TestSaveProfileAndRestartInjectsParams(t *testing.T) {
 	f.waitParams(t, 2)
 	want := bridge.CastParams{
 		Usb: bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
+		Serial: "X", ExpectedSerial: "X",
 		// v2.1.78：声音档位无条件注入（空档 → 主屏默认 pc）
 		Wifi: bridge.ModeParams{Audio: "pc", VCodec: "h264", ACodec: "opus"},
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
@@ -878,7 +879,7 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	p := DefaultProfile()
 	p.Usb = ModeProfile{Res: 2400, FPS: 75, Bitrate: 55, Custom: true}
 	p.Wifi = ModeProfile{Res: 1280, FPS: 30, Bitrate: 15, Custom: true}
-	if err := a.profiles.Save("X", p); err != nil {
+	if err := saveLegacyFixture(a.profiles, "X", p); err != nil {
 		t.Fatal(err)
 	}
 	_ = a.StartCast("X")
@@ -886,6 +887,7 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	want := bridge.CastParams{
 		Usb:  bridge.ModeParams{Res: 2400, FPS: 75, Bitrate: 55, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
 		Wifi: bridge.ModeParams{Res: 1280, FPS: 30, Bitrate: 15, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
+		Serial: "X", ExpectedSerial: "X",
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 	}
@@ -899,7 +901,7 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	a2.SetRunnerFactory(func(string, func(string), func(int)) (Runner, error) { return f2, nil })
 	p2 := DefaultProfile()
 	p2.Wifi = ModeProfile{Res: 720, FPS: 30, Bitrate: 15, Custom: true}
-	if err := a2.profiles.Save("W", p2); err != nil {
+	if err := saveLegacyFixture(a2.profiles, "W", p2); err != nil {
 		t.Fatal(err)
 	}
 	_ = a2.StartCast("W")
@@ -907,6 +909,7 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 	want2 := bridge.CastParams{
 		Usb:  bridge.ModeParams{Audio: "pc", VCodec: "h264", ACodec: "opus"},
 		Wifi: bridge.ModeParams{Res: 720, FPS: 30, Bitrate: 15, Set: true, Audio: "pc", VCodec: "h264", ACodec: "opus"},
+		Serial: "W", ExpectedSerial: "W",
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 	}
@@ -979,7 +982,7 @@ func TestBaselineFromSpecLine(t *testing.T) {
 	}
 	// baseline 持久化：新实例重载
 	a2 := New(Config{ProfilesPath: filepath.Join(dir, "profiles.json"), Version: "test"})
-	if got := a2.profiles.Get("X").Usb.Baseline; got != (Baseline{Res: 2560, FPS: 120, Bitrate: 80}) {
+	if got := a2.profiles.Get(fixtureArchiveKey(a2.profiles, "X")).Usb.Baseline; got != (Baseline{Res: 2560, FPS: 120, Bitrate: 80}) {
 		t.Fatalf("baseline 未持久化: %+v", got)
 	}
 }

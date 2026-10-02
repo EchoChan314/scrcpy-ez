@@ -15,6 +15,21 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
     }
 
     msg->type = buf[0];
+    msg->clipboard_revision = 0;
+    msg->clipboard_pc_sequence = 0;
+    size_t prefix = 0;
+    if (msg->type == DEVICE_MSG_TYPE_CLIPBOARD_SNAPSHOT
+            || msg->type == DEVICE_MSG_TYPE_IMAGE_CLIPBOARD_SNAPSHOT) {
+        if (len < 9) { return 0; }
+        msg->clipboard_revision = sc_read64be(&buf[1]);
+        msg->type = msg->type == DEVICE_MSG_TYPE_CLIPBOARD_SNAPSHOT
+                  ? DEVICE_MSG_TYPE_CLIPBOARD : DEVICE_MSG_TYPE_IMAGE_CLIPBOARD;
+        // Leave the type byte in place: the remaining parser uses offsets
+        // relative to it, and never reads it again.
+        buf += 8;
+        len -= 8;
+        prefix = 8;
+    }
     switch (msg->type) {
         case DEVICE_MSG_TYPE_CLIPBOARD: {
             if (len < 5) {
@@ -36,7 +51,7 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
             text[clipboard_len] = '\0';
 
             msg->clipboard.text = text;
-            return 5 + clipboard_len;
+            return prefix + 5 + clipboard_len;
         }
         case DEVICE_MSG_TYPE_ACK_CLIPBOARD: {
             if (len < 9) {
@@ -110,7 +125,7 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
             msg->image_clipboard.data = image_data;
             msg->image_clipboard.size = data_len;
 
-            return 9 + mimetype_len + data_len;
+            return prefix + 9 + mimetype_len + data_len;
         }
         case DEVICE_MSG_TYPE_ABR_STATE: {
             if (len < 9) {

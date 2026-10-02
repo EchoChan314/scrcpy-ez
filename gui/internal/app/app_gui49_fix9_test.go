@@ -11,10 +11,10 @@ import (
 func TestGui49Fix9ConnectingCardGetsNoSpecs(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		t.Fatal("档案缺失")
 	}

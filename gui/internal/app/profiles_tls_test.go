@@ -34,17 +34,17 @@ func TestBestAddrPrefersTls(t *testing.T) {
 	}
 	s.mu.Unlock()
 
-	if got := s.BestAddr("TEST0002"); got != "192.0.2.99:33895" {
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0002")); got != "192.0.2.99:33895" {
 		t.Fatalf("TLS 优先：history tls 应在 5555 active 前: %q", got)
 	}
 	// OrderedAddrs 顺序：tls 层在前
-	ordered := s.OrderedAddrs("TEST0002")
+	ordered := s.OrderedAddrs(fixtureArchiveKey(s, "TEST0002"))
 	if len(ordered) != 2 || ordered[0].Addr != "192.0.2.99:33895" || ordered[1].Addr != "192.0.2.99:5555" {
 		t.Fatalf("OrderedAddrs 应为 tls 优先: %+v", ordered)
 	}
 	// 层内 active 优先：两个 tls 地址时 active 在前（经 addrSuccess 正常排序路径）
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.77:33999", ModeTls)
-	if got := s.BestAddr("TEST0002"); got != "192.0.2.77:33999" {
+	s.AddrSuccessWithMode(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.77:33999", ModeTls)
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0002")); got != "192.0.2.77:33999" {
 		t.Fatalf("tls 层内应 active 优先（最近成功）: %q", got)
 	}
 }
@@ -58,10 +58,10 @@ func TestBestAddrLegacyNoModeIsTcpip(t *testing.T) {
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
 			Wireless: "192.0.2.162:5555"},
 	})
-	if got := s.BestAddr("TEST0002"); got != "192.0.2.162:5555" {
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0002")); got != "192.0.2.162:5555" {
 		t.Fatalf("旧档案地址应可用: %q", got)
 	}
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if e.Wireless != ModeTcpip {
 		t.Fatalf("旧档案同步后 wireless 应回填 tcpip: %+v", e.Wireless)
 	}
@@ -84,7 +84,7 @@ func TestMatchMdnsModesTlsGuidMerge(t *testing.T) {
 	if len(matched) != 1 || matched[0].Addr != "192.0.2.99:33895" || matched[0].Mode != ModeTls {
 		t.Fatalf("tls 服务应匹配为 tls 候选: %+v", matched)
 	}
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if e.Wireless != ModeTls {
 		t.Fatalf("tls 服务命中后 wireless 应记 tls: %+v", e)
 	}
@@ -134,7 +134,7 @@ func TestMatchMdnsModesTcpipRegression(t *testing.T) {
 	if len(matched) != 1 || matched[0].Addr != "192.0.2.183:5555" || matched[0].Mode != ModeTcpip {
 		t.Fatalf("经典服务应匹配 tcpip 候选: %+v", matched)
 	}
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	for i := range e.Addrs {
 		if e.Addrs[i].Addr == "192.0.2.183:5555" && e.Addrs[i].Mode != ModeTcpip {
 			t.Fatalf("经典地址应记 tcpip: %+v", e.Addrs[i])
@@ -142,12 +142,12 @@ func TestMatchMdnsModesTcpipRegression(t *testing.T) {
 	}
 	// tcpip 观察不覆盖既有 tls（两形态并存，tls 优先）
 	s.mu.Lock()
-	s.data.Devices["Xiaomi Pad 8 Pro"].Wireless = ModeTls
+	s.data.Devices[fixtureArchiveKeyLocked(s, "Xiaomi Pad 8 Pro")].Wireless = ModeTls
 	s.mu.Unlock()
 	s.MatchMdnsModes([]MdnsMatch{
 		{Name: "adb-TEST0002", Addr: "192.0.2.184:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	e, _ = s.Entry("TEST0002")
+	e, _ = s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	if e.Wireless != ModeTls {
 		t.Fatalf("tcpip 观察不应覆盖 tls 形态: %+v", e.Wireless)
 	}
@@ -178,9 +178,9 @@ func TestPairArchiveWritesBackTls(t *testing.T) {
 	_ = s.Load()
 
 	s.PairArchive("Xiaomi Pad 8 Pro", "TEST0002", "192.0.2.99:33895",
-		"adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "MODEL789")
+		"adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
 
-	e, ok := s.Entry("Xiaomi Pad 8 Pro")
+	e, ok := s.Entry(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatalf("PairArchive 应新建 identity 档案: %v", s.Entries())
 	}
@@ -206,7 +206,7 @@ func TestPairArchiveWritesBackTls(t *testing.T) {
 	if err := s2.Load(); err != nil {
 		t.Fatal(err)
 	}
-	e2, ok := s2.Entry("Xiaomi Pad 8 Pro")
+	e2, ok := s2.Entry(fixtureArchiveKey(s2, "Xiaomi Pad 8 Pro"))
 	if !ok || e2.Wireless != ModeTls || e2.TlsGuid != "adb-TEST0002-Ab12Cd" ||
 		len(e2.Addrs) != 1 || e2.Addrs[0].Mode != ModeTls {
 		t.Fatalf("落盘重载后 tls 字段丢失: %+v", e2)
@@ -230,12 +230,12 @@ func TestPairArchiveMergesIntoExistingEntry(t *testing.T) {
 			Wireless: "192.0.2.162:5555"},
 	})
 
-	s.PairArchive("", "TEST0002", "192.0.2.99:33895", "adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "MODEL789")
+	s.PairArchive("", "TEST0002", "192.0.2.99:33895", "adb-TEST0002-Ab12Cd", "Xiaomi Pad 8 Pro", "25091RP04C")
 	entries := s.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("配对接入不应分裂档案: %v", entries)
 	}
-	e := entries["Xiaomi Pad 8 Pro"]
+	e := entries[fixtureEntriesKey(entries, "Xiaomi Pad 8 Pro")]
 	if e.Wireless != ModeTls {
 		t.Fatalf("wireless 应为 tls: %+v", e)
 	}
@@ -264,7 +264,7 @@ func TestOfflineCandidateAddrsTlsFirst(t *testing.T) {
 		t.Fatalf("active 地址=在线证据，不应有离线候选: %+v", got)
 	}
 	// 全 stale → 离线候选（TLS 层优先）
-	if !s.MarkAllAddrsStale("Xiaomi Pad 8 Pro") {
+	if !s.MarkAllAddrsStale(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro")) {
 		t.Fatal("MarkAllAddrsStale 应有改动")
 	}
 	got := s.OfflineCandidateAddrs(nil)
@@ -288,8 +288,8 @@ func TestAddrSuccessWithModeBackfillsTls(t *testing.T) {
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
 			Wireless: "192.0.2.162:5555"},
 	})
-	s.AddrSuccessWithMode("TEST0002", "192.0.2.99:33895", ModeTls)
-	e, _ := s.Entry("TEST0002")
+	s.AddrSuccessWithMode(fixtureArchiveKey(s, "TEST0002"), "192.0.2.99:33895", ModeTls)
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	var got *AddrEntry
 	for i := range e.Addrs {
 		if e.Addrs[i].Addr == "192.0.2.99:33895" {

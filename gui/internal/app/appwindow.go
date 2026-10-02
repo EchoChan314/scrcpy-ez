@@ -11,6 +11,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -27,20 +29,20 @@ import (
 )
 
 const (
-	appListTTL      = 5 * time.Minute  // 读缓存保鲜期
-	appListTimeout  = 20 * time.Second // 单次 --list-apps 超时（实测 ~5s，留 4x 余量）
-	appListRetries  = 1                // 失败重试次数（额外的）
-	appListRetryGap = 6 * time.Second  // 重试间隔（跨 adbd 重启窗口）
-	appListMaxApps  = 500              // 解析上限（防异常输出）
-	appListBadgeTTL = 10 * time.Second // 「应用」按钮「读取中…」遮罩最长显示（兜底：枚举重试中到时也清）
+	appListTTL           = 5 * time.Minute         // 读缓存保鲜期
+	appListTimeout       = 20 * time.Second        // 单次 --list-apps 超时（实测 ~5s，留 4x 余量）
+	appListRetries       = 1                       // 失败重试次数（额外的）
+	appListRetryGap      = 6 * time.Second         // 重试间隔（跨 adbd 重启窗口）
+	appListMaxApps       = 500                     // 解析上限（防异常输出）
 	appListUsbWaitWindow = 2500 * time.Millisecond // 枚举前"等 USB 出现"窗口（v2.1.21 修复：启动瞬间无线卡先到，USB 晚 ~2s）
 )
 
 // AppListItem 是应用列表一项（`scrcpy --list-apps` 解析结果）。
 type AppListItem struct {
-	Pkg  string `json:"pkg"`
-	Name string `json:"name"`
-	Sys  bool   `json:"sys"` // * = 系统应用 / - = 第三方
+	Pkg       string `json:"pkg"`
+	Name      string `json:"name"`
+	IconStamp string `json:"iconStamp,omitempty"`
+	Sys       bool   `json:"sys"` // * = 系统应用 / - = 第三方
 }
 
 // appListEntry 应用列表缓存项（内存态；持久层在档案 profiles.json）。
@@ -52,18 +54,16 @@ type appListEntry struct {
 // ---------- 就绪边沿触发 ----------
 
 // devicesWithAppBusyLocked 复制设备列表并填充「应用」按钮的枚举遮罩态（AppBusy）。
-// 调用方必须已持 a.mu（snapshotRaw 的锁内调用）。遮罩=该 identity 正在枚举
-// 且未超 10s 兜底（枚举完毕清 busy → 下一步快照即消失；重试超时也最多显示 10s）。
+// 调用方持 a.mu。仅首次完全无图标缓存时遮罩，使用独立固定期限，进度不会延长它。
 func (a *App) devicesWithAppBusyLocked() []adb.Device {
 	devs := append([]adb.Device{}, a.devices...)
+	now := time.Now()
 	for i := range devs {
 		id := devs[i].Identity
 		if id == "" {
 			continue
 		}
-		if ts, ok := a.appListBusy[id]; ok && time.Since(ts) < appListBadgeTTL && !a.appListSilent[id] {
-			devs[i].AppBusy = true
-		}
+		devs[i].AppBusy = a.initialAppIconBusyLocked(id, now)
 	}
 	return devs
 }
@@ -94,7 +94,7 @@ func (a *App) kickAppListOnReadyChange(devs []adb.Device) {
 	serialOf := map[string]string{}
 	for i := range devs {
 		d := &devs[i]
-		if d.Identity == "" || d.Serial == "" {
+		if d.Identity == "" || strings.HasPrefix(d.Identity, "pending:") || d.Serial == "" {
 			continue
 		}
 		if d.State == "device" && !d.Connecting && !d.Pairing {
@@ -116,6 +116,7 @@ func (a *App) kickAppListOnReadyChange(devs []adb.Device) {
 			if _, busy := a.appListBusy[id]; !busy {
 				a.appListBusy[id] = time.Now() // 值=开始时刻（「应用」按钮遮罩 10s 兜底用）
 				a.appListSilentChanged[id] = false
+				delete(a.appIconsChanged, id)
 				jobs = append(jobs, job{identity: id, serial: serialOf[id]})
 			}
 		}
@@ -130,6 +131,7 @@ func (a *App) kickAppListOnReadyChange(devs []adb.Device) {
 	a.mu.Unlock()
 
 	for _, j := range jobs {
+		a.prepareInitialAppIconGate(j.identity)
 		bridge.DebugLog("[appwin] 就绪边沿 → 应用列表枚举 serial=%q identity=%q", j.serial, j.identity)
 		go a.runAppListEnum(j.identity, j.serial)
 		// v2.1.32：虚拟屏 dpi 参数预热（后台）——设备就绪时顺手把 wm size/density
@@ -180,21 +182,21 @@ func (a *App) waitBestEnumSerial(identity, fallback string, timeout time.Duratio
 	return best
 }
 
-// appListDiff 计算两次应用列表的差异（pkg 集合 + 名称映射；顺序无关）。
+// appListDiff compares package, display name and system-app flag; order is ignored.
 // v2.1.16 列表 diff（联合判据·列表侧）：same 且未超兜底期 → 跳过图标导出。
 func appListDiff(oldList, cur []AppListItem) (same bool, added, removed, renamed []string) {
-	om := make(map[string]string, len(oldList))
+	om := make(map[string]AppListItem, len(oldList))
 	for _, e := range oldList {
-		om[e.Pkg] = e.Name
+		om[e.Pkg] = e
 	}
-	cm := make(map[string]string, len(cur))
+	cm := make(map[string]AppListItem, len(cur))
 	for _, e := range cur {
-		cm[e.Pkg] = e.Name
+		cm[e.Pkg] = e
 	}
-	for pkg, name := range cm {
-		if oldName, ok := om[pkg]; !ok {
+	for pkg, item := range cm {
+		if oldItem, ok := om[pkg]; !ok {
 			added = append(added, pkg)
-		} else if oldName != name {
+		} else if oldItem.Name != item.Name || oldItem.Sys != item.Sys {
 			renamed = append(renamed, pkg)
 		}
 	}
@@ -215,130 +217,59 @@ func appListUpdateRequired(silentDiff, same bool) bool {
 	return !silentDiff || !same
 }
 
-// runAppListEnum 后台执行一次枚举（含重试）→ 内存缓存 + 档案落盘 → diff 决策 → 图标导出。
-// v2.1.16 列表 diff：
-//   - 列表无变化 且 距上次全量 < 24h → 跳过图标导出（push/export/pull 全免，遮罩秒清）；
-//   - 仅卸载（无新增/改名）→ 只删本地 PNG，不起 server；
-//   - 有新增/改名（且全量未超期、变化数 ≤50）→ 定向导出（只导变化的包）；
-//   - 首次/超期/变化过大 → 全量（清目录重导，并记录全量时间）。
-// busy 联合判据（主人 0919）：枚举成功后 busy 交接给图标流程，图标入库才清；
-// 跳过/仅删/任一步失败=立即清（失败静默，下次稳定期重试）。
+// Read cached UI data immediately; reconcile package metadata and icon files in the background.
 func (a *App) runAppListEnum(identity, serial string) {
 	a.runAppListEnumMode(identity, serial, false)
 }
 
-// runAppListEnumMode silentDiff=true 用于入口点击检测：只有与最新缓存存在差异时才
-// 写入列表/档案并继续图标流程；无差异时不更新时间戳、不触发任何 UI 更新。
 func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
-	if !silentDiff {
-		a.mu.Lock()
-		if !a.appListSilent[identity] {
-			if a.appListSilentChanged == nil {
-				a.appListSilentChanged = map[string]bool{}
-			}
-			a.appListSilentChanged[identity] = false
-		}
-		a.mu.Unlock()
-	}
-	// v2.1.84：等 adb 服务就绪（抢庄检测完成）后再枚举——"应用名+图标获取也要
-	// 等 server 确定好了再开始"（此前可能撞上服务重建窗口 → 枚举超时白跑）。
+	defer a.clearAppBusy(identity)
+	a.prepareInitialAppIconGate(identity)
 	a.waitSrvReady(context.Background())
-	// serial 复核（v2.1.21 修复）：枚举触发瞬间可能只有无线卡可见（USB 卡晚 ~2s
-	// 出现），而无线 transport 可能是 stale 档案地址（枚举必超时）——开工前短暂
-	// 等待 USB 出现（纯无线设备最多多等 appListUsbWaitWindow）。
-	serial = a.waitBestEnumSerial(identity, serial, appListUsbWaitWindow)
+	// Prefer available USB immediately. Do not delay every WiFi-only check by 2.5 seconds.
+	serial = a.bestEnumSerial(identity, serial)
 	var items []AppListItem
+	var remote string
 	var err error
 	for attempt := 0; attempt <= appListRetries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(appListRetryGap)
-			serial = a.bestEnumSerial(identity, serial) // 重试前复核（USB 优先）
+			serial = a.bestEnumSerial(identity, serial)
 		}
-		items, err = listAppsOnce(a.scrcpyExePath(), serial)
+		if a.appListKeyFor(serial) != identity {
+			return
+		}
+		items, remote, err = a.listAppCatalogOnce(identity, serial)
 		if err == nil {
 			break
 		}
-		bridge.DebugLog("[appwin] 应用列表枚举尝试%d失败 identity=%q serial=%q: %v", attempt+1, identity, serial, err)
+		bridge.DebugLog("[appwin] catalog attempt=%d identity=%q err=%v", attempt+1, identity, err)
 	}
-	if err != nil {
-		// 失败静默：不弹错、不打扰；下一次稳定期（或手动刷新）自然重试。
-		a.clearAppBusy(identity)
-		bridge.DebugLog("[appwin] 应用列表枚举失败 identity=%q serial=%q: %v", identity, serial, err)
+	if err != nil || a.appListKeyFor(serial) != identity {
 		return
 	}
-
-	// 读档案旧列表 + 上次全量时间（diff 判据）。
-	var oldApps []AppListItem
-	var iconsFullAt int64
-	if e, ok := a.profiles.Entry(identity); ok {
-		oldApps = e.Apps
-		iconsFullAt = e.IconsFullAt
+	var old []AppListItem
+	if entry, ok := a.profiles.Entry(identity); ok {
+		old = entry.Apps
 	}
-	if silentDiff {
-		// 点击检测以最近一次内存列表为准；进程重启或缓存缺失时回退档案。
-		a.mu.RLock()
-		if cached, ok := a.appListCache[identity]; ok && time.Since(cached.at) < appListTTL {
-			oldApps = cached.items
-		}
-		a.mu.RUnlock()
-	}
-	same, added, removed, renamed := appListDiff(oldApps, items)
-	a.markAppListCheckChanged(identity, !same)
-	if !appListUpdateRequired(silentDiff, same) {
-		a.clearAppBusy(identity)
-		bridge.DebugLog("[appwin] 点击检测无差异 identity=%q，保持列表与档案不变", identity)
+	same, _, _, _ := appListDiff(old, items)
+	if err = a.profiles.SetApps(identity, items); err != nil {
+		bridge.DebugLog("[appwin] catalog persist identity=%q err=%v", identity, err)
 		return
 	}
-	fresh := iconsFullAt > 0 && time.Since(time.Unix(iconsFullAt, 0)) < appIconsFullTTL
-
 	a.mu.Lock()
 	if a.appListCache == nil {
 		a.appListCache = map[string]appListEntry{}
 	}
 	a.appListCache[identity] = appListEntry{items: items, at: time.Now()}
 	a.mu.Unlock()
-	if err := a.profiles.SetApps(identity, items); err != nil {
-		a.clearAppBusy(identity)
-		bridge.DebugLog("[appwin] 应用列表入档失败 identity=%q: %v", identity, err)
+	a.markAppListCheckChanged(identity, !same)
+	needed, removed := planAppIcons(a.iconsDirFor(identity), items)
+	bridge.DebugLog("[appwin] catalog identity=%q apps=%d iconDelta=%d removed=%d", identity, len(items), len(needed), len(removed))
+	if len(needed) == 0 && len(removed) == 0 {
 		return
 	}
-	bridge.DebugLog("[appwin] 应用列表已入档 identity=%q：n=%d（diff: +%d -%d ~%d，全量超期=%v）",
-		identity, len(items), len(added), len(removed), len(renamed), !fresh)
-
-	// ① 列表无变化且全量未超期 → 跳过图标导出（v2.1.16：日常插拔的主要快路径）。
-	if same && fresh {
-		a.clearAppBusy(identity)
-		bridge.DebugLog("[appwin] 列表无变化且未超期，跳过图标导出 identity=%q", identity)
-		return
-	}
-
-	// ② 仅卸载（无新增/改名）→ 只删本地 PNG，不起 server（秒级）。
-	if fresh && !same && len(added)+len(renamed) == 0 {
-		iconsDir := a.iconsDirFor(identity)
-		for _, pkg := range removed {
-			if err := os.Remove(filepath.Join(iconsDir, pkg+".png")); err != nil && !os.IsNotExist(err) {
-				bridge.DebugLog("[appwin] 删除本地图标失败 identity=%q pkg=%q: %v", identity, pkg, err)
-			}
-		}
-		a.clearAppBusy(identity)
-		bridge.DebugLog("[appwin] 仅有卸载变化，本地删除完成 identity=%q（removed=%d）", identity, len(removed))
-		return
-	}
-
-	// ③ 定向（新增/改名 ≤50 且未超期）或全量。
-	var only []string
-	mode := "全量"
-	if fresh && !same && len(added)+len(renamed) <= appIconsDirectMax {
-		only = make([]string, 0, len(added)+len(renamed))
-		only = append(only, added...)
-		only = append(only, renamed...)
-		mode = "定向"
-	}
-	bridge.DebugLog("[appwin] 图标导出模式=%s identity=%q（only=%d removed=%d）",
-		mode, identity, len(only), len(removed))
-
-	// Step 1c：列表就绪 → 接图标导出（busy 由图标流程接管并最终清理）。
-	a.runAppIcons(identity, serial, only, removed)
+	a.runAppIconDelta(identity, serial, remote, items, needed, removed)
 }
 
 // clearAppBusy 清「应用」按钮遮罩态（幂等）。
@@ -346,6 +277,7 @@ func (a *App) clearAppBusy(identity string) {
 	a.mu.Lock()
 	delete(a.appListBusy, identity)
 	delete(a.appListSilent, identity)
+	a.releaseInitialAppIconGateLocked(identity)
 	a.mu.Unlock()
 }
 
@@ -358,7 +290,7 @@ func (a *App) markAppListCheckChanged(identity string, changed bool) {
 	a.mu.Unlock()
 }
 
-// touchAppBusy 遮罩心跳续期（有进展=续 10s；已被兜底过期则不复活）。
+// touchAppBusy 记录后台作业进展；不会延长首次无图标遮罩的固定时限。
 func (a *App) touchAppBusy(identity string) {
 	a.mu.Lock()
 	if _, ok := a.appListBusy[identity]; ok {
@@ -373,114 +305,121 @@ const (
 	iconExportTimeout = 90 * time.Second // 起 server 导出图标（实测 ~6s，大余量防老设备）
 	iconPushTimeout   = 30 * time.Second // push server
 	iconPullTimeout   = 60 * time.Second // pull 图标目录
-	// v2.1.16 列表 diff：距上次全量图标导出超过此时长 → 强制全量（兜底抓"图标变了但列表没变"）。
-	appIconsFullTTL = 24 * time.Hour
-	// v2.1.16 定向上限：新增+改名超过此数改走全量（定向逐文件 pull 的成本拐点附近）。
-	appIconsDirectMax = 50
 	serverVersion     = "4.1"            // 与 dist/scrcpy-server 一致（随构建同步）
 )
 
-// runAppIcons 后台导出应用图标：push server → 起 server（export_app_icons）→ pull 入库。
-// v2.1.16：onlyPkgs == nil → 全量（清本地目录 + 全量 pull + 记全量时间）；
-// onlyPkgs 非 nil → 定向（server 只导这些包 + 逐文件 pull；removed 从本地删除；不动其他）。
-// busy 心跳：每阶段完成续 10s；结束（成功/失败）清 busy（遮罩消失）。
-// 与 scrcpy client 解耦：直接 adb 起我们自定义的 server（免 client 改动）。
-func (a *App) runAppIcons(identity, serial string, onlyPkgs []string, removedPkgs []string) {
-	defer a.clearAppBusy(identity)
-
-	distDir := filepath.Dir(a.cfg.BatPath)
-	serverPath := filepath.Join(distDir, "scrcpy-server")
-	iconsDir := a.iconsDirFor(identity)
-	t0 := time.Now()
-	mode := "全量"
-	if onlyPkgs != nil {
-		mode = "定向"
+// All deltas, including an initially empty archive, use a private remote staging directory.
+// A single directory transfer replaces the old one-adb-process-per-package path.
+func (a *App) runAppIconDelta(identity, serial, helper string, items []AppListItem, wanted, removed []string) {
+	if a.appListKeyFor(serial) != identity {
+		return
 	}
-
-	// 1) push server（无脑重推；USB 毫秒级 / 无线 ~1s）
-	pushCtx, pushCancel := context.WithTimeout(context.Background(), iconPushTimeout)
-	err := a.adb.PushFile(pushCtx, serial, serverPath, "/data/local/tmp/scrcpy-server")
-	pushCancel()
+	dir := a.iconsDirFor(identity)
+	if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
+		return
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(dir), ".export-")
 	if err != nil {
-		bridge.DebugLog("[appwin] 图标导出·push 失败 identity=%q serial=%q: %v", identity, serial, err)
 		return
 	}
-	t1 := time.Now()
-	a.touchAppBusy(identity)
-
-	// 2) 起 server 导出（one-shot；成功输出含 "Exported icons: N"）
-	ctx, cancel := context.WithTimeout(context.Background(), iconExportTimeout)
-	defer cancel()
-	exportArg := "export_app_icons=true"
-	if onlyPkgs != nil {
-		exportArg = "export_app_icons=" + strings.Join(onlyPkgs, ",")
-	}
-	shellCmd := "CLASSPATH=/data/local/tmp/scrcpy-server app_process / com.genymobile.scrcpy.Server " +
-		serverVersion + " " + exportArg
-	out, err := a.adb.ShellOut(ctx, serial, shellCmd)
-	if err != nil || !strings.Contains(out, "Exported icons:") {
-		bridge.DebugLog("[appwin] 图标导出·server 失败 identity=%q serial=%q err=%v out=%q",
-			identity, serial, err, strings.TrimSpace(out))
-		return
-	}
-	// server 端细分计时（ICON_TIMING）顺带入日志。
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "ICON_TIMING") {
-			bridge.DebugLog("[appwin] server %s", strings.TrimSpace(line))
-		}
-	}
-	t2 := time.Now()
-	a.touchAppBusy(identity)
-
-	if onlyPkgs != nil {
-		// 3a) 定向：逐文件 pull（N 小）+ removed 本地删除；不动其他图标。
-		if err := os.MkdirAll(iconsDir, 0o755); err != nil {
-			bridge.DebugLog("[appwin] 图标导出·建目录失败 identity=%q dir=%q: %v", identity, iconsDir, err)
+	defer os.RemoveAll(stage)
+	start := time.Now()
+	if len(wanted) > 0 {
+		token := make([]byte, 12)
+		if _, err = rand.Read(token); err != nil {
 			return
 		}
-		for _, pkg := range onlyPkgs {
-			pullCtx, pullCancel := context.WithTimeout(context.Background(), iconPullTimeout)
-			err = a.adb.PullFile(pullCtx, serial,
-				"/data/local/tmp/scrcpy/icons/"+pkg+".png",
-				filepath.Join(iconsDir, pkg+".png"))
-			pullCancel()
-			if err != nil {
-				// 失败静默：单个图标失败不致命（兜底全量会重抓）。
-				bridge.DebugLog("[appwin] 图标导出·定向 pull 失败 identity=%q pkg=%q: %v", identity, pkg, err)
+		remote := fmt.Sprintf("/data/local/tmp/scrcpy/icons-job-%x", token)
+		defer a.cleanRemoteIconStage(serial, remote)
+		for _, chunk := range iconExportChunks(wanted) {
+			if a.appListKeyFor(serial) != identity {
+				return
 			}
-		}
-		for _, pkg := range removedPkgs {
-			if err := os.Remove(filepath.Join(iconsDir, pkg+".png")); err != nil && !os.IsNotExist(err) {
-				bridge.DebugLog("[appwin] 图标导出·删除本地失败 identity=%q pkg=%q: %v", identity, pkg, err)
+			ctx, cancel := context.WithTimeout(context.Background(), iconExportTimeout)
+			out, exportErr := a.adb.ShellOut(ctx, serial, "CLASSPATH="+helper+" app_process / com.genymobile.scrcpy.Server "+serverVersion+" cleanup=false export_app_icons="+strings.Join(chunk, ",")+" export_app_icons_dir="+remote)
+			cancel()
+			if exportErr != nil || !strings.Contains(out, "Exported icons:") || !a.iconExportOwnerMatches(identity, out) {
+				bridge.DebugLog("[appwin] icon export identity=%q err=%v ownerValid=%v", identity, exportErr, a.iconExportOwnerMatches(identity, out))
+				return
 			}
+			a.touchAppBusy(identity)
 		}
-	} else {
-		// 3b) 全量：清本地旧图标 + pull（全量覆盖=与设备一致；卸载应用的残留自然清）
-		if err := os.RemoveAll(iconsDir); err != nil {
-			bridge.DebugLog("[appwin] 图标导出·清理本地失败 identity=%q dir=%q: %v", identity, iconsDir, err)
+		if a.appListKeyFor(serial) != identity {
 			return
 		}
-		if err := os.MkdirAll(iconsDir, 0o755); err != nil {
-			bridge.DebugLog("[appwin] 图标导出·建目录失败 identity=%q dir=%q: %v", identity, iconsDir, err)
-			return
-		}
-		pullCtx, pullCancel := context.WithTimeout(context.Background(), iconPullTimeout)
-		err = a.adb.PullDir(pullCtx, serial, "/data/local/tmp/scrcpy/icons/.", iconsDir)
-		pullCancel()
+		ctx, cancel := context.WithTimeout(context.Background(), iconPullTimeout)
+		err = a.adb.PullDir(ctx, serial, remote+"/.", stage)
+		cancel()
 		if err != nil {
-			bridge.DebugLog("[appwin] 图标导出·pull 失败 identity=%q serial=%q: %v", identity, serial, err)
+			bridge.DebugLog("[appwin] icon bulk pull identity=%q err=%v", identity, err)
 			return
 		}
-		// 全量完成 → 记录时间（列表 diff 的兜底判据）。
-		if err := a.profiles.SetIconsFullAt(identity, time.Now().Unix()); err != nil {
-			bridge.DebugLog("[appwin] 图标全量时间落档失败 identity=%q: %v", identity, err)
+	}
+	changed, err := a.commitIconDelta(identity, serial, stage, items, wanted, removed)
+	a.markIconsChanged(identity, changed)
+	a.mu.Lock()
+	a.releaseInitialAppIconGateLocked(identity)
+	a.mu.Unlock()
+	bridge.DebugLog("[appwin] icon delta identity=%q requested=%d committed=%d removed=%d total=%dms err=%v", identity, len(wanted), len(changed), len(removed), time.Since(start).Milliseconds(), err)
+}
+
+func (a *App) iconExportOwnerMatches(identity, out string) bool {
+	const marker = "SCEZ_ICON_OWNER:"
+	pos := strings.Index(out, marker)
+	if pos < 0 {
+		return false
+	}
+	physical := adb.StableSerial(strings.TrimSpace(strings.SplitN(out[pos+len(marker):], "\n", 2)[0]))
+	if physical == "" {
+		return true
+	} // property may be inaccessible; transport ownership guard still applies
+	entry, ok := a.profiles.Entry(identity)
+	return ok && contains(entry.Serials, physical)
+}
+
+// A delayed pull must not write a new IP owner's icons into the old archive.
+func (a *App) commitAppIcons(identity, serial, stageDir string, onlyPkgs, removedPkgs []string) (bool, error) {
+	if a.appListKeyFor(serial) != identity {
+		return false, nil
+	}
+	dir := a.iconsDirFor(identity)
+	if onlyPkgs == nil {
+		entries, err := os.ReadDir(stageDir)
+		if err != nil {
+			return false, err
+		}
+		onlyPkgs = []string{}
+		for _, entry := range entries {
+			pkg := strings.TrimSuffix(entry.Name(), ".png")
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".png") && rePkgName.MatchString(pkg) {
+				onlyPkgs = append(onlyPkgs, pkg)
+			}
 		}
 	}
-
-	bridge.DebugLog("[appwin] 图标分段计时 identity=%q：push=%dms export=%dms pull=%dms total=%dms（%s）",
-		identity, t1.Sub(t0).Milliseconds(), t2.Sub(t1).Milliseconds(),
-		time.Since(t2).Milliseconds(), time.Since(t0).Milliseconds(), mode)
-	bridge.DebugLog("[appwin] 应用图标已入库 identity=%q：n=%d dir=%q", identity, countPNGs(iconsDir), iconsDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false, err
+	}
+	for _, pkg := range onlyPkgs {
+		if !rePkgName.MatchString(pkg) {
+			continue
+		}
+		from := filepath.Join(stageDir, pkg+".png")
+		if _, err := os.Stat(from); os.IsNotExist(err) {
+			continue // keep the prior icon when a single pull failed
+		}
+		if err := os.Rename(from, filepath.Join(dir, pkg+".png")); err != nil {
+			return false, err
+		}
+	}
+	for _, pkg := range removedPkgs {
+		if !rePkgName.MatchString(pkg) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, pkg+".png")); err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // countPNGs 数目录内 .png 文件（日志用）。
@@ -510,14 +449,40 @@ func (a *App) GetAppIcon(serial, pkg string) (string, error) {
 	}
 	b, err := os.ReadFile(filepath.Join(a.iconsDirFor(key), pkg+".png"))
 	if err != nil {
+		if legacy := a.legacyIconsDirFor(key); legacy != "" {
+			b, err = os.ReadFile(filepath.Join(legacy, pkg+".png"))
+		}
+	}
+	if err != nil {
 		return "", nil
 	}
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b), nil
 }
 
-// iconsDirFor 图标缓存目录：<档案目录>/icons/<identity 安全化>/（跟设备、跟软件目录）。
+// iconsDirFor 用完整档案键的哈希隔离图标，避免大小写和非法文件名替换造成碰撞。
 func (a *App) iconsDirFor(identity string) string {
-	return filepath.Join(filepath.Dir(a.profiles.Path()), "icons", sanitizeFileName(identity))
+	digest := sha256.Sum256([]byte(identity))
+	return filepath.Join(filepath.Dir(a.profiles.Path()), "icons", fmt.Sprintf("device-%x", digest))
+}
+
+// Legacy name directories are readable only when their name identifies exactly
+// one old archive. New identities never read a same-model device's cached icons.
+func (a *App) legacyIconsDirFor(identity string) string {
+	if strings.HasPrefix(identity, "device:") || strings.HasPrefix(identity, "pending:") {
+		return ""
+	}
+	a.profiles.mu.Lock()
+	defer a.profiles.mu.Unlock()
+	if a.profiles.data.Devices[identity] == nil {
+		return ""
+	}
+	name := sanitizeFileName(identity)
+	for key := range a.profiles.data.Devices {
+		if key != identity && strings.EqualFold(sanitizeFileName(key), name) {
+			return ""
+		}
+	}
+	return filepath.Join(filepath.Dir(a.profiles.Path()), "icons", name)
 }
 
 // sanitizeFileName 去掉 Windows 文件名非法字符（空格保留，保持可读）。
@@ -645,6 +610,7 @@ func (a *App) RefreshAppList(serial string) error {
 	if key == "" {
 		return errors.New("未指定设备")
 	}
+	a.prepareInitialAppIconGate(key)
 	a.mu.Lock()
 	if a.appListBusy == nil {
 		a.appListBusy = map[string]time.Time{}
@@ -665,6 +631,7 @@ func (a *App) resetAppListCheckResultLocked(key string) {
 		a.appListSilentChanged = map[string]bool{}
 	}
 	a.appListSilentChanged[key] = false
+	delete(a.appIconsChanged, key)
 }
 
 // beginAppListCheckLocked 复用枚举 busy 作为设备级防重闸；静默标志独立于 busy，
@@ -699,6 +666,7 @@ func (a *App) CheckAppList(serial string) (bool, error) {
 	if key == "" {
 		return false, errors.New("未指定设备")
 	}
+	a.prepareInitialAppIconGate(key)
 	a.mu.Lock()
 	start := a.beginAppListCheckLocked(key)
 	a.mu.Unlock()
@@ -709,8 +677,10 @@ func (a *App) CheckAppList(serial string) (bool, error) {
 }
 
 type AppListCheckStatus struct {
-	Busy    bool `json:"busy"`
-	Changed bool `json:"changed"`
+	Busy            bool     `json:"busy"`
+	Changed         bool     `json:"changed"`
+	Icons           []string `json:"icons,omitempty"`
+	InitialIconBusy bool     `json:"initialIconBusy,omitempty"`
 }
 
 // IsAppListCheckBusy 用于前端静默等待列表及图标均处理完毕，并确认是否真的需要换列表。
@@ -720,7 +690,7 @@ func (a *App) IsAppListCheckBusy(serial string) (AppListCheckStatus, error) {
 		return AppListCheckStatus{}, errors.New("未指定设备")
 	}
 	a.mu.RLock()
-	status := AppListCheckStatus{Busy: a.appListSilent[key], Changed: a.appListSilentChanged[key]}
+	status := AppListCheckStatus{Busy: a.appListSilent[key], Changed: a.appListSilentChanged[key], Icons: append([]string(nil), a.appIconsChanged[key]...), InitialIconBusy: a.initialAppIconBusyLocked(key, time.Now())}
 	a.mu.RUnlock()
 	return status, nil
 }
@@ -735,8 +705,7 @@ func (a *App) appListKeyFor(serial string) string {
 	for i := range a.devices {
 		d := &a.devices[i]
 		if d.Serial == serial || d.Wireless == serial {
-			if d.Identity != "" {
-				id := d.Identity
+			if id := a.identityOf(d); id != "" {
 				a.mu.RUnlock()
 				return id
 			}

@@ -93,7 +93,7 @@ func TestGui49Fix6StableTimerResetsOnFluctuation(t *testing.T) {
 func TestGui49Fix6TimeoutConnectSuccess(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix3SeedK80(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555")
 	ops := &teachfix3Ops{port: "0"}
 	ops.install(a)
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error { return nil }

@@ -12,7 +12,7 @@ func mdns10Seed(a *App, native string, usb, wifi ModeProfile) {
 	seedProfiles(a, map[string]*DeviceEntry{
 		"REDMI K80": {
 			Marketname: "REDMI K80",
-			Model:      "MODEL123",
+			Model:      "12345TESTA",
 			Serials:    []string{"TEST0001"},
 			Res:        native,
 			Addrs: []AddrEntry{
@@ -150,8 +150,8 @@ func TestGui48Mdns10OfflineCardNoSpecNoError(t *testing.T) {
 	a, _ := newWirelessApp()
 	p := DefaultProfile()
 	mdns10Seed(a, "2560x1708", p.Usb, p.Wifi)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555")
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:45005")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:45005")
 
 	out := mdns10Commit(t, a, nil)
 	if len(out) != 1 {

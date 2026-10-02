@@ -83,7 +83,7 @@ func TestGui37TlsAbsentMarksStaleAndStartCastPicksTcpip(t *testing.T) {
 
 	runGui37Scan(t, a, gui37MdnsTcpipOnly())
 
-	e, ok := a.profiles.Entry("TEST0002")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if !ok {
 		t.Fatal("档案应可解析")
 	}
@@ -95,7 +95,7 @@ func TestGui37TlsAbsentMarksStaleAndStartCastPicksTcpip(t *testing.T) {
 	if tcpip == nil || tcpip.Stale {
 		t.Fatalf("5555 广播在场不应打标: %+v", tcpip)
 	}
-	got := a.profiles.OrderedAddrs("TEST0002")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.162:5555" || got[0].State != AddrStateActive ||
 		got[1].Addr != "192.0.2.162:42627" || got[1].State != AddrStateStale {
 		t.Fatalf("OrderedAddrs 应 active 5555 优先、stale TLS 作离线候选: %+v", got)
@@ -135,7 +135,7 @@ func TestGui37TlsRebroadcastClearsStaleAndOrderedAddrsIncludesTls(t *testing.T) 
 	a.profiles.MarkMdnsAbsentStale([]MdnsMatch{
 		{Name: "adb-TEST0002", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	e0, _ := a.profiles.Entry("TEST0002")
+	e0, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if tls0 := gui24FindAddr(e0, "192.0.2.162:42627"); tls0 == nil || !tls0.Stale {
 		t.Fatalf("前置：TLS 应已打标: %+v", tls0)
 	}
@@ -143,12 +143,12 @@ func TestGui37TlsRebroadcastClearsStaleAndOrderedAddrsIncludesTls(t *testing.T) 
 	// 本轮 TLS 广播再现
 	runGui37Scan(t, a, gui37MdnsTlsOnly())
 
-	e, _ := a.profiles.Entry("TEST0002")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil || tls.Stale {
 		t.Fatalf("TLS 广播再现应清除 Stale（复活）: %+v", tls)
 	}
-	got := a.profiles.OrderedAddrs("TEST0002")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" || got[0].State != AddrStateActive ||
 		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("复活后 OrderedAddrs 应 active TLS 优先（5555 本轮缺席变 stale 候选）: %+v", got)
@@ -164,12 +164,12 @@ func TestGui37TcpipAbsentMarksStaleAndDirectPicksTls(t *testing.T) {
 
 	runGui37Scan(t, a, gui37MdnsTlsOnly())
 
-	e, _ := a.profiles.Entry("TEST0002")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	tcpip := gui24FindAddr(e, "192.0.2.162:5555")
 	if tcpip == nil || !tcpip.Stale {
 		t.Fatalf("5555 广播缺席应打标 Stale=true: %+v", tcpip)
 	}
-	got := a.profiles.OrderedAddrs("TEST0002")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" || got[0].State != AddrStateActive ||
 		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("OrderedAddrs 应 active TLS 优先、stale 5555 作离线候选: %+v", got)
@@ -206,7 +206,7 @@ func TestGui37EmptySnapshotNoMark(t *testing.T) {
 
 	runGui37Scan(t, a, nil) // 成功扫描、无任何广播
 
-	e, _ := a.profiles.Entry("TEST0002")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	tcpip := gui24FindAddr(e, "192.0.2.162:5555")
 	if tls == nil || tls.Stale {
@@ -215,7 +215,7 @@ func TestGui37EmptySnapshotNoMark(t *testing.T) {
 	if tcpip == nil || tcpip.Stale {
 		t.Fatalf("空快照不应打标 tcpip: %+v", tcpip)
 	}
-	got := a.profiles.OrderedAddrs("TEST0002")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" || got[1].Addr != "192.0.2.162:5555" {
 		t.Fatalf("空快照应保持两个形态原样参与: %+v", got)
 	}
@@ -227,7 +227,7 @@ func TestGui37StaleEntriesRetainedInArchive(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui37SeedTablet(a)
 
-	eBefore, _ := a.profiles.Entry("TEST0002")
+	eBefore, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	tlsBefore := gui24FindAddr(eBefore, "192.0.2.162:42627")
 	if tlsBefore == nil {
 		t.Fatal("前置 TLS 条目应存在")
@@ -236,7 +236,7 @@ func TestGui37StaleEntriesRetainedInArchive(t *testing.T) {
 
 	runGui37Scan(t, a, gui37MdnsTcpipOnly())
 
-	e, _ := a.profiles.Entry("TEST0002")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil {
 		t.Fatalf("打标不应删除 TLS 条目: %+v", e.Addrs)
@@ -271,7 +271,7 @@ func TestGui37BroadcastNewTlsPortRetireNotRegress(t *testing.T) {
 		{Type: "_adb-tls-connect._tcp", Name: "adb-TEST0002-Ab12Cd", Addr: "192.0.2.162:45005", Mode: discovery.MdnsModeTls},
 	})
 
-	e, _ := a.profiles.Entry("TEST0002")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	newTls := gui24FindAddr(e, "192.0.2.162:45005")
 	if newTls == nil || newTls.State != AddrStateActive || newTls.Stale {
 		t.Fatalf("新 TLS 广播应入档 active 且未打标: %+v", newTls)
@@ -279,7 +279,7 @@ func TestGui37BroadcastNewTlsPortRetireNotRegress(t *testing.T) {
 	if gui24FindAddr(e, "192.0.2.162:42627") != nil {
 		t.Fatalf("旧 TLS 应按单记忆删除（不再 history）: %+v", e.Addrs)
 	}
-	got := a.profiles.OrderedAddrs("TEST0002")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.162:45005" || got[0].State != AddrStateActive ||
 		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("候选应 active 新 TLS 45005 优先（5555 本轮缺席变 stale 候选）: %+v", got)
@@ -296,14 +296,14 @@ func TestGui37AddrSuccessWithModeClearsStale(t *testing.T) {
 	a.profiles.MarkMdnsAbsentStale([]MdnsMatch{
 		{Name: "adb-TEST0002", Addr: "192.0.2.162:5555", Mode: discovery.MdnsModeTcpip},
 	})
-	e0, _ := a.profiles.Entry("TEST0002")
+	e0, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if tls0 := gui24FindAddr(e0, "192.0.2.162:42627"); tls0 == nil || !tls0.Stale {
 		t.Fatalf("前置：TLS 应已打标: %+v", tls0)
 	}
 
-	a.profiles.AddrSuccessWithMode("TEST0002", "192.0.2.162:42627", ModeTls)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "TEST0002"), "192.0.2.162:42627", ModeTls)
 
-	e, _ := a.profiles.Entry("TEST0002")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0002"))
 	tls := gui24FindAddr(e, "192.0.2.162:42627")
 	if tls == nil || tls.Stale {
 		t.Fatalf("连接成功应解除打标: %+v", tls)
@@ -311,7 +311,7 @@ func TestGui37AddrSuccessWithModeClearsStale(t *testing.T) {
 	if tls.State != AddrStateActive || tls.LastFail != 0 {
 		t.Fatalf("连接成功应恢复 active/清 lastFail: %+v", tls)
 	}
-	got := a.profiles.OrderedAddrs("TEST0002")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.162:42627" {
 		t.Fatalf("解除打标后 TLS 应重新参与候选: %+v", got)
 	}

@@ -16,6 +16,7 @@
 
 #include "audio_player.h"
 #include "controller.h"
+#include "clipboard_sync.h"
 #include "decoder.h"
 #include "demuxer.h"
 #include "events.h"
@@ -43,6 +44,72 @@
 #include "util/term.h"
 #include "util/timeout.h"
 #include "util/tick.h"
+
+#ifdef _WIN32
+struct session_monitor {
+    HANDLE done, stop, route, parent, thread;
+};
+
+static DWORD WINAPI
+session_monitor_run(void *data) {
+    struct session_monitor *m = data;
+    HANDLE handles[4];
+    DWORD count = 0, route_index = 0;
+    handles[count++] = m->done;
+    if (m->stop) { handles[count++] = m->stop; }
+    if (m->parent) { handles[count++] = m->parent; }
+    if (m->route) { route_index = count; handles[count++] = m->route; }
+    DWORD result = WaitForMultipleObjects(count, handles, FALSE, INFINITE);
+    if (result == WAIT_OBJECT_0) { return 0; }
+    if (result >= WAIT_OBJECT_0 + count) {
+        LOGE("Session control wait failed: %lu (error=%lu)",
+             (unsigned long) result, (unsigned long) GetLastError());
+        return 0;
+    }
+    bool route = m->route && result == WAIT_OBJECT_0 + route_index;
+    const char *cause = route ? "route"
+        : m->stop && handles[result - WAIT_OBJECT_0] == m->stop ? "stop"
+        : "parent";
+    fprintf(stdout, "SCRCPY_EZ_CONTROL cause=%s\n", cause);
+    fflush(stdout);
+    sc_push_event(route ? SC_EVENT_ROUTE_SWITCH : SDL_EVENT_QUIT);
+    return 0;
+}
+
+static bool
+session_monitor_start(struct session_monitor *m) {
+    memset(m, 0, sizeof(*m));
+    const char *stop = getenv("SCEZ_EVENT_STOP_NAME");
+    const char *route = getenv("SCEZ_EVENT_SWITCH_NAME");
+    const char *parent = getenv("SCEZ_EVENT_SUPERVISOR_PID");
+    if (!stop || !route || !parent) { return true; }
+    m->stop = OpenEventA(SYNCHRONIZE, FALSE, stop);
+    m->route = OpenEventA(SYNCHRONIZE, FALSE, route);
+    m->parent = OpenProcess(SYNCHRONIZE, FALSE, (DWORD) strtoul(parent, NULL, 10));
+    m->done = CreateEventA(NULL, TRUE, FALSE, NULL);
+    if (m->done && m->stop && m->route && m->parent) {
+        m->thread = CreateThread(NULL, 0, session_monitor_run, m, 0, NULL);
+    }
+    if (!m->thread) {
+        LOGE("Session control unavailable");
+        return false;
+    }
+    return true;
+}
+
+static void
+session_monitor_finish(struct session_monitor *m) {
+    if (m->thread) {
+        SetEvent(m->done);
+        WaitForSingleObject(m->thread, INFINITE);
+        CloseHandle(m->thread);
+    }
+    if (m->done) { CloseHandle(m->done); }
+    if (m->stop) { CloseHandle(m->stop); }
+    if (m->route) { CloseHandle(m->route); }
+    if (m->parent) { CloseHandle(m->parent); }
+}
+#endif
 #ifdef HAVE_V4L2
 # include "v4l2_sink.h"
 #endif
@@ -158,6 +225,11 @@ event_loop(struct scrcpy *s, bool has_screen) {
                 fflush(stdout);
                 restore_device_screen(s, has_screen);
                 return SCRCPY_EXIT_SUCCESS;
+            case SC_EVENT_ROUTE_SWITCH:
+                fprintf(stdout, "SCRCPY_EZ_ROUTE_SWITCH\n");
+                fflush(stdout);
+                restore_device_screen(s, has_screen);
+                return SCRCPY_EXIT_ROUTE_SWITCH;
             case SC_EVENT_STOP_MIRRORING:
                 // scrcpy-ez: user pressed "stop mirroring" on the device
                 // notification. Treated exactly like a user closing the window:
@@ -175,15 +247,19 @@ event_loop(struct scrcpy *s, bool has_screen) {
                 break;
         }
     }
+    LOGE("SDL_WaitEvent() error: %s", SDL_GetError());
     return SCRCPY_EXIT_FAILURE;
 }
 
 // Return true on success, false on error
-static bool
+static int
 await_for_server(bool *connected) {
     SDL_Event event;
     while (SDL_WaitEvent(&event)) {
         switch (event.type) {
+            case SC_EVENT_ROUTE_SWITCH:
+                if (connected) { *connected = false; }
+                return 2;
             case SDL_EVENT_QUIT:
                 if (connected) {
                     *connected = false;
@@ -387,6 +463,14 @@ scrcpy(struct scrcpy_options *options) {
 
     atexit(SDL_Quit);
 
+#ifdef _WIN32
+    struct session_monitor session;
+    if (!session_monitor_start(&session)) {
+        session_monitor_finish(&session);
+        return SCRCPY_EXIT_FAILURE;
+    }
+#endif
+
     enum scrcpy_exit_code ret = SCRCPY_EXIT_FAILURE;
 
     bool server_started = false;
@@ -503,8 +587,8 @@ scrcpy(struct scrcpy_options *options) {
     server_started = true;
 
     if (options->list) {
-        bool ok = await_for_server(NULL);
-        ret = ok ? SCRCPY_EXIT_SUCCESS : SCRCPY_EXIT_FAILURE;
+        int ok = await_for_server(NULL);
+        ret = ok == 2 ? SCRCPY_EXIT_ROUTE_SWITCH : ok ? SCRCPY_EXIT_SUCCESS : SCRCPY_EXIT_FAILURE;
         goto end;
     }
 
@@ -545,7 +629,9 @@ scrcpy(struct scrcpy_options *options) {
 
     // Await for server without blocking Ctrl+C handling
     bool connected;
-    if (!await_for_server(&connected)) {
+    int awaited = await_for_server(&connected);
+    if (awaited == 2) { ret = SCRCPY_EXIT_ROUTE_SWITCH; goto end; }
+    if (!awaited) {
         LOGE("Server connection failed");
         goto end;
     }
@@ -572,6 +658,11 @@ scrcpy(struct scrcpy_options *options) {
 
     const char *serial = s->server.serial;
     assert(serial);
+#ifdef _WIN32
+    if (!sc_clipboard_sync_init(serial)) {
+        LOGW("Clipboard coordinator unavailable; automatic push is disabled");
+    }
+#endif
 
     struct sc_file_pusher *fp = NULL;
 
@@ -977,6 +1068,8 @@ aoa_complete:
         }
     }
 
+    fprintf(stdout, "SCRCPY_EZ_READY\n");
+    fflush(stdout);
     ret = event_loop(s, options->window);
 
     // Reject all new runnables, and execute the pending ones now
@@ -1111,5 +1204,11 @@ end:
 
     sc_server_destroy(&s->server);
 
+#ifdef _WIN32
+    sc_clipboard_sync_destroy();
+    session_monitor_finish(&session);
+#endif
+    fprintf(stdout, "SCRCPY_EZ_EXIT code=%d\n", ret);
+    fflush(stdout);
     return ret;
 }

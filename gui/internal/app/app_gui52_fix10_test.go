@@ -42,10 +42,10 @@ func TestGui52Fix10PairArchiveUsesMdnsAuthorityPort(t *testing.T) {
 
 	// 档案 TLS 应为 mdns 权威端口 35195，而非 pair 返回的 33895
 	waitFor(t, 2*time.Second, func() bool {
-		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 		return ok && gui50Fix45EntryHasAddr(e, "192.168.1.2:35195", ModeTls)
 	}, "配对入档应用 mdns 权威 TLS 端口")
-	e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatal("配对应建档")
 	}
@@ -86,10 +86,10 @@ func TestGui52Fix10NoMdnsServiceFallbackPairPort(t *testing.T) {
 	}
 	waitPairPhase(t, a, PairPhaseSuccess)
 	waitFor(t, 2*time.Second, func() bool {
-		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 		return ok && gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls)
 	}, "无 mdns 权威时应回退 pair 返回端口入档")
-	e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatal("配对应建档")
 	}

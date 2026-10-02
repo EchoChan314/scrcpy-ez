@@ -19,10 +19,14 @@ enum sc_device_msg_type {
     DEVICE_MSG_TYPE_ABR_STATE,
     // scrcpy-ez: device-side "stop mirroring" request (device notification action)
     DEVICE_MSG_TYPE_STOP_MIRRORING,
+    DEVICE_MSG_TYPE_CLIPBOARD_SNAPSHOT,
+    DEVICE_MSG_TYPE_IMAGE_CLIPBOARD_SNAPSHOT,
 };
 
 struct sc_device_msg {
     enum sc_device_msg_type type;
+    uint64_t clipboard_revision;
+    uint32_t clipboard_pc_sequence; // local metadata, never serialized
     union {
         struct {
             char *text; // owned, to be freed by free()

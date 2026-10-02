@@ -18,8 +18,8 @@
 #define SC_CONTROL_MSG_MAX_SIZE (1 << 28)
 
 #define SC_CONTROL_MSG_INJECT_TEXT_MAX_LENGTH 300
-// type: 1 byte; sequence: 8 bytes; paste flag: 1 byte; length: 4 bytes
-#define SC_CONTROL_MSG_CLIPBOARD_TEXT_MAX_LENGTH (SC_CONTROL_MSG_MAX_SIZE - 14)
+// type + sequence + paste + length + the optional epoch/version (16 bytes)
+#define SC_CONTROL_MSG_CLIPBOARD_TEXT_MAX_LENGTH (SC_CONTROL_MSG_MAX_SIZE - 30)
 
 #define SC_CONTROL_MSG_SCAN_FILE_PATH_MAX_LENGTH 256
 
@@ -58,6 +58,8 @@ enum sc_control_msg_type {
     // (already stored in the device clipboard cache) to the gallery and
     // triggers a media scan, so it appears in the gallery app.
     SC_CONTROL_MSG_TYPE_SAVE_CLIPBOARD_IMAGE_TO_GALLERY,
+    SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED,
+    SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED,
 };
 
 enum sc_copy_key {
@@ -68,6 +70,9 @@ enum sc_copy_key {
 
 struct sc_control_msg {
     enum sc_control_msg_type type;
+    uint64_t clipboard_epoch;
+    uint64_t clipboard_version;
+    uint32_t clipboard_pc_sequence;
     union {
         struct {
             enum android_keyevent_action action;

@@ -62,6 +62,9 @@ function eq(name, got, want) {
 })();
 
 // --- 输入防御 ---
+const reused = M.activeSessionMap([{serial:'192.0.2.10:5555',active:true,identity:'device:A'}]);
+ok('DHCP 地址复用不能把 A 会话贴到 B 卡', M.matchSession({serial:'192.0.2.10:5555',identity:'device:B'}, reused) === null);
+ok('待确认卡不能认领旧档案会话', M.matchSession({serial:'192.0.2.10:5555',identity:'pending:192.0.2.10:5555'}, reused) === null);
 ok('matchSession null 输入安全', M.matchSession(null, {}) === null);
 ok('matchSession 空表安全', M.matchSession({ serial: 'A' }, null) === null);
 

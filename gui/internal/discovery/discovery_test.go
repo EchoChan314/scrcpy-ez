@@ -33,7 +33,7 @@ func TestParseMdnsServices(t *testing.T) {
 	out := `List of discovered mdns services
 _adb-tls-connect._tcp	R58T00WA0YM	192.0.2.162:5555
 _adb-tls-pairing._tcp	R58T00WA0YM	local
-_adb-tls-connect._tcp	MODEL123._adb-tls._tcp	local
+_adb-tls-connect._tcp	12345TESTA._adb-tls._tcp	local
 _http._tcp	some-web-service	10.0.0.1:80
 
 `
@@ -49,7 +49,7 @@ _http._tcp	some-web-service	10.0.0.1:80
 		t.Fatalf("local（未解析）行应为空地址: %+v", svcs[1])
 	}
 	// 实例名带 _adb-tls 后缀：名字保留原样（供 serial 匹配），地址为空
-	if svcs[2].Name != "MODEL123._adb-tls._tcp" || svcs[2].Addr != "" {
+	if svcs[2].Name != "12345TESTA._adb-tls._tcp" || svcs[2].Addr != "" {
 		t.Fatalf("实例名后缀行解析错误: %+v", svcs[2])
 	}
 }

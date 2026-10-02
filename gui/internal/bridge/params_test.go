@@ -15,6 +15,16 @@ func envMap(env []string) map[string]string {
 	return m
 }
 
+func TestCastEnvFullSerialPinIndependentOfUSB(t *testing.T) {
+	values := envMap(castEnv(CastParams{ExpectedSerial: "PHONE_A", Addr: "192.0.2.10:5555"}, "identity-test"))
+	if values["SCEZ_EXPECT_SERIAL"] != "PHONE_A" || values["SCEZ_ADDR"] != "192.0.2.10:5555" {
+		t.Fatal(values)
+	}
+	if _, ok := values["SCEZ_SERIAL"]; ok {
+		t.Fatal("wireless identity pin pretended USB was online")
+	}
+}
+
 // 设置面板开关 A：参数控件启动可见性注入（SCEZ_PARAM_OVERLAY）。
 // GUI→bat→scrcpy.exe 的注入链在 GUI 侧的最后一环就是这里——客户端侧读取逻辑
 // 由 02_client/tests/overlay_env_test.c 覆盖。
@@ -61,11 +71,11 @@ func TestCastEnvParamOverlay(t *testing.T) {
 func TestCastEnvLegacyFieldsUnchanged(t *testing.T) {
 	params := CastParams{
 		Usb:    ModeParams{Res: 1920, FPS: 60, Bitrate: 8, Set: true},
-		Serial: "MODEL123",
+		Serial: "12345TESTA",
 		Addr:   "192.0.2.197:5555",
 		Addr2:  "192.0.2.197:45005",
 		Market: "Redmi K80",
-		Model:  "MODEL123",
+		Model:  "12345TESTA",
 	}
 	env := envMap(castEnv(params, "tag-1"))
 	want := map[string]string{
@@ -73,11 +83,11 @@ func TestCastEnvLegacyFieldsUnchanged(t *testing.T) {
 		"SCEZ_RES_USB":      "1920",
 		"SCEZ_FPS_USB":      "60",
 		"SCEZ_BITRATE_USB":  "8",
-		"SCEZ_SERIAL":       "MODEL123",
+		"SCEZ_SERIAL":       "12345TESTA",
 		"SCEZ_ADDR":         "192.0.2.197:5555",
 		"SCEZ_ADDR2":        "192.0.2.197:45005",
 		"SCEZ_MARKET":       "Redmi K80",
-		"SCEZ_MODEL":        "MODEL123",
+		"SCEZ_MODEL":        "12345TESTA",
 		"SCEZ_WATCH_TAG":    "tag-1",
 	}
 	for k, v := range want {
@@ -134,10 +144,10 @@ func TestCastEnvVirtualDisplay(t *testing.T) {
 	}
 	env = envMap(castEnv(params, "tag-vd"))
 	want := map[string]string{
-		"SCEZ_VD_SIZE":  "1280x720",
-		"SCEZ_VD_DPI":   "240",
-		"SCEZ_VD_FLEX":  "1",
-		"SCEZ_VD_IME":   "local",
+		"SCEZ_VD_SIZE":   "1280x720",
+		"SCEZ_VD_DPI":    "240",
+		"SCEZ_VD_FLEX":   "1",
+		"SCEZ_VD_IME":    "local",
 		"SCEZ_START_APP": "+com.android.browser",
 		"SCEZ_WIN_TITLE": "浏览器",
 	}

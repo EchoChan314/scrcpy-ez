@@ -129,10 +129,10 @@ func TestDecorateTlsDeadAddrNoTlsTag(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui17SeedK80(a, 2)
 	a.profiles.mu.Lock()
-	for i := range a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs {
-		if addrEntryClass(a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[i]) == ModeTls {
-			a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[i].State = AddrStateStale
-			a.profiles.data.Devices["Xiaomi Pad 8 Pro"].Addrs[i].Stale = true
+	for i := range a.profiles.data.Devices[fixtureArchiveKeyLocked(a.profiles, "Xiaomi Pad 8 Pro")].Addrs {
+		if addrEntryClass(a.profiles.data.Devices[fixtureArchiveKeyLocked(a.profiles, "Xiaomi Pad 8 Pro")].Addrs[i]) == ModeTls {
+			a.profiles.data.Devices[fixtureArchiveKeyLocked(a.profiles, "Xiaomi Pad 8 Pro")].Addrs[i].State = AddrStateStale
+			a.profiles.data.Devices[fixtureArchiveKeyLocked(a.profiles, "Xiaomi Pad 8 Pro")].Addrs[i].Stale = true
 		}
 	}
 	a.profiles.mu.Unlock()

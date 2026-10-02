@@ -5,41 +5,6 @@ import (
 	"testing"
 )
 
-// --- Stop 杀树顺序契约（双投屏修复） ---
-
-// 顺序契约：先整树 taskkill /T（cmd 存活），再 Process.Kill 兜底——历史 bug 是先
-// Kill（只杀 cmd）→ taskkill 128 → scrcpy 逃逸成孤儿 → 保存重投后双窗口。
-// 残余 scrcpy 兜底复查必须在 adb kill-server 之前（杀服前窗口先归零）。
-func TestStopStepsOrderContract(t *testing.T) {
-	idx := func(name string) int {
-		for i, s := range stopSteps {
-			if s == name {
-				return i
-			}
-		}
-		t.Fatalf("stopSteps 缺步骤 %s: %v", name, stopSteps)
-		return -1
-	}
-	if idx("treekill") != 0 {
-		t.Fatalf("第一步必须是整树 taskkill /T: %v", stopSteps)
-	}
-	if idx("treekill") >= idx("killcmd") {
-		t.Fatalf("treekill 必须先于 killcmd: %v", stopSteps)
-	}
-	if idx("killcmd") >= idx("watchtag") {
-		t.Fatalf("killcmd 必须先于 watcher 补杀: %v", stopSteps)
-	}
-	if idx("watchtag") >= idx("residual") {
-		t.Fatalf("watcher 补杀必须先于残余 scrcpy 复查: %v", stopSteps)
-	}
-	if idx("residual") >= idx("adbserver") {
-		t.Fatalf("残余 scrcpy 复查必须先于杀服: %v", stopSteps)
-	}
-	if len(stopSteps) != 5 {
-		t.Fatalf("步骤数异常: %v", stopSteps)
-	}
-}
-
 // --- scrcpy 进程枚举解析 ---
 
 func TestParseScrcpyProcs(t *testing.T) {
@@ -89,10 +54,10 @@ func TestScrcpyCmdlineMatches(t *testing.T) {
 
 func TestResidualScrcpyCandidates(t *testing.T) {
 	procs := []scrcpyProc{
-		{pid: 400, ppid: 99, cmdline: `scrcpy.exe --serial TEST0002`},           // 别的会话（平板）
-		{pid: 300, ppid: 42, cmdline: `scrcpy.exe --serial TEST0001`},           // 本会话：命令行命中
-		{pid: 100, ppid: 42, cmdline: `scrcpy.exe --serial x`},                  // 本会话：父链命中
-		{pid: 200, ppid: 42, cmdline: `scrcpy.exe --serial TEST0001`},           // 本会话：双命中
+		{pid: 400, ppid: 99, cmdline: `scrcpy.exe --serial TEST0002`},        // 别的会话（平板）
+		{pid: 300, ppid: 42, cmdline: `scrcpy.exe --serial TEST0001`},        // 本会话：命令行命中
+		{pid: 100, ppid: 42, cmdline: `scrcpy.exe --serial x`},               // 本会话：父链命中
+		{pid: 200, ppid: 42, cmdline: `scrcpy.exe --serial TEST0001`},        // 本会话：双命中
 		{pid: 500, ppid: 7, cmdline: `scrcpy.exe --serial 192.0.2.197:5555`}, // 本会话：无线候选命中
 	}
 	// 本会话=主投屏（无虚拟屏形态特征）
@@ -117,9 +82,9 @@ func TestResidualScrcpyCandidates(t *testing.T) {
 // 停止主投屏把虚拟屏一起优雅关窗杀掉），反向同理。
 func TestResidualScrcpyNoBleedSameDevice(t *testing.T) {
 	procs := []scrcpyProc{
-		{pid: 600, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --keyboard=uhid --max-size 2560`}, // 主投屏（他会话）
+		{pid: 600, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --keyboard=uhid --max-size 2560`},                                            // 主投屏（他会话）
 		{pid: 700, ppid: 8, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --flex-display --start-app=+com.android.browser`}, // 虚拟屏（本会话）
-		{pid: 800, ppid: 9, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.settings`},              // 同设备另一应用窗口
+		{pid: 800, ppid: 9, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.settings`},               // 同设备另一应用窗口
 	}
 	// 主投屏 Stop（无形态特征）：只命中主投屏进程 600
 	got := residualScrcpyCandidates(procs, 42, []string{"TEST0001"}, "", "")
@@ -197,7 +162,7 @@ func TestBringToFrontCandidatesProfileAddrCombo(t *testing.T) {
 	candidates := []string{"TEST0002", "192.0.2.162:5555"}
 	procs := []scrcpyProc{
 		{pid: 100, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial 192.0.2.162:5555 --max-size 1920`}, // 无线直连（v3 实况）
-		{pid: 200, ppid: 8, cmdline: `scrcpy.exe --serial TEST0002`},                                   // USB 形态
+		{pid: 200, ppid: 8, cmdline: `scrcpy.exe --serial TEST0002`},                                // USB 形态
 		{pid: 300, ppid: 9, cmdline: `scrcpy.exe --serial 192.0.2.162:5556`},                        // 前缀撞串：别台设备
 	}
 	got := bringToFrontCandidates(procs, candidates)
@@ -217,10 +182,10 @@ func TestBringToFrontCandidatesProfileAddrCombo(t *testing.T) {
 // 与其他应用窗口（不同包名/其他设备）都不吃。
 func TestBringAppWinCandidates(t *testing.T) {
 	procs := []scrcpyProc{
-		{pid: 100, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --keyboard=uhid --max-size 2560`},                                                          // 主投屏：不吃
-		{pid: 200, ppid: 8, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.browser --window-title=browser`},      // 目标
-		{pid: 300, ppid: 9, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.settings --window-title=settings`},     // 同设备其他应用窗口：不吃
-		{pid: 400, ppid: 10, cmdline: `"C:\x\scrcpy.exe" --serial TEST0002 --new-display=1280x720/240 --start-app=+com.android.browser`},                              // 其他设备：不吃
+		{pid: 100, ppid: 7, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --keyboard=uhid --max-size 2560`},                                                      // 主投屏：不吃
+		{pid: 200, ppid: 8, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.browser --window-title=browser`},   // 目标
+		{pid: 300, ppid: 9, cmdline: `"C:\x\scrcpy.exe" --serial TEST0001 --new-display=1280x720/240 --start-app=+com.android.settings --window-title=settings`}, // 同设备其他应用窗口：不吃
+		{pid: 400, ppid: 10, cmdline: `"C:\x\scrcpy.exe" --serial TEST0002 --new-display=1280x720/240 --start-app=+com.android.browser`},                         // 其他设备：不吃
 	}
 	got := bringAppWinCandidates(procs, []string{"TEST0001"}, "com.android.browser")
 	if len(got) != 1 || got[0].pid != 200 {

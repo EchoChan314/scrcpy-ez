@@ -24,11 +24,11 @@ func seedGui23Stale183Archive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555", ModeTcpip)
 	for i := 0; i < 28; i++ {
-		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.183:5555")
+		a.profiles.AddrFail(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555")
 	}
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.162:5555", ModeTcpip)
 }
 
 // gui23StaleCands 手工构建探测候选（tiers 构建是本测试的单元，不经
@@ -78,7 +78,7 @@ func TestGui23StaleBroadcastArchiveFallbackFound(t *testing.T) {
 		return gui23StaleMdns(), nil
 	}
 
-	a.runDiscovery(context.Background(), gui23StaleCands())
+	a.runDiscovery(context.Background(), fixtureCandidateKeys(a.profiles, gui23StaleCands()))
 
 	st := waitDiscStatus(t, a, "found")
 	if st.Found != "192.0.2.162:5555" {
@@ -95,7 +95,7 @@ func TestGui23StaleBroadcastArchiveFallbackFound(t *testing.T) {
 		t.Fatalf("Tried 应为 [183 162]（广播优先）: %+v", st)
 	}
 	// 档案：gui41 单记忆下 183 已删除；162 兜底成功保持 active+fail=0
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 死档案应按单记忆删除: %+v", e.Addrs)
 	}

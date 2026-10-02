@@ -14,6 +14,8 @@ enum scrcpy_exit_code {
 
     // Device was disconnected while running
     SCRCPY_EXIT_DISCONNECTED,
+    // A session supervisor requested a transport switch (never a user close).
+    SCRCPY_EXIT_ROUTE_SWITCH,
 };
 
 enum scrcpy_exit_code

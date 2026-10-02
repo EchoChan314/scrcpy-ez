@@ -44,13 +44,13 @@ func seedGui19TabletArchive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555", ModeTcpip)
 	for i := 0; i < 28; i++ {
-		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.183:5555")
+		a.profiles.AddrFail(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555")
 	}
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.162:5555", ModeTcpip)
 	for i := 0; i < 3; i++ {
-		a.profiles.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.162:5555")
+		a.profiles.AddrFail(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.162:5555")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestGui19MdnsBroadcastAuthoritative(t *testing.T) {
 		return gui19TabletMdns(), nil
 	}
 
-	a.runDiscovery(context.Background(), gui19TabletCands())
+	a.runDiscovery(context.Background(), fixtureCandidateKeys(a.profiles, gui19TabletCands()))
 
 	st := waitDiscStatus(t, a, "found")
 	if st.Found != "192.0.2.162:5555" {
@@ -111,7 +111,7 @@ func TestGui19MdnsBroadcastAuthoritative(t *testing.T) {
 		t.Fatalf("Tried 不应含档案死地址 183: %+v", st)
 	}
 	// 档案：gui41 单记忆下 183 已彻底退役；162 成功复位 active+fail=0
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 应已按单记忆删除: %+v", e.Addrs)
 	}
@@ -131,9 +131,9 @@ func TestGui19NoBroadcastArchiveFallback(t *testing.T) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "T7000PAD", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.162:5555", ModeTcpip)
-	if !a.profiles.MarkAddrStale("Xiaomi Pad 8 Pro", "192.0.2.162:5555") {
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.162:5555", ModeTcpip)
+	if !a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.162:5555") {
 		t.Fatal("MarkAddrStale 应有改动")
 	}
 
@@ -164,7 +164,7 @@ func TestGui19NoBroadcastArchiveFallback(t *testing.T) {
 		t.Fatalf("无广播时档案兜底应只试 stale 162: %v", calls)
 	}
 	// 探测成功 → 162 翻回 active；183 已被单记忆删除
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 应已被单记忆删除: %+v", e.Addrs)
 	}
@@ -195,7 +195,7 @@ func TestGui23BroadcastFailNoHealthyArchiveNotfound(t *testing.T) {
 		return gui19TabletMdns(), nil
 	}
 
-	a.runDiscovery(context.Background(), gui19TabletCands())
+	a.runDiscovery(context.Background(), fixtureCandidateKeys(a.profiles, gui19TabletCands()))
 
 	st := waitDiscStatus(t, a, "notfound")
 	mu.Lock()
@@ -208,7 +208,7 @@ func TestGui23BroadcastFailNoHealthyArchiveNotfound(t *testing.T) {
 		t.Fatalf("Tried 不应含档案死地址 183: %+v", st)
 	}
 	// fail 记到广播地址：162 fail++（3→4）；183 已按单记忆删除
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if gui24FindAddr(e, "192.0.2.183:5555") != nil {
 		t.Fatalf("183 应已删除: %+v", e.Addrs)
 	}

@@ -26,7 +26,7 @@ func TestGui33FoldGhostUsbMergesUsbOfflineWindow(t *testing.T) {
 	devs := a.foldGhostUsb([]adb.Device{
 		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"}, // USB 握手窗口
 		{Serial: "192.0.2.197:5555", State: "device", ConnType: "wifi", Name: "REDMI K80",
-			Model: "MODEL123", Marketname: "REDMI K80", Identity: "REDMI K80",
+			Model: "12345TESTA", Marketname: "REDMI K80", Identity: "REDMI K80",
 			Battery: 94, Res: "2560x1600", FPS: 120, WirelessRes: "1920x1200",
 			Tls: true, WirelessForm: ModeTcpip},
 	})
@@ -43,7 +43,7 @@ func TestGui33FoldGhostUsbMergesUsbOfflineWindow(t *testing.T) {
 	if d.Wireless != "192.0.2.197:5555" {
 		t.Fatalf("无线地址应并入 Wireless 副行: %+v", d)
 	}
-	if d.Name != "REDMI K80" || d.Model != "MODEL123" || d.Marketname != "REDMI K80" || d.Identity != "REDMI K80" {
+	if d.Name != "REDMI K80" || d.Model != "12345TESTA" || d.Marketname != "REDMI K80" || d.Identity != "REDMI K80" {
 		t.Fatalf("名称/型号/身份应从无线卡补缺: %+v", d)
 	}
 	if d.Battery != 94 || d.Res != "2560x1600" || d.FPS != 120 || d.WirelessRes != "1920x1200" ||
@@ -155,8 +155,8 @@ func TestGui33FoldGhostUsbPureWifiUnchanged(t *testing.T) {
 func TestGui33FoldGhostUsbOfflineNoCrossDeviceMerge(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80":        mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
-		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "MODEL789", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
+		"REDMI K80":        mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"Xiaomi Pad 8 Pro": mkEntry("Xiaomi Pad 8 Pro", "25091RP04C", []string{"TEST0002"}, []string{"192.0.2.162:5555"}),
 	})
 	devs := a.foldGhostUsb([]adb.Device{
 		{Serial: "TEST0001", State: "offline", ConnType: "usb", Name: "TEST0001"},
@@ -213,7 +213,7 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 		"      case \"$5\" in\n" +
 		"        ro.product.marketname) echo 'REDMI K80';;\n" +
 		"        ro.product.manufacturer) echo 'Xiaomi';;\n" +
-		"        ro.product.model) echo 'MODEL123';;\n" +
+		"        ro.product.model) echo '12345TESTA';;\n" +
 		"        service.adb.tcp.port) echo '5555';;\n" +
 		"      esac\n" +
 		"      ;;\n" +
@@ -252,7 +252,7 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 
 	// ① 握手窗口：USB offline + 5555 无线 device 同轮出现 → 第一轮即单 USB 卡
 	// （State 取优=device，无线地址并入副行）——不闪「离线/无线」。
-	t.Setenv("G33_DEV", "TEST0001\toffline\n192.0.2.197:5555\tdevice model:MODEL123")
+	t.Setenv("G33_DEV", "TEST0001\toffline\n192.0.2.197:5555\tdevice model:12345TESTA")
 	a.pollOnce(context.Background())
 	devs := a.Snapshot().Devices
 	noWifiOnly("握手窗口", devs)
@@ -274,7 +274,7 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 	// ② 未授权：USB unauthorized + 无线 device（gui49-fix4 形态锁定适配）——
 	// USB 条目在列即钉有线主卡；State=unauthorized 如实呈现，无线地址并入副行；
 	// 不合成连接中卡。
-	t.Setenv("G33_DEV", "TEST0001\tunauthorized\n192.0.2.197:5555\tdevice model:MODEL123")
+	t.Setenv("G33_DEV", "TEST0001\tunauthorized\n192.0.2.197:5555\tdevice model:12345TESTA")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
 	if len(devs) != 1 {
@@ -287,7 +287,7 @@ func TestPollOnceGui33UsbOfflineWindowNoFlash(t *testing.T) {
 	}
 
 	// ③ USB device（正常路径）→ gui31 回归：单 USB 卡。
-	t.Setenv("G33_DEV", "TEST0001\tdevice\n192.0.2.197:5555\tdevice model:MODEL123")
+	t.Setenv("G33_DEV", "TEST0001\tdevice\n192.0.2.197:5555\tdevice model:12345TESTA")
 	a.pollOnce(context.Background())
 	devs = a.Snapshot().Devices
 	noWifiOnly("正常", devs)

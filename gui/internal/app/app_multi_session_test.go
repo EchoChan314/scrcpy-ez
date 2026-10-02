@@ -510,7 +510,7 @@ func TestNewDevicePopupThrottleAndExpire(t *testing.T) {
 
 	// 30s 后：可再弹（需要一次新的 device 事件）
 	a.mu.Lock()
-	a.popup.lastShown["Xiaomi Pad 8 Pro"] = time.Now().Add(-31 * time.Second)
+	a.popup.lastShown[a.profiles.ResolveKey("TEST0002")] = time.Now().Add(-31 * time.Second)
 	a.mu.Unlock()
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)
@@ -521,7 +521,7 @@ func TestNewDevicePopupThrottleAndExpire(t *testing.T) {
 	// 未处理弹窗 30s 自动消失（下一次事件判定）
 	a.mu.Lock()
 	a.popup.shownAt = time.Now().Add(-31 * time.Second)
-	a.popup.lastShown["Xiaomi Pad 8 Pro"] = time.Now().Add(-31 * time.Second)
+	a.popup.lastShown[a.profiles.ResolveKey("TEST0002")] = time.Now().Add(-31 * time.Second)
 	a.mu.Unlock()
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate(devs)

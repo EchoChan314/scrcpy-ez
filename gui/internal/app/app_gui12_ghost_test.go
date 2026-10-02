@@ -71,7 +71,7 @@ func TestStartCastTcpipAddrWithMdnsTlsOtherPortNoTlsFlag(t *testing.T) {
 func TestFoldGhostWirelessDoesNotMergeViaIpClue(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	setMdns(a, []discovery.MdnsService{
 		{Type: "_adb-tls-connect._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.0.2.197:33895", Mode: discovery.MdnsModeTls},
@@ -97,7 +97,7 @@ func TestFoldGhostWirelessDoesNotMergeViaIpClue(t *testing.T) {
 func TestFoldGhostWirelessDoesNotMergeViaProfileIpOnly(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
 		{Serial: "192.0.2.197:33895", State: "offline", ConnType: "wifi"},
@@ -115,7 +115,7 @@ func TestFoldGhostWirelessDoesNotMergeViaProfileIpOnly(t *testing.T) {
 func TestFoldGhostWirelessDoesNotMergeViaMdnsSerialClue(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"R58T00WA0YM"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"R58T00WA0YM"}, []string{"192.0.2.197:5555"}),
 	})
 	setMdns(a, []discovery.MdnsService{
 		{Type: "_adb-tls-connect._tcp", Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.0.2.197:33895", Mode: discovery.MdnsModeTls},
@@ -136,7 +136,7 @@ func TestFoldGhostWirelessDoesNotMergeViaMdnsSerialClue(t *testing.T) {
 func TestFoldGhostWirelessDoesNotMergeIntoUsbViaIp(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
 		{Serial: "192.0.2.197:33895", State: "offline", ConnType: "wifi"},
@@ -171,7 +171,7 @@ func TestFoldGhostWirelessFiltersUnknown(t *testing.T) {
 func TestFoldGhostWirelessKeepsProfiledOfflineCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
 		{Serial: "192.0.2.197:5555", State: "offline", ConnType: "wifi"},
@@ -198,14 +198,14 @@ func TestFoldGhostWirelessLeavesOnlineUsbUnauthorized(t *testing.T) {
 func TestProfileStoreResolveKey(t *testing.T) {
 	s := NewProfileStore("")
 	seedProfiles(&App{profiles: s}, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
-	if s.ResolveKey("REDMI K80") != "REDMI K80" ||
-		s.ResolveKey("TEST0001") != "REDMI K80" ||
-		s.ResolveKey("192.0.2.197:5555") != "REDMI K80" {
+	if s.ResolveKey(fixtureArchiveKey(s, "REDMI K80")) != "REDMI K80" ||
+		s.ResolveKey(fixtureArchiveKey(s, "TEST0001")) != "REDMI K80" ||
+		s.ResolveKey(fixtureArchiveKey(s, "192.0.2.197:5555")) != "REDMI K80" {
 		t.Fatal("ResolveKey 应按 identity 键/serial/addr 解析")
 	}
-	if s.ResolveKey("192.0.2.197:33895") != "" || s.ResolveKey("") != "" {
+	if s.ResolveKey(fixtureArchiveKey(s, "192.0.2.197:33895")) != "" || s.ResolveKey("") != "" {
 		t.Fatal("未知 key 应返回空")
 	}
 }
@@ -222,7 +222,7 @@ func TestPollOnceFoldsGhostWirelessCard(t *testing.T) {
 	fake := filepath.Join(dir, "adb")
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"devices\" ]; then printf 'List of devices attached\\n192.0.2.197:33895\\toffline\\n192.0.2.197:5555\\tdevice model:REDMI_K80\\n'; exit 0; fi\n" +
-		"if [ \"$3\" = \"shell\" ]; then case \"$5\" in ro.product.marketname) echo 'REDMI K80';; ro.product.manufacturer) echo 'Xiaomi';; ro.product.model) echo 'MODEL123';; esac; exit 0; fi\n" +
+		"if [ \"$3\" = \"shell\" ]; then case \"$5\" in ro.product.marketname) echo 'REDMI K80';; ro.product.manufacturer) echo 'Xiaomi';; ro.product.model) echo '12345TESTA';; esac; exit 0; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

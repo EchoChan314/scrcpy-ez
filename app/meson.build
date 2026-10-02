@@ -79,6 +79,7 @@ feature_test_macros = [
 conf = configuration_data()
 
 if host_machine.system() == 'windows'
+    src += 'src/clipboard_sync.c'
     windows = import('windows')
     src += [
         'src/util/command.c',
@@ -146,6 +147,9 @@ if host_machine.system() == 'windows'
     dependencies += cc.find_library('ws2_32')
     dependencies += cc.find_library('imm32')
     dependencies += cc.find_library('advapi32')
+    dependencies += cc.find_library('ole32')
+    dependencies += cc.find_library('windowscodecs')
+    dependencies += cc.find_library('uuid')
 endif
 
 check_functions = [

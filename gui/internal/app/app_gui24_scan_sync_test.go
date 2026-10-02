@@ -17,7 +17,7 @@ func seedGui24TabletArchive(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.183:5555", ModeTcpip)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.183:5555", ModeTcpip)
 }
 
 // gui24TabletMdns 平板当前广播：TLS 服务新端口 37201（adb-TEST0002-On9v2R）
@@ -50,7 +50,7 @@ func TestMdnsEventsSyncTlsToArchive(t *testing.T) {
 		First:    true,
 	})
 
-	e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatal("档案应存在")
 	}
@@ -83,7 +83,7 @@ func TestMdnsEventsNoSyncOnEmptySnapshot(t *testing.T) {
 		First:    true,
 	})
 
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if len(e.Addrs) != 1 || e.Addrs[0].Addr != "192.0.2.183:5555" {
 		t.Fatalf("空快照不应写档案: %+v", e.Addrs)
 	}
@@ -99,7 +99,7 @@ func TestMdnsEventsIdempotent(t *testing.T) {
 
 	snap := gui24TabletMdns()
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: snap, First: true})
-	first, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	first, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	first37201 := gui24FindAddr(first, "192.0.2.183:37201")
 	if first37201 == nil {
 		t.Fatal("第一轮 37201 应入档")
@@ -107,7 +107,7 @@ func TestMdnsEventsIdempotent(t *testing.T) {
 
 	a.onMdnsTrackEvents(context.Background(), adb.MdnsTrackEvents{Snapshot: snap, First: false})
 
-	second, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	second, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if len(second.Addrs) != len(first.Addrs) {
 		t.Fatalf("第二轮不应新增/删除地址: %+v → %+v", first.Addrs, second.Addrs)
 	}

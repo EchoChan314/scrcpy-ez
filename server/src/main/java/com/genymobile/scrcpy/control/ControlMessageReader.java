@@ -29,6 +29,12 @@ public class ControlMessageReader {
     public ControlMessage read() throws IOException {
         int type = dis.readUnsignedByte();
         switch (type) {
+            case ControlMessage.TYPE_SET_CLIPBOARD_VERSIONED:
+            case ControlMessage.TYPE_SET_IMAGE_CLIPBOARD_VERSIONED:
+                long epoch = dis.readLong();
+                long version = dis.readLong();
+                ControlMessage msg = type == ControlMessage.TYPE_SET_CLIPBOARD_VERSIONED ? parseSetClipboard() : parseSetImageClipboard();
+                return msg.withClipboardVersion(epoch, version);
             case ControlMessage.TYPE_INJECT_KEYCODE:
                 return parseInjectKeycode();
             case ControlMessage.TYPE_INJECT_TEXT:
@@ -105,6 +111,9 @@ public class ControlMessageReader {
 
     private byte[] parseByteArray(int sizeBytes) throws IOException {
         int len = parseBufferLength(sizeBytes);
+        if (len < 0 || len > (1 << 28)) {
+            throw new IOException("Invalid control payload length: " + len);
+        }
         byte[] data = new byte[len];
         dis.readFully(data);
         return data;

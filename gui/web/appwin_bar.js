@@ -24,6 +24,8 @@
     var direct = directKeys || [];
     Object.keys(cards).forEach(function (k) {
       if (!(cards[k] || []).length) return;
+      var owner = typeof identityOf === 'function' ? identityOf(k) : '';
+      if (devIdentity && owner && owner !== devIdentity) return;
       if (direct.indexOf(k) >= 0) { out.push(k); return; }
       if (devIdentity && typeof identityOf === 'function' && identityOf(k) === devIdentity) out.push(k);
     });

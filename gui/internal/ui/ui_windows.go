@@ -242,6 +242,9 @@ func Run(a *app.App, html string) error {
 			bridge.DebugLog("[js] RefreshAppList serial=%q", serial)
 			return a.RefreshAppList(serial)
 		}},
+		{"GetAppIcons", func(serial string, pkgs []string) (interface{}, error) {
+			return a.GetAppIcons(serial, pkgs)
+		}},
 		{"GetAppIcon", func(serial, pkg string) (interface{}, error) {
 			// 高频调用（每个卡片一次）——不记日志，避免刷屏。
 			return a.GetAppIcon(serial, pkg)
@@ -254,6 +257,10 @@ func Run(a *app.App, html string) error {
 		{"StopAppWin", func(serial, pkg string) error {
 			bridge.DebugLog("[js] StopAppWin serial=%q pkg=%q", serial, pkg)
 			return a.StopAppWin(serial, pkg)
+		}},
+		{"RestartAppWin", func(serial, pkg string) error {
+			bridge.DebugLog("[js] RestartAppWin serial=%q pkg=%q", serial, pkg)
+			return a.RestartAppWin(serial, pkg)
 		}},
 		// ---------- 应用窗口（二期）· Step 4/5：窗口设置（虚拟屏参数面板） ----------
 		{"GetAppWinParams", func(serial, pkg string) (interface{}, error) {
@@ -332,6 +339,9 @@ func Run(a *app.App, html string) error {
 		{"SetSettings", func(showParamOverlay, closeToTray bool) error {
 			bridge.DebugLog("[js] SetSettings showParamOverlay=%v closeToTray=%v", showParamOverlay, closeToTray)
 			return a.SetSettings(showParamOverlay, closeToTray)
+		}},
+		{"SetOtherAppWinSystemDecorations", func(enabled bool) error {
+			return a.SetOtherAppWinSystemDecorations(enabled)
 		}},
 		// 设备卡顺序写回（gui45：后端持久化；前端两处触发、后端幂等）
 		{"SetDeviceOrder", func(order []string) error {

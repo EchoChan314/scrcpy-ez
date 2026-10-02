@@ -20,7 +20,7 @@ func TestLoadKeepsAppsAndIconsFullAt(t *testing.T) {
 	if err := s.Load(); err != nil {
 		t.Fatal(err)
 	}
-	e, ok := s.Entry("Dev 1")
+	e, ok := s.Entry(fixtureArchiveKey(s, "Dev 1"))
 	if !ok {
 		t.Fatal("档案未加载")
 	}

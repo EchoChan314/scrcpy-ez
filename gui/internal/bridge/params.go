@@ -41,14 +41,15 @@ type ModeParams struct {
 //
 // 未设置（空/零值）的字段不注入，bat 走原逻辑（回归兼容）。
 type CastParams struct {
-	Usb     ModeParams
-	Wifi    ModeParams
-	Serial  string
-	Addr    string
-	Addr2   string // SCEZ_ADDR2（备用无线地址；空=无备用）
-	NoWatch bool
-	Market  string // SCEZ_MARKET（档案 marketname，仅锁定会话）
-	Model   string // SCEZ_MODEL（档案 model，仅锁定会话）
+	Usb            ModeParams
+	Wifi           ModeParams
+	Serial         string
+	ExpectedSerial string // Full confirmed device serial; independent of current USB transport.
+	Addr           string
+	Addr2          string // SCEZ_ADDR2（备用无线地址；空=无备用）
+	NoWatch        bool
+	Market         string // SCEZ_MARKET（档案 marketname，仅锁定会话）
+	Model          string // SCEZ_MODEL（档案 model，仅锁定会话）
 	// OverlayVisible 是参数控件（fps/码率/状态浮层）的启动可见性，仅当
 	// OverlayVisibleSet=true 时注入（true→"1" 显示 / false→"0" 隐藏）。
 	OverlayVisible    bool
@@ -150,6 +151,9 @@ func castEnv(params CastParams, watchTag string) []string {
 	}
 	if params.Serial != "" {
 		env = append(env, "SCEZ_SERIAL="+params.Serial)
+	}
+	if params.ExpectedSerial != "" {
+		env = append(env, "SCEZ_EXPECT_SERIAL="+params.ExpectedSerial)
 	}
 	if params.Addr != "" {
 		env = append(env, "SCEZ_ADDR="+params.Addr)

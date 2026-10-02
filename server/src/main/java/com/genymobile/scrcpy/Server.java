@@ -1,5 +1,6 @@
 package com.genymobile.scrcpy;
 
+import com.genymobile.scrcpy.device.AppCatalog;
 import com.genymobile.scrcpy.audio.AudioCapture;
 import com.genymobile.scrcpy.audio.AudioCodec;
 import com.genymobile.scrcpy.audio.AudioDirectCapture;
@@ -287,13 +288,18 @@ public final class Server {
                 Ln.i("Processing Android apps... (this may take some time)");
                 Ln.i(LogUtils.buildAppListMessage());
             }
+            if (options.getAppCatalog()) {
+                Workarounds.apply();
+                Ln.i("SCEZ_APP_CATALOG:" + AppCatalog.build());
+            }
             if (options.getExportAppIcons()) {
                 // ez 自定义（二期 Step 1c）：导出应用图标 PNG → /data/local/tmp/scrcpy/icons/
                 // v2.1.16：支持定向导出（export_app_icons=pkg1,pkg2；全量时 list=null）
                 Workarounds.apply();
                 String only = options.getExportAppIconsList();
                 Ln.i("Exporting app icons..." + (only != null ? " (filtered)" : ""));
-                int count = Device.exportAppIcons(only);
+                Ln.i("SCEZ_ICON_OWNER:" + AppCatalog.serial());
+                int count = Device.exportAppIcons(only, options.getExportAppIconsDir());
                 Ln.i("Exported icons: " + count);
             }
             // Just print the requested data, do not mirror

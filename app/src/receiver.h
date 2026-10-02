@@ -16,6 +16,7 @@ struct sc_fps_overlay; // forward declaration (see fps_overlay.h)
 // managed by the controller
 struct sc_receiver {
     sc_socket control_socket;
+    uint32_t clipboard_pc_sequence;
     sc_thread thread;
     sc_mutex mutex;
 

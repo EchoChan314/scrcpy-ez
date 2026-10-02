@@ -14,3 +14,13 @@ dist/
 
 # local build config
 local.properties
+
+# Local user data and credentials must not be committed.
+/.env
+/.env.*
+/profiles.json
+/settings.json
+/config.txt
+/config.identity.txt
+/icons/
+/图标/

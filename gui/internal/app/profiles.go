@@ -252,9 +252,8 @@ type AddrEntry struct {
 }
 
 // DeviceEntry 是 identity 唯一化后的设备档案。
-// identity 规则（adb.IdentityKey）：marketname 非空优先；无市场名 →
-// manufacturer+model；都无 → 首个 serial。同一设备的 USB serials 累积、
-// 无线 addrs 追加（IP 变化不分裂设备）。
+// 旧档案键保持不变；新档案键为 device:<完整序列号>。市场名与型号只作展示。
+// 已确认的 USB/无线连接共用档案，缺少身份的连接不新建永久条目。
 // Wireless=最新无线形态（tls/tcpip/空）；TlsGuid=mDNS tls 连接服务实例名
 // （adb-<serial>-XXXXXX，persist.adb.wifi.guid 稳定不变——端口变化后仍能匹配本机）。
 type DeviceEntry struct {
@@ -284,7 +283,7 @@ type DeviceEntry struct {
 
 // storeData 是 profiles.json 的新结构：{"devices": {identity: DeviceEntry}}。
 // 旧结构 {serial: {usb,wifi}} 由 Load 检测并迁移（identity=serial 回退键），
-// 设备上线后由 SyncDevices 按 marketname 重键归并；旧结构不再落盘。
+// 设备上线后按已确认的序列号关联原键；旧结构不再落盘。
 type storeData struct {
 	Devices map[string]*DeviceEntry `json:"devices"`
 	// DeviceOrder 设备卡自定义顺序（identity 键表；gui45 后端持久化——
@@ -335,11 +334,13 @@ type legacyAddrEntry struct {
 // 默认路径 %APPDATA%\scrcpy-ez\profiles.json（Windows；os.UserConfigDir），
 // 可用 SCEZ_PROFILES_PATH 覆盖；path 为空时内存模式（不落盘，测试用）。
 type ProfileStore struct {
-	path           string
-	mu             sync.Mutex
-	data           storeData
-	addressAliases map[string]*DeviceEntry // 仅本次运行，旧 UI/会话键仍绑定原设备
-	mdnsAuthority  map[*DeviceEntry]map[string]string
+	path               string
+	mu                 sync.Mutex
+	data               storeData
+	addressAliases     map[string]*DeviceEntry // 仅本次运行，旧 UI/会话键仍绑定原设备
+	persistError       error
+	lastPersistAttempt time.Time
+	mdnsAuthority      map[*DeviceEntry]map[string]string
 }
 
 func NewProfileStore(path string) *ProfileStore {
@@ -641,14 +642,15 @@ func (s *ProfileStore) normalizeLocked() bool {
 }
 
 // isOrphanIPPortArchiveLocked 判定该键是否为 gui52fix1 的孤儿档案：
-// 键本身是 IP:port、无市场名/serials/tlsGuid/自定义名，且 addrs 只有键自身
+// 键本身是 IP:port、无身份信息或已保存参数，且 addrs 只有键自身
 // 这一条（配对瞬间端口建档、会话已断留下的空壳）。
 func isOrphanIPPortArchiveLocked(key string, e *DeviceEntry) bool {
 	if e == nil || !IsIPPort(key) {
 		return false
 	}
 	if e.Marketname != "" || e.Manufacturer != "" || e.Model != "" ||
-		e.DisplayName != "" || e.DisplayNameSet || len(e.Serials) != 0 || e.TlsGuid != "" {
+		e.DisplayName != "" || e.DisplayNameSet || e.Res != "" || len(e.Serials) != 0 || e.TlsGuid != "" ||
+		e.Profiles != DefaultProfile() && e.Profiles != (DeviceProfile{}) || len(e.Apps) != 0 || len(e.AppParams) != 0 || e.IconsFullAt != 0 {
 		return false
 	}
 	return len(e.Addrs) == 1 && e.Addrs[0].Addr == key
@@ -656,9 +658,8 @@ func isOrphanIPPortArchiveLocked(key string, e *DeviceEntry) bool {
 
 // cleanOrphanIPPortLocked 清理孤儿 IP:port 键档案（gui52fix1；gui52fix3 事件驱动复用）：
 //   - 收集全部孤儿键（排序处理，结果确定）；
-//   - 对每个孤儿，按同 IP 找非孤儿主档案（有 active 地址的档案优先）；
-//     命中 → addrs/serials/参数并入主档案（mergeEntryLocked 去重），删除孤儿键
-//     与 deviceOrder 中的孤儿键；
+//   - 对每个无内容孤儿，按同 IP 找非孤儿主档案（active 优先）；
+//     命中则删除空壳和排序键，不向主档案合入地址或参数；
 //   - 无同 IP 主档案 → 保留不动；
 //   - 合并后统一 normalize（同形态单记忆折叠，主档案保留其真实证据）；
 //   - 无孤儿 → 零改动（调用方不落盘）。
@@ -686,11 +687,10 @@ func (s *ProfileStore) cleanOrphanIPPortLocked(trigger string) bool {
 		skip[key] = true
 	}
 	for _, orphanKey := range orphans {
-		orphan, ok := s.data.Devices[orphanKey]
+		_, ok := s.data.Devices[orphanKey]
 		if !ok {
 			continue
 		}
-		_ = orphan // gui52-fix12：零合入——孤儿内容不再读取（无信息可搬）
 		mainKey := s.resolveKeyByIPLocked(ipOfAddr(orphanKey), skip)
 		if mainKey == "" {
 			continue // 无同 IP 主档案：保留（可能是真正还没入档的设备）
@@ -709,7 +709,6 @@ func (s *ProfileStore) cleanOrphanIPPortLocked(trigger string) bool {
 		}
 		s.data.DeviceOrder = order
 		changed = true
-		bridge.DebugLog("[app] 孤儿档案合并：%s → %s（%s）", orphanKey, mainKey, trigger)
 	}
 	if changed && s.normalizeLocked() {
 		changed = true
@@ -741,6 +740,13 @@ func (s *ProfileStore) DeviceOrder() []string {
 func (s *ProfileStore) SetDeviceOrder(order []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	confirmed := make([]string, 0, len(order))
+	for _, key := range order {
+		if !strings.HasPrefix(key, "pending:") {
+			confirmed = append(confirmed, key)
+		}
+	}
+	order = confirmed
 	if equalStringSlices(s.data.DeviceOrder, order) {
 		return nil
 	}
@@ -817,7 +823,15 @@ func equalStringSlices(a, b []string) bool {
 }
 
 // persistLocked 落盘新结构（原子写：tmp+rename）。调用方必须持锁。
-func (s *ProfileStore) persistLocked() error {
+func (s *ProfileStore) persistLocked() (err error) {
+	previous := s.persistError
+	s.lastPersistAttempt = time.Now()
+	defer func() {
+		s.persistError = err
+		if err != nil && (previous == nil || previous.Error() != err.Error()) {
+			bridge.DebugLog("[profiles] 档案保存失败，内存数据保留待重试：%v", err)
+		}
+	}()
 	if s.path == "" {
 		return nil
 	}
@@ -865,7 +879,17 @@ func (s *ProfileStore) Save(key string, p DeviceProfile) error {
 	if e, ok := s.resolveLocked(key); ok {
 		e.Profiles = p
 	} else {
-		s.data.Devices[key] = entryFromKey(key, p)
+		if strings.HasPrefix(key, "pending:") || IsIPPort(key) {
+			return errors.New("设备身份尚未确认，暂时无法保存参数")
+		}
+		serial := strings.TrimPrefix(key, "device:")
+		if adb.StableSerial(serial) == "" {
+			return errors.New("设备身份无效")
+		}
+		if s.hasSerialClaimLocked(serial) {
+			return errors.New("设备身份存在冲突，无法覆盖已有档案")
+		}
+		s.data.Devices["device:"+serial] = entryFromKey(serial, p)
 	}
 	return s.persistLocked()
 }
@@ -887,22 +911,29 @@ func (s *ProfileStore) resolveCurrentLocked(key string) (*DeviceEntry, bool) {
 	if key == "" {
 		return nil, false
 	}
-	if e, ok := s.data.Devices[key]; ok {
+	if e, ok := s.data.Devices[key]; ok && !IsIPPort(key) {
 		return e, true
 	}
+	var found *DeviceEntry
 	for _, e := range s.data.Devices {
 		for _, ser := range e.Serials {
 			if ser == key {
-				return e, true
+				if found != nil && found != e {
+					return nil, false
+				}
+				found = e
 			}
 		}
 		for i := range e.Addrs {
 			if e.Addrs[i].Addr == key {
-				return e, true
+				if found != nil && found != e {
+					return nil, false
+				}
+				found = e
 			}
 		}
 	}
-	return nil, false
+	return found, found != nil
 }
 
 // Entry 返回指定 key（identity/serial/IP:port）的档案快照副本（只读用）。
@@ -916,7 +947,7 @@ func (s *ProfileStore) Entry(key string) (DeviceEntry, bool) {
 	return cloneEntry(e), true
 }
 
-// SetApps 应用列表入档（整体替换；identity 键）。
+// SetApps compares complete app metadata by package; unchanged lists do not write the archive.
 // （二期 Step 1：就绪边沿枚举完成后调用；旧档无该字段=零值，向后兼容。）
 func (s *ProfileStore) SetApps(key string, apps []AppListItem) error {
 	s.mu.Lock()
@@ -925,7 +956,13 @@ func (s *ProfileStore) SetApps(key string, apps []AppListItem) error {
 	if !ok {
 		return errors.New("未找到设备档案: " + key)
 	}
-	e.Apps = apps
+	if sameAppMetadata(e.Apps, apps) {
+		if s.persistError != nil {
+			return s.persistLocked()
+		}
+		return nil
+	}
+	e.Apps = append([]AppListItem(nil), apps...)
 	return s.persistLocked()
 }
 
@@ -1074,16 +1111,7 @@ func profileCardName(e DeviceEntry, fallback string) string {
 // Entry 返回只读快照。
 func applyProfileNames(devs []adb.Device, store *ProfileStore) {
 	for i := range devs {
-		e, ok := store.Entry(devs[i].Serial)
-		// gui52-fix13：孤儿已清/IP:port 键不存在时按 IP 回退识别主档案
-		// （36475→Xiaomi Pad 8 Pro），避免卡名回退为 IP:port 或空。
-		if !ok && IsIPPort(devs[i].Serial) {
-			if ip := ipOfAddr(devs[i].Serial); ip != "" {
-				if k := store.ResolveKeyByIP(ip); k != "" {
-					e, ok = store.Entry(k)
-				}
-			}
-		}
+		e, ok := store.Entry(store.DeviceKey(&devs[i]))
 		if !ok {
 			continue
 		}
@@ -1127,6 +1155,7 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 	defer s.mu.Unlock()
 	changed := false
 	now := time.Now()
+	index := buildSnapshotIdentityIndex(s.data.Devices)
 	for i := range devs {
 		d := &devs[i]
 		if d.State != "device" {
@@ -1134,7 +1163,7 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 			// gui49-fix5 豁免：该 identity 的 USB 条目仍在设备流（线插着）→
 			// 无线 offline 是 adbd 连带重启瞬态，不打 stale、不记失败节流。
 			if d.ConnType == "wifi" && d.Serial != "" {
-				if e, ok := s.resolveLocked(d.Serial); ok {
+				if e := s.resolveDeviceLocked(d); e != nil {
 					key := s.keyOfLocked(e)
 					// gui49-fix6：插线遮罩期豁免（removed 折腾窗口也保护）。
 					if exempt[key] {
@@ -1149,49 +1178,34 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 			}
 			continue
 		}
-		identity := adb.IdentityKey(d.Marketname, d.Manufacturer, d.Model, d.Serial)
-		e, ok := s.resolveCurrentLocked(d.Serial)
-		if ok {
-			// 模型归并（自愈档案分裂）：市场名读不到时无线地址曾被记到
-			// man+model 键下（如 "Xiaomi MODEL123"，无 serials、只有 addrs）——
-			// 同 model 且带市场名的档案存在时（"REDMI K80"），归并回本尊键，
-			// BestAddr 恢复 → SCEZ_ADDR 注得上（16:53 无线回退抢台根因之一）。
-			if e.Marketname == "" && e.Model != "" && len(e.Serials) == 0 {
-				for k2, other := range s.data.Devices {
-					if other != e && other.Model == e.Model && other.Marketname != "" && len(other.Serials) > 0 {
-						s.rekeyLocked(k2, e)
-						e = s.data.Devices[k2]
-						changed = true
-						break
-					}
-				}
-			}
-			// 档案优先（防 identity 抖动）：多会话 adb 竞态下 marketname 可能本轮
-			// 读不到（回退 man+model），已有档案存有市场名时用它定身份——
-			// 否则同一设备在 "REDMI K80"/"Xiaomi MODEL123" 两个键间反复重键，
-			// 档案分裂 → SCEZ_ADDR 注不上、弹窗误判"新设备"（16:53 实况根源）。
-			if e.Marketname != "" {
-				identity = e.Marketname
-				if d.Marketname == "" {
-					d.Marketname = e.Marketname // 补回本轮富化缺失（下游 identity 一致）
-				}
-			}
-			if s.keyOfLocked(e) != identity {
-				// 已在其它键下（回退键/旧 identity）：重键归并到规范 identity
-				s.rekeyLocked(identity, e)
-				e = s.data.Devices[identity]
-				changed = true
-			}
+		serial := deviceShortSerial(d)
+		var e *DeviceEntry
+		if serial != "" {
+			e = index.serials[serial]
 		} else {
-			if old, ok := s.data.Devices[identity]; ok {
-				// 键已存在：resolveLocked 只是按新无线 IP 解析失败（IP 尚未入档），
-				// 不能覆盖旧档案（serials/参数）——复用继续累积
-				e = old
-			} else {
-				e = &DeviceEntry{Serials: []string{}, Addrs: []AddrEntry{}, Profiles: DefaultProfile()}
-				s.data.Devices[identity] = e
+			e = s.resolveDeviceLocked(d)
+		}
+		if e == nil {
+			if serial == "" {
+				d.Identity = adb.IdentityKey("", "", "", d.Serial)
+				continue // unidentified transports remain visible, never create permanent archives
 			}
+			if index.claims[serial] {
+				d.Identity = "pending:" + d.Serial
+				continue // conflicting legacy claims must never overwrite a third archive
+			}
+			identity := "device:" + serial
+			e = &DeviceEntry{Serials: []string{serial}, Addrs: []AddrEntry{}, Profiles: DefaultProfile()}
+			s.data.Devices[identity] = e
+			index.keys[e], index.serials[serial], index.claims[serial] = identity, e, true
 			changed = true
+		}
+		identity := index.keys[e] // immutable, including historical product-name keys
+		if !serialCompatible(e, serial) {
+			continue
+		}
+		if d.Marketname == "" {
+			d.Marketname = e.Marketname
 		}
 		if e.Marketname == "" && d.Marketname != "" {
 			e.Marketname = d.Marketname
@@ -1205,11 +1219,9 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 			e.Manufacturer = d.Manufacturer
 			changed = true
 		}
-		// 卡片 Identity 归一为档案身份（本轮 marketname 读不到时不再漂移成
-		// man+model 回退值——弹窗判重/会话绑定/前端身份绑定都用它）
+		// 卡片使用不可变档案键，身份不会随展示字段读取波动。
 		if d.Identity != identity {
 			d.Identity = identity
-			changed = true
 		}
 		// 原生分辨率持久化（宽≥高）：会话外兜底（设备列表暂时消失时徽标仍可换算）
 		if d.Res != "" && e.Res != d.Res {
@@ -1217,8 +1229,8 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 			changed = true
 		}
 		// USB 序列号累积（serial 集合）
-		if d.ConnType == "usb" && d.Serial != "" && !contains(e.Serials, d.Serial) {
-			e.Serials = append(e.Serials, d.Serial)
+		if serial != "" && !contains(e.Serials, serial) {
+			e.Serials = append(e.Serials, serial)
 			changed = true
 		}
 		// 无线地址：在线=成功（active+fail=0+lastOk，新 IP 追加 active）；
@@ -1232,10 +1244,17 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 		if addr != "" && !s.snapshotAddressAllowedLocked(e, addr) {
 			continue // 已有更新的 mDNS 地址：保留 transport 事实，不倒写档案地址
 		}
+		if addr != "" && serial == "" && !addrInList(e.Addrs, addr) {
+			continue
+		}
+		if addr != "" && index.addresses[addr] == e && refreshUnchangedAddress(e, addr, now.Unix()) {
+			continue
+		}
 		if addr != "" && s.addrSuccessLocked(e, addr, now) {
 			changed = true
 		}
 		if addr != "" {
+			index.addresses[addr] = e
 			mode := ""
 			for i := range e.Addrs {
 				if e.Addrs[i].Addr == addr {
@@ -1262,7 +1281,7 @@ func (s *ProfileStore) syncDevices(devs []adb.Device, exempt map[string]bool) bo
 	if s.normalizeLocked() {
 		changed = true
 	}
-	if changed {
+	if changed || s.persistError != nil && time.Since(s.lastPersistAttempt) >= 5*time.Second {
 		_ = s.persistLocked()
 	}
 	return changed
@@ -1299,10 +1318,12 @@ func (s *ProfileStore) keyOfLocked(e *DeviceEntry) string {
 
 // rekeyLocked 把档案从旧键归并到新 identity 键（旧键删除）。
 // identity 键已存在其它档案时做真合并（serials/addrs 并集、参数档按规则择优），不丢数据。
-func (s *ProfileStore) rekeyLocked(identity string, e *DeviceEntry) {
+func (s *ProfileStore) rekeyLocked(identity string, e *DeviceEntry) bool {
 	oldKey := s.keyOfLocked(e)
 	if dest, ok := s.data.Devices[identity]; ok && dest != e {
-		mergeEntryLocked(dest, e)
+		if !mergeEntryLocked(dest, e) {
+			return false
+		}
 		for addr, owner := range s.addressAliases {
 			if owner == e {
 				s.addressAliases[addr] = dest
@@ -1315,19 +1336,23 @@ func (s *ProfileStore) rekeyLocked(identity string, e *DeviceEntry) {
 		if oldKey != "" {
 			delete(s.data.Devices, oldKey)
 		}
-		return
+		return true
 	}
 	if oldKey != "" {
 		delete(s.data.Devices, oldKey)
 	}
 	s.data.Devices[identity] = e
+	return true
 }
 
 // mergeEntryLocked 把 src 并入 dest（identity 归并）：
 // marketname/model 空缺回填；serials/addrs 并集（addrs 按状态择优）；
 // 无线形态 tls 优先、tlsGuid 非空保留；参数档每模式独立择优：custom 优先，
 // 其次 baseline 非零者，最后保持 dest。
-func mergeEntryLocked(dest, src *DeviceEntry) {
+func mergeEntryLocked(dest, src *DeviceEntry) bool {
+	if !sameArchiveIdentity(dest, src) {
+		return false
+	}
 	if dest.Marketname == "" {
 		dest.Marketname = src.Marketname
 	}
@@ -1384,6 +1409,7 @@ func mergeEntryLocked(dest, src *DeviceEntry) {
 	sortAddrs(dest)
 	dest.Profiles.Usb = mergeMode(dest.Profiles.Usb, src.Profiles.Usb)
 	dest.Profiles.Wifi = mergeMode(dest.Profiles.Wifi, src.Profiles.Wifi)
+	return true
 }
 
 // mergeMode 单模式参数档归并择优：custom 优先；其次 baseline 非零者；最后保持 dst。
@@ -1417,7 +1443,7 @@ func (s *ProfileStore) addrSuccessLocked(e *DeviceEntry, addr string, now time.T
 // 更新时间戳；跨 IP 的新 5555 成功 → 旧 5555 弃用。TLS 规则：新 TLS 端口
 // 成功 → 旧 TLS 条目弃用（tlsGuid 更新由广播匹配路径记录）。
 func (s *ProfileStore) addrSuccessModeLocked(e *DeviceEntry, addr, mode string, now time.Time) bool {
-	changed := false
+	changed := s.claimAddressLocked(e, addr)
 	// 本次成功地址的形态：显式 mode 优先；空则按环境事实（port != 5555 → tls）
 	// 归类——保证"替换同类"分类正确。
 	class := mode
@@ -1433,13 +1459,14 @@ func (s *ProfileStore) addrSuccessModeLocked(e *DeviceEntry, addr, mode string, 
 			continue
 		}
 		a := &e.Addrs[i]
-		if a.State != AddrStateActive || a.Fail != 0 || a.LastOk != now.Unix() || a.LastFail != 0 {
+		if a.State != AddrStateActive || a.Fail != 0 || a.LastFail != 0 {
 			a.State = AddrStateActive
 			a.Fail = 0
 			a.LastOk = now.Unix()
 			a.LastFail = 0
 			changed = true
 		}
+		a.LastOk = now.Unix() // runtime timestamp is not serialized
 		// gui37：连接成功=活性事实，解除广播缺席打标（复活）。
 		if a.Stale {
 			a.Stale = false
@@ -1980,128 +2007,59 @@ func (s *ProfileStore) MatchMdnsModes(services []MdnsMatch) []MdnsAddr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []MdnsAddr
+	changed := false
 	now := time.Now()
 	for _, sv := range services {
-		if sv.Addr == "" || !IsIPPort(sv.Addr) {
+		if sv.Addr == "" || !IsIPPort(sv.Addr) || sv.Mode == discovery.MdnsModePairing {
 			continue
 		}
-		// gui55：配对服务（_adb-tls-pairing._tcp）的端口是"配对对话框临时端点"，
-		// 不是连接地址——绝不能写进档案（现场：配对期间 IP 级认领把它写成了
-		// mode=pairing 的 active 条目）。
-		if sv.Mode == discovery.MdnsModePairing {
+		serial := SerialFromServiceName(sv.Name)
+		e := s.resolveSerialLocked(serial)
+		if e == nil {
+			e = s.resolveGuidLocked(sv.Name)
+		}
+		if e == nil {
+			if candidate, ok := s.resolveCurrentLocked(sv.Addr); ok && serialCompatible(candidate, serial) {
+				e = candidate
+			} else if serial != "" {
+				e = s.claimableByIPLocked(ipOfAddr(sv.Addr), serial)
+			}
+		}
+		if e == nil || !serialCompatible(e, serial) {
 			continue
 		}
-		mode := sv.Mode
-		matched := false
-		for _, e := range s.data.Devices {
+		if serial != "" && !contains(e.Serials, serial) {
+			e.Serials = append(e.Serials, serial)
+			changed = true
+		}
+		if addrInList(e.Addrs, sv.Addr) {
+			// A broadcast reports presence, not a successful ADB connection.
+			// Keep accumulated probe failures so stale broadcasts cannot defeat backoff.
 			for i := range e.Addrs {
-				if e.Addrs[i].Addr == sv.Addr {
-					a := &e.Addrs[i] // 后续 addrSuccessModeLocked 可能 sortAddrs 重排——指针仍指向原条目
-					// gui55：地址已在档 ≠ 身份已在档——广播自称的短号先与档案比对：
-					//   档案无短号 → 自举补学（现场：设备流先把地址写活，档案仍是残缺）；
-					//   短号冲突 → DHCP 复用（B 设备占了 A 档案的地址）→ 不认领、不复活。
-					if serial := SerialFromServiceName(sv.Name); serial != "" {
-						if len(e.Serials) == 0 {
-							e.Serials = append(e.Serials, serial)
-							if sv.Mode == discovery.MdnsModeTls && sv.Name != "" && e.TlsGuid != sv.Name {
-								e.TlsGuid = sv.Name
-							}
-							if s.applyWirelessFormLocked(e, sv.Mode) {
-								// 形态回填（与短号命中路径同口径）
-							}
-							_ = s.persistLocked()
-							bridge.DebugLog("[app] mDNS 地址已在档：按广播自举补学短号 %q（%s，档案 %s）",
-								serial, sv.Addr, s.keyOfLocked(e))
-						} else if !contains(e.Serials, serial) {
-							bridge.DebugLog("[app] mDNS 广播短号冲突（疑似 DHCP 复用）：%s 处自称 %q，档案 %s 记的是 %v → 不认领、不复活",
-								sv.Addr, serial, s.keyOfLocked(e), e.Serials)
-							matched = true
-							break
-						}
-					}
-					out = append(out, MdnsAddr{Addr: sv.Addr, Mode: mode})
-					// 形态回填：旧档案缺 mode 的 tls 地址在 mDNS 再匹配时补齐
-					if mode != "" && a.Mode == "" {
-						if s.addrSuccessModeLocked(e, sv.Addr, mode, now) {
-							_ = s.persistLocked()
-						}
-					}
-					// gui27 广播=真相：设备自报"我现在在这"→ 该地址的失败节流
-					// 解除（广播在场即设备可达，lastFail 归零）。只动 lastFail，
-					// 不刷 lastOk（低频扫描幂等不受影响）。
-					if a.LastFail != 0 {
-						a.LastFail = 0
-						_ = s.persistLocked()
-					}
-					// gui37：广播匹配到该地址 → 解除该地址的广播缺席打标。
-					// 按地址搜索（不依赖上面易被 sortAddrs 重排的指针）。
-					if s.clearStaleLocked(e, sv.Addr) {
-						_ = s.persistLocked()
-					}
-					matched = true
-					break
+				a := &e.Addrs[i]
+				if a.Addr != sv.Addr {
+					continue
 				}
-			}
-			if matched {
-				break
-			}
-		}
-		if matched {
-			continue
-		}
-		// 服务名命中 serial → 新 IP 归并入该档案
-		// （adb mdns services 实例名形如 "adb-<serial>"；tls 服务为
-		// "adb-<serial>-XXXXXX"，先剥前缀/后缀再比——换 WiFi 换 IP 场景）
-		if sv.Mode == discovery.MdnsModeTls {
-			identity := TlsServiceIdentity(sv.Name)
-			tlsMatched := false
-			for _, e := range s.data.Devices {
-				if identity != "" && contains(e.Serials, identity) || e.TlsGuid != "" && e.TlsGuid == sv.Name {
-					if s.addrSuccessModeLocked(e, sv.Addr, ModeTls, now) {
-						_ = s.persistLocked()
-						bridge.DebugLog("[app] MatchMdnsModes TLS 写档成功：name=%s addr=%s key=%s addrs=%+v", sv.Name, sv.Addr, s.keyOfLocked(e), e.Addrs)
-					} else {
-						bridge.DebugLog("[app] MatchMdnsModes TLS 写档无变化：name=%s addr=%s key=%s", sv.Name, sv.Addr, s.keyOfLocked(e))
-					}
-					changed := s.applyWirelessFormLocked(e, ModeTls)
-					if sv.Name != "" && e.TlsGuid != sv.Name {
-						e.TlsGuid = sv.Name
-						changed = true
-					}
-					if changed {
-						_ = s.persistLocked()
-					}
-					out = append(out, MdnsAddr{Addr: sv.Addr, Mode: ModeTls})
-					tlsMatched = true
-					break
+				if a.State != AddrStateActive || a.Mode != sv.Mode {
+					changed = true
 				}
+				a.State, a.Mode, a.LastFail = AddrStateActive, sv.Mode, 0
 			}
-			// 短号/guid 都不中才走 IP 级兜底认领（命中时不重复追加候选）。
-			if !tlsMatched && s.claimMdnsByIPLocked(sv, now) {
-				out = append(out, MdnsAddr{Addr: sv.Addr, Mode: ModeTls})
-			}
-			continue
+		} else {
+			changed = s.addrSuccessModeLocked(e, sv.Addr, sv.Mode, now) || changed
 		}
-		name := strings.TrimPrefix(sv.Name, "adb-")
-		claimed := false
-		for _, e := range s.data.Devices {
-			if contains(e.Serials, name) {
-				if s.addrSuccessModeLocked(e, sv.Addr, ModeTcpip, now) {
-					_ = s.persistLocked()
-				}
-				if s.applyWirelessFormLocked(e, ModeTcpip) {
-					_ = s.persistLocked()
-				}
-				out = append(out, MdnsAddr{Addr: sv.Addr, Mode: ModeTcpip})
-				claimed = true
-				break
-			}
+		changed = s.applyWirelessFormLocked(e, sv.Mode) || changed
+		if sv.Mode == ModeTls && serial != "" && e.TlsGuid != sv.Name {
+			e.TlsGuid = sv.Name
+			changed = true
 		}
-		if !claimed && s.claimMdnsByIPLocked(sv, now) {
-			out = append(out, MdnsAddr{Addr: sv.Addr, Mode: ModeTcpip})
-		}
+		changed = s.clearStaleLocked(e, sv.Addr) || changed
+		out = append(out, MdnsAddr{Addr: sv.Addr, Mode: sv.Mode})
 	}
 	s.rememberMdnsAddressesLocked(out)
+	if changed {
+		_ = s.persistLocked()
+	}
 	return out
 }
 
@@ -2161,6 +2119,7 @@ func (s *ProfileStore) claimMdnsByIPLocked(sv MdnsMatch, now time.Time) bool {
 // （与 resolveKeyByIPLocked 同口径，保证确定性）。
 func (s *ProfileStore) claimableByIPLocked(ip, serial string) *DeviceEntry {
 	activeKey, otherKey := "", ""
+	compatibleCount := 0
 	for key, e := range s.data.Devices {
 		matched, active := false, false
 		for i := range e.Addrs {
@@ -2179,6 +2138,7 @@ func (s *ProfileStore) claimableByIPLocked(ip, serial string) *DeviceEntry {
 		if len(e.Serials) > 0 && serial != "" && !contains(e.Serials, serial) {
 			continue
 		}
+		compatibleCount++
 		if active {
 			if activeKey == "" || key < activeKey {
 				activeKey = key
@@ -2186,6 +2146,12 @@ func (s *ProfileStore) claimableByIPLocked(ip, serial string) *DeviceEntry {
 		} else if otherKey == "" || key < otherKey {
 			otherKey = key
 		}
+	}
+	if compatibleCount > 1 {
+		return nil
+	}
+	if serial == "" {
+		return nil
 	}
 	if activeKey != "" {
 		return s.data.Devices[activeKey]
@@ -2238,6 +2204,12 @@ func (s *ProfileStore) LearnIdentity(key, serial, guid string) bool {
 	defer s.mu.Unlock()
 	e, ok := s.resolveLocked(key)
 	if !ok {
+		return false
+	}
+	if !serialCompatible(e, serial) {
+		return false
+	}
+	if owner := s.resolveSerialLocked(serial); owner != nil && owner != e {
 		return false
 	}
 	changed := false
@@ -2458,57 +2430,52 @@ func isAlnum6(s string) bool {
 // 按 identity（优先）/serial/addr 定位或新建档案 → 记 mode=tls + tls 地址 +
 // tlsGuid + 设备形态 wireless=tls；serial 累积（mDNS 实例名里的真 serial）；
 // marketname/model 空缺回填。自动落盘。
-func (s *ProfileStore) PairArchive(identity, serial, addr, tlsGuid, marketname, model string) {
+// PairArchive receives a serial verified by the existing authenticated pairing flow.
+func (s *ProfileStore) PairArchive(identity, serial, addr, tlsGuid, marketname, model string) error {
+	serial = adb.StableSerial(serial)
+	if serial == "" {
+		serial = adb.StableSerial(tlsGuid)
+	}
+	if serial == "" {
+		return errors.New("配对设备身份尚未确认")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var e *DeviceEntry
-	if identity != "" {
-		e = s.data.Devices[identity]
+	e := s.resolveSerialLocked(serial)
+	if e == nil && s.hasSerialClaimLocked(serial) {
+		return errors.New("设备序列号在现有档案中存在冲突")
 	}
 	if e == nil {
-		if e = s.resolveLockedAddrOnly(serial); e == nil {
-			e = s.resolveLockedAddrOnly(addr)
+		// An explicitly verified pairing may finish an old identity-less archive.
+		candidate := s.data.Devices[identity]
+		if candidate != nil && serialCompatible(candidate, serial) &&
+			(contains(candidate.Serials, serial) || len(candidate.Serials) == 0 &&
+				(addrInList(candidate.Addrs, addr) || s.claimableByIPLocked(ipOfAddr(addr), serial) == candidate)) {
+			e = candidate
 		}
 	}
 	if e == nil {
 		e = &DeviceEntry{Serials: []string{}, Addrs: []AddrEntry{}, Profiles: DefaultProfile()}
-		if identity != "" {
-			s.data.Devices[identity] = e
-		} else if serial != "" {
-			s.data.Devices[serial] = e
-		} else {
-			s.data.Devices[addr] = e
-		}
+		s.data.Devices["device:"+serial] = e
 	}
-	changed := false
-	if e.Marketname == "" && marketname != "" {
+	if !serialCompatible(e, serial) {
+		return errors.New("配对身份与档案不一致")
+	}
+	if e.Marketname == "" {
 		e.Marketname = marketname
-		changed = true
 	}
-	if e.Model == "" && model != "" {
+	if e.Model == "" {
 		e.Model = model
-		changed = true
 	}
-	if serial != "" && !contains(e.Serials, serial) {
+	if !contains(e.Serials, serial) {
 		e.Serials = append(e.Serials, serial)
-		changed = true
 	}
-	if tlsGuid != "" && e.TlsGuid != tlsGuid {
+	if tlsGuid != "" {
 		e.TlsGuid = tlsGuid
-		changed = true
 	}
-	changed = s.applyWirelessFormLocked(e, ModeTls) || changed
-	if s.addrSuccessModeLocked(e, addr, ModeTls, time.Now()) {
-		changed = true
-	}
-	if changed {
-		_ = s.persistLocked()
-	}
-	// gui52fix3：配对建档后事件驱动合卡——若本次写入了 IP:port 过渡孤儿，
-	// 且同 IP 已有主档案，立即并入主档案（不留双卡窗口）。
-	if s.cleanOrphanIPPortLocked("事件驱动") {
-		_ = s.persistLocked()
-	}
+	s.applyWirelessFormLocked(e, ModeTls)
+	s.addrSuccessModeLocked(e, addr, ModeTls, time.Now())
+	return s.persistLocked()
 }
 
 // resolveLockedAddrOnly 只按 serials/addrs 集合解析档案（不按 identity 键直查；

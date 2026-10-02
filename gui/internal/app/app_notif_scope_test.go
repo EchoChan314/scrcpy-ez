@@ -33,19 +33,19 @@ func newNotifScopeApp(t *testing.T) (*App, *[]*fakeRunner) {
 func TestAnyOnSameDeviceNormalization(t *testing.T) {
 	a, _ := newNotifScopeApp(t)
 	setDevices(a, []adb.Device{
-		{Serial: "K80USB", Wireless: "192.168.1.5:5555", Identity: "K80", State: "device"},
-		{Serial: "PadUSB", Identity: "Pad", State: "device"},
+		{Serial: "K80USB", Wireless: "192.168.1.5:5555", Identity: "device:K80USB", State: "device"},
+		{Serial: "PadUSB", Identity: "device:PadUSB", State: "device"},
 	})
-	if !a.anyOnSameDevice("K80", []string{"192.168.1.5:5555"}) {
+	if !a.anyOnSameDevice("device:K80USB", []string{"192.168.1.5:5555"}) {
 		t.Fatal("同设备（identity ↔ 无线地址）应识别为同一台")
 	}
-	if !a.anyOnSameDevice("K80USB", []string{"K80"}) {
+	if !a.anyOnSameDevice("K80USB", []string{"device:K80USB"}) {
 		t.Fatal("同设备（USB serial ↔ identity）应识别为同一台")
 	}
-	if a.anyOnSameDevice("K80", []string{"PadUSB"}) {
+	if a.anyOnSameDevice("device:K80USB", []string{"PadUSB"}) {
 		t.Fatal("不同设备不应识别为同一台")
 	}
-	if a.anyOnSameDevice("K80", nil) {
+	if a.anyOnSameDevice("device:K80USB", nil) {
 		t.Fatal("无其它会话应为 false")
 	}
 }
@@ -91,7 +91,7 @@ func TestOtherSessionIDsStoppingNotHolder(t *testing.T) {
 // 再停主投屏（窗口已受理停止=不算持有者）→ skip=false（它是"最后会话"，保持等待）。
 func TestStopSkipInjectionDoubleSession(t *testing.T) {
 	a, runners := newNotifScopeApp(t)
-	setDevices(a, []adb.Device{{Serial: "K80", State: "device", Identity: "K80"}})
+	setDevices(a, []adb.Device{{Serial: "K80", State: "device", Identity: "device:K80USB"}})
 	if err := a.StartCast("K80"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +139,8 @@ func TestStopIsolatedSessionNoSkip(t *testing.T) {
 func TestStopCrossDeviceNoSkip(t *testing.T) {
 	a, runners := newNotifScopeApp(t)
 	setDevices(a, []adb.Device{
-		{Serial: "K80", State: "device", Identity: "K80"},
-		{Serial: "Pad", State: "device", Identity: "Pad"},
+		{Serial: "K80", State: "device", Identity: "device:K80USB"},
+		{Serial: "Pad", State: "device", Identity: "device:PadUSB"},
 	})
 	if err := a.StartCast("K80"); err != nil {
 		t.Fatal(err)

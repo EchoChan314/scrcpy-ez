@@ -2,6 +2,12 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#ifdef _WIN32
+#define COBJMACROS
+#include <windows.h>
+#include <wincodec.h>
+#endif
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
@@ -12,6 +18,118 @@
 
 // JPEG quality (1-100)
 #define SC_JPEG_QUALITY 95
+
+bool
+sc_image_to_bgra(const uint8_t *data, size_t size, const char *mime,
+                 uint8_t **pixels, unsigned *width, unsigned *height) {
+#ifdef _WIN32
+    if (!size || size > UINT_MAX) { return false; }
+    HRESULT initialized = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) { return false; }
+    IWICImagingFactory *factory = NULL;
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = NULL;
+    IWICBitmapFrameDecode *frame = NULL;
+    IWICFormatConverter *converter = NULL;
+    uint8_t *bgra = NULL;
+    UINT w = 0, h = 0;
+    bool ok = false;
+    HRESULT hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                                   &IID_IWICImagingFactory, (void **) &factory);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICImagingFactory_CreateStream(factory, &stream);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICStream_InitializeFromMemory(stream, (BYTE *) data, (DWORD) size);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICImagingFactory_CreateDecoderFromStream(factory, (IStream *) stream, NULL,
+                                                    WICDecodeMetadataCacheOnLoad, &decoder);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICBitmapFrameDecode_GetSize(frame, &w, &h);
+    if (FAILED(hr) || !w || !h || (uint64_t) w * h > 256u * 1024u * 1024u / 4) { goto wic_end; }
+    bgra = malloc((size_t) w * h * 4);
+    if (!bgra) { goto wic_end; }
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICFormatConverter_Initialize(converter, (IWICBitmapSource *) frame,
+                                        &GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
+                                        NULL, 0, WICBitmapPaletteTypeCustom);
+    if (FAILED(hr)) { goto wic_end; }
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, w * 4, w * h * 4, bgra);
+    if (FAILED(hr)) { goto wic_end; }
+    *pixels = bgra;
+    *width = w;
+    *height = h;
+    bgra = NULL;
+    ok = true;
+wic_end:
+    if (!ok) { LOGW("Windows image decoder failed (%s, HRESULT=0x%08lx)", mime, (unsigned long) hr); }
+    free(bgra);
+    if (converter) { IWICFormatConverter_Release(converter); }
+    if (frame) { IWICBitmapFrameDecode_Release(frame); }
+    if (decoder) { IWICBitmapDecoder_Release(decoder); }
+    if (stream) { IWICStream_Release(stream); }
+    if (factory) { IWICImagingFactory_Release(factory); }
+    if (SUCCEEDED(initialized)) { CoUninitialize(); }
+    return ok;
+#else
+    enum AVCodecID id;
+    if (!strcmp(mime, "image/png")) { id = AV_CODEC_ID_PNG; }
+    else if (!strcmp(mime, "image/jpeg") || !strcmp(mime, "image/jpg")) { id = AV_CODEC_ID_MJPEG; }
+    else if (!strcmp(mime, "image/bmp")) { id = AV_CODEC_ID_BMP; }
+    else if (!strcmp(mime, "image/webp")) { id = AV_CODEC_ID_WEBP; }
+    else if (!strcmp(mime, "image/gif")) { id = AV_CODEC_ID_GIF; }
+    else { return false; }
+    if (!size || size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE) { return false; }
+    const AVCodec *codec = avcodec_find_decoder(id);
+    AVCodecContext *ctx = codec ? avcodec_alloc_context3(codec) : NULL;
+    AVFrame *frame = av_frame_alloc();
+    AVPacket *packet = av_packet_alloc();
+    struct SwsContext *sws = NULL;
+    uint8_t *bgra = NULL;
+    bool ok = false;
+    if (!ctx || !frame || !packet || avcodec_open2(ctx, codec, NULL) < 0
+            || av_new_packet(packet, (int) size) < 0) {
+        LOGW("Clipboard image decoder initialization failed (%s)", mime);
+        goto end;
+    }
+    // The decoder may read padding beyond the payload: av_new_packet zeros it.
+    memcpy(packet->data, data, size);
+    ctx->max_pixels = 256u * 1024u * 1024u / 4;
+    int sent = avcodec_send_packet(ctx, packet);
+    int decoded = sent < 0 ? sent : avcodec_receive_frame(ctx, frame);
+    if (decoded < 0
+            || frame->width <= 0 || frame->height <= 0
+            || (uint64_t) frame->width * frame->height > (uint64_t) ctx->max_pixels) {
+        LOGW("Clipboard image decode failed (%s, code=%d, dimensions=%dx%d)", mime, decoded, frame->width, frame->height);
+        goto end;
+    }
+    size_t bytes = (size_t) frame->width * frame->height * 4;
+    bgra = malloc(bytes);
+    if (!bgra) { goto end; }
+    sws = sws_getContext(frame->width, frame->height, frame->format,
+                         frame->width, frame->height, AV_PIX_FMT_BGRA,
+                         SWS_POINT, NULL, NULL, NULL);
+    if (!sws) { LOGW("Clipboard pixel converter initialization failed"); goto end; }
+    uint8_t *dst[] = { bgra, NULL, NULL, NULL };
+    int strides[] = { frame->width * 4, 0, 0, 0 };
+    if (sws_scale(sws, (const uint8_t *const *) frame->data, frame->linesize,
+                  0, frame->height, dst, strides) != frame->height) { goto end; }
+    *pixels = bgra;
+    *width = frame->width;
+    *height = frame->height;
+    bgra = NULL;
+    ok = true;
+end:
+    free(bgra);
+    sws_freeContext(sws);
+    av_packet_free(&packet);
+    av_frame_free(&frame);
+    avcodec_free_context(&ctx);
+    return ok;
+#endif
+}
 
 bool
 sc_image_bmp_to_jpeg(const uint8_t *bmp_data, size_t bmp_size,

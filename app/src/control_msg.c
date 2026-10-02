@@ -116,6 +116,13 @@ string_size_tiny(const char *utf8, size_t max_len) {
 
 size_t
 sc_control_msg_serialized_size(const struct sc_control_msg *msg) {
+    if (msg->type == SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED
+            || msg->type == SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED) {
+        struct sc_control_msg base = *msg;
+        base.type = msg->type == SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED
+                  ? SC_CONTROL_MSG_TYPE_SET_CLIPBOARD : SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD;
+        return 16 + sc_control_msg_serialized_size(&base);
+    }
     switch (msg->type) {
         case SC_CONTROL_MSG_TYPE_INJECT_KEYCODE:
             return 14;
@@ -177,6 +184,17 @@ sc_control_msg_serialized_size(const struct sc_control_msg *msg) {
 // of bytes written. The wire format is unchanged.
 static size_t
 serialize_into(const struct sc_control_msg *msg, uint8_t *buf) {
+    if (msg->type == SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED
+            || msg->type == SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED) {
+        struct sc_control_msg base = *msg;
+        base.type = msg->type == SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED
+                  ? SC_CONTROL_MSG_TYPE_SET_CLIPBOARD : SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD;
+        size_t size = serialize_into(&base, buf + 16);
+        buf[0] = msg->type;
+        sc_write64be(buf + 1, msg->clipboard_epoch);
+        sc_write64be(buf + 9, msg->clipboard_version);
+        return size + 16;
+    }
     buf[0] = msg->type;
     switch (msg->type) {
         case SC_CONTROL_MSG_TYPE_INJECT_KEYCODE:
@@ -305,7 +323,7 @@ serialize_into(const struct sc_control_msg *msg, uint8_t *buf) {
 uint8_t *
 sc_control_msg_serialize(const struct sc_control_msg *msg, size_t *len) {
     size_t size = sc_control_msg_serialized_size(msg);
-    if (!size) {
+    if (!size || size > SC_CONTROL_MSG_MAX_SIZE) {
         if (len) {
             *len = 0;
         }
@@ -388,12 +406,14 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
             LOG_CMSG("get clipboard copy_key=%s",
                      copy_key_labels[msg->get_clipboard.copy_key]);
             break;
+        case SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED:
         case SC_CONTROL_MSG_TYPE_SET_CLIPBOARD:
-            LOG_CMSG("clipboard %" PRIu64_ " %s \"%s\"",
+            LOG_CMSG("clipboard %" PRIu64_ " %s length=%u",
                      msg->set_clipboard.sequence,
                      msg->set_clipboard.paste ? "paste" : "nopaste",
-                     msg->set_clipboard.text);
+                     (unsigned) strlen(msg->set_clipboard.text));
             break;
+        case SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED:
         case SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD:
             LOG_CMSG("image clipboard %" PRIu64_ " %s size=%u mimetype=\"%s\"",
                     msg->set_image_clipboard.sequence,
@@ -497,9 +517,11 @@ sc_control_msg_destroy(struct sc_control_msg *msg) {
         case SC_CONTROL_MSG_TYPE_INJECT_TEXT:
             free(msg->inject_text.text);
             break;
+        case SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED:
         case SC_CONTROL_MSG_TYPE_SET_CLIPBOARD:
             free(msg->set_clipboard.text);
             break;
+        case SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED:
         case SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD:
             free(msg->set_image_clipboard.data);
             free(msg->set_image_clipboard.mimetype);

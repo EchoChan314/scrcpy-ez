@@ -66,7 +66,7 @@ func TestTeachfix4K80FullChainZeroFlicker(t *testing.T) {
 func TestTeachfix4TrueUnplugFallsBackAt10sToArchiveState(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix3SeedK80(a)
-	a.profiles.AddrSuccess("REDMI K80", "192.0.2.197:5555", ModeTcpip)
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555", ModeTcpip)
 	ops := &teachfix3Ops{port: "0"}
 	ops.install(a)
 	a.disc.ConnectFn = func(ctx context.Context, addr string) error { return nil } // 兜底 connect 成功

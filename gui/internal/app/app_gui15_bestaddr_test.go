@@ -40,7 +40,7 @@ func TestBestAddrSkipsThrottledTls(t *testing.T) {
 		},
 		Profiles: DefaultProfile(),
 	})
-	if got := s.BestAddr("TEST0001"); got != "192.0.2.197:5555" {
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0001")); got != "192.0.2.197:5555" {
 		t.Fatalf("60s 节流期内的 tls 地址不应胜出，BestAddr 应为 5555: %q", got)
 	}
 	if list := s.OfflineCandidateAddrs(nil)["Redmi K80"]; len(list) != 0 {
@@ -61,7 +61,7 @@ func TestBestAddrKeepsFail1(t *testing.T) {
 		},
 		Profiles: DefaultProfile(),
 	})
-	if got := s.BestAddr("TEST0001"); got != "192.0.2.197:33895" {
+	if got := s.BestAddr(fixtureArchiveKey(s, "TEST0001")); got != "192.0.2.197:33895" {
 		t.Fatalf("fail=1 且无 lastFail 的 tls 地址应参与（tls 层优先）: %q", got)
 	}
 }
@@ -86,7 +86,7 @@ func TestOrderedAddrsThrottleFilter(t *testing.T) {
 		},
 		Profiles: DefaultProfile(),
 	})
-	got := s.OrderedAddrs("TEST0001")
+	got := s.OrderedAddrs(fixtureArchiveKey(s, "TEST0001"))
 	// gui32 active 严格优先：tls 层取唯一 active 41234（history 33895 虽 lastOk
 	// 更新也不抢——死记忆让位）；tcpip 层 5555。
 	if len(got) != 2 || got[0].Addr != "192.0.2.197:41234" || got[1].Addr != "192.0.2.197:5555" {
@@ -96,13 +96,13 @@ func TestOrderedAddrsThrottleFilter(t *testing.T) {
 	// active 41234 拨进节流期 → 本层无候选（不回退 history 33895——节流是本类
 	// 整体跳过，旧条目=纯噪声；与 gui27 节流同口径）。
 	s.mu.Lock()
-	for i := range s.data.Devices["Redmi K80"].Addrs {
-		if s.data.Devices["Redmi K80"].Addrs[i].Addr == "192.0.2.197:41234" {
-			s.data.Devices["Redmi K80"].Addrs[i].LastFail = now.Unix()
+	for i := range s.data.Devices[fixtureArchiveKeyLocked(s, "Redmi K80")].Addrs {
+		if s.data.Devices[fixtureArchiveKeyLocked(s, "Redmi K80")].Addrs[i].Addr == "192.0.2.197:41234" {
+			s.data.Devices[fixtureArchiveKeyLocked(s, "Redmi K80")].Addrs[i].LastFail = now.Unix()
 		}
 	}
 	s.mu.Unlock()
-	got = s.OrderedAddrs("TEST0001")
+	got = s.OrderedAddrs(fixtureArchiveKey(s, "TEST0001"))
 	if len(got) != 1 || got[0].Addr != "192.0.2.197:5555" {
 		t.Fatalf("active 被节流后本类无候选（不回退 history）: %+v", got)
 	}

@@ -22,6 +22,7 @@ import (
 
 	"scrcpy-ez/gui/internal/app"
 	"scrcpy-ez/gui/internal/bridge"
+	"scrcpy-ez/gui/internal/castsupervisor"
 	"scrcpy-ez/gui/internal/ui"
 	"scrcpy-ez/gui/internal/updater"
 )
@@ -129,6 +130,9 @@ var pairUIJS string
 //go:embed web/pinyin_pro.js
 var pinyinProJS string
 
+//go:embed web/app_icon_cache.js
+var appIconCacheJS string
+
 //go:embed web/app_search.js
 var appSearchJS string
 
@@ -151,7 +155,7 @@ var githubMarkPNG []byte
 var giteeMarkSVG []byte
 
 const (
-	version = "v2.2.1"
+	version = "v2.2.2"
 )
 
 // appDir gui53 产品级修复：返回 exe 所在目录（发行包内 bat 与 GUI 同级解压）。
@@ -212,6 +216,9 @@ func migrateLegacyProfile(newPath string) {
 }
 
 func main() {
+	if castsupervisor.RunIfRequested(os.Args[1:]) {
+		return
+	}
 	if updater.RunIfRequested(os.Args[1:]) {
 		return
 	}
@@ -281,7 +288,7 @@ func main() {
 	// v2.1.18：pinyin_pro（拼音库，全局 pinyinPro）+ app_search（搜索过滤模块）
 	// 在业务脚本前内联（app.js 依赖 SCEZAppSearch）。
 	pageTemplate := strings.NewReplacer("/*__GITHUB_ICON__*/", base64.StdEncoding.EncodeToString(githubMarkPNG), "/*__GITEE_ICON__*/", base64.StdEncoding.EncodeToString(giteeMarkSVG)).Replace(indexHTML)
-	html, err := ui.BuildIndex(pageTemplate, styleCSS, updateUIJS+"\n"+pinyinProJS+"\n"+appSearchJS+"\n"+appWinTextJS+"\n"+appWinBarJS+"\n"+sessionMapJS+"\n"+paramStateJS+"\n"+appsettingStateJS+"\n"+dragOrderJS+"\n"+pairUIJS+"\n"+appJS)
+	html, err := ui.BuildIndex(pageTemplate, styleCSS, updateUIJS+"\n"+pinyinProJS+"\n"+appSearchJS+"\n"+appIconCacheJS+"\n"+appWinTextJS+"\n"+appWinBarJS+"\n"+sessionMapJS+"\n"+paramStateJS+"\n"+appsettingStateJS+"\n"+dragOrderJS+"\n"+pairUIJS+"\n"+appJS)
 	if err != nil {
 		log.Fatalf("界面资源组装失败: %v", err)
 	}

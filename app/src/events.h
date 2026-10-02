@@ -29,6 +29,7 @@ enum {
     SC_EVENT_KEYBOARD_LAYOUT_RESTORE,
     // scrcpy-ez: user pressed "stop mirroring" on the device notification
     SC_EVENT_STOP_MIRRORING,
+    SC_EVENT_ROUTE_SWITCH,
 };
 
 bool

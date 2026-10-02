@@ -46,7 +46,7 @@ func TestGui52LegacyMigrationToTwoState(t *testing.T) {
 	if err := s.Load(); err != nil {
 		t.Fatal(err)
 	}
-	e, ok := s.Entry("Xiaomi Pad 8 Pro")
+	e, ok := s.Entry(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatalf("档案应加载: %v", s.Entries())
 	}
@@ -70,7 +70,7 @@ func TestGui52LegacyMigrationToTwoState(t *testing.T) {
 		}
 	}
 
-	got := s.OrderedAddrs("TEST0002")
+	got := s.OrderedAddrs(fixtureArchiveKey(s, "TEST0002"))
 	if len(got) != 2 || got[0].Addr != "192.0.2.99:33895" || got[0].State != AddrStateActive ||
 		got[1].Addr != "192.0.2.162:5555" || got[1].State != AddrStateStale {
 		t.Fatalf("二态候选应为 active TLS → stale tcpip: %+v", got)
@@ -113,10 +113,10 @@ func TestGui52TwoStateMutualExclusion(t *testing.T) {
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro",
 			Wireless: "192.0.2.99:5555"},
 	})
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
+	s.AddrSuccessWithMode(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.99:33895", ModeTls)
 
 	// 初始：两条都 active
-	e, _ := s.Entry("TEST0002")
+	e, _ := s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	for i := range e.Addrs {
 		if e.Addrs[i].State != AddrStateActive || e.Addrs[i].Stale {
 			t.Fatalf("成功入档必须 state=active 且无 stale 标: %+v", e.Addrs[i])
@@ -124,8 +124,8 @@ func TestGui52TwoStateMutualExclusion(t *testing.T) {
 	}
 
 	// 失败只打对应端口：TLS 翻 stale，5555 仍 active（形态独立）
-	s.AddrFail("Xiaomi Pad 8 Pro", "192.0.2.99:33895")
-	e, _ = s.Entry("TEST0002")
+	s.AddrFail(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.99:33895")
+	e, _ = s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	tls := gui24FindAddr(e, "192.0.2.99:33895")
 	tcp := gui24FindAddr(e, "192.0.2.99:5555")
 	if tls == nil || tls.State != AddrStateStale || tcp == nil || tcp.State != AddrStateActive {
@@ -133,8 +133,8 @@ func TestGui52TwoStateMutualExclusion(t *testing.T) {
 	}
 
 	// 成功覆盖对应端口：TLS 翻回 active，5555 不受影响
-	s.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
-	e, _ = s.Entry("TEST0002")
+	s.AddrSuccessWithMode(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"), "192.0.2.99:33895", ModeTls)
+	e, _ = s.Entry(fixtureArchiveKey(s, "TEST0002"))
 	tls = gui24FindAddr(e, "192.0.2.99:33895")
 	tcp = gui24FindAddr(e, "192.0.2.99:5555")
 	if tls == nil || tls.State != AddrStateActive || tls.Stale || tcp == nil || tcp.State != AddrStateActive {
@@ -176,7 +176,7 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "MODEL123", nil
+			return "12345TESTA", nil
 		}
 		return "", nil
 	}
@@ -192,12 +192,12 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 	waitPairPhase(t, a, PairPhaseSuccess)
 
 	waitFor(t, 3*time.Second, func() bool {
-		e, ok := a.profiles.Entry("REDMI K80")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 		return ok && contains(e.Serials, "TEST0001") &&
 			gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls)
 	}, "短号/ TLS 入档未完成")
 
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		t.Fatal("配对成功应建档")
 	}
@@ -214,12 +214,12 @@ func TestGui52PairLearningSerialTlsAnd5555(t *testing.T) {
 func TestGui52DisplayNameWinsForOnlineCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "MODEL123"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "12345TESTA"},
 	})
-	a.profiles.SetDisplayName("REDMI K80", "红米k80")
+	a.profiles.SetDisplayName(fixtureArchiveKey(a.profiles, "REDMI K80"), "红米k80")
 
 	devs := []adb.Device{
-		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "MODEL123", Identity: "REDMI K80"},
+		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Manufacturer: "Xiaomi", Model: "12345TESTA", Identity: "REDMI K80"},
 	}
 	applyProfileNames(devs, a.profiles)
 	if devs[0].Name != "红米k80" {
@@ -227,7 +227,7 @@ func TestGui52DisplayNameWinsForOnlineCard(t *testing.T) {
 	}
 
 	// DisplayNameSet=false → 在线卡保留 adb 富化名（marketname 链）
-	a.profiles.SetDisplayName("REDMI K80", "")
+	a.profiles.SetDisplayName(fixtureArchiveKey(a.profiles, "REDMI K80"), "")
 	devs = []adb.Device{
 		{Serial: "TEST0001", State: "device", ConnType: "usb", Name: "REDMI K80", Marketname: "REDMI K80", Identity: "REDMI K80"},
 	}
@@ -245,23 +245,23 @@ func TestGui52CandidateDegradeRecoverLoop(t *testing.T) {
 	a.profiles.SyncDevices([]adb.Device{
 		{Serial: "TEST0002", State: "device", ConnType: "usb", Marketname: "Xiaomi Pad 8 Pro", Wireless: "192.0.2.99:5555"},
 	})
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.99:33895", ModeTls)
 
 	// active → 在线证据
 	if got := a.profiles.OfflineCandidateAddrs(nil); len(got) != 0 {
 		t.Fatalf("active 地址=在线证据，不应有离线候选: %+v", got)
 	}
 	// 全 stale → 离线候选（TLS 优先）
-	if !a.profiles.MarkAllAddrsStale("Xiaomi Pad 8 Pro") {
+	if !a.profiles.MarkAllAddrsStale(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro")) {
 		t.Fatal("MarkAllAddrsStale 应有改动")
 	}
-	got := a.profiles.OfflineCandidateAddrs(nil)["Xiaomi Pad 8 Pro"]
+	got := a.profiles.OfflineCandidateAddrs(nil)[a.profiles.ResolveKey("TEST0002")]
 	if len(got) != 2 || got[0].Addr != "192.0.2.99:33895" || got[1].Addr != "192.0.2.99:5555" {
 		t.Fatalf("全 stale 后应产出 TLS 优先离线候选: %+v", got)
 	}
 	// 探测成功 → 翻回 active
-	a.profiles.AddrSuccessWithMode("Xiaomi Pad 8 Pro", "192.0.2.99:33895", ModeTls)
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"), "192.0.2.99:33895", ModeTls)
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	tls := gui24FindAddr(e, "192.0.2.99:33895")
 	if tls == nil || tls.State != AddrStateActive {
 		t.Fatalf("恢复应翻回 active: %+v", e.Addrs)

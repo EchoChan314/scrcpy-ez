@@ -72,11 +72,13 @@
     } else if (d.connType === 'wifi') {
       parts.push('无线');
       if (d.wirelessIP) parts.push(d.wirelessIP);
+      else if (d.serial) parts.push(d.serial);
       if (d.wirelessRes) parts.push(d.wirelessRes + ' · ' + (d.fps ? d.fps + 'fps' : '60fps'));
     } else {
       parts.push('其他');
       if (d.serial) parts.push(d.serial);
     }
+    if (d.identity && d.identity.indexOf('pending:') === 0) parts.push('身份待确认');
     return parts.join(' · ');
   }
 
@@ -318,7 +320,8 @@
     });
     batchSelectedDevices(st).forEach(function (d) {
       var k = devKey(d);
-      obj[k] = (drafts[k] !== undefined) ? drafts[k].trim() : '';
+      var renameKey = k.indexOf('pending:') === 0 ? k + '|' + (d.identityEpoch || 0) : k;
+      obj[renameKey] = (drafts[k] !== undefined) ? drafts[k].trim() : '';
     });
     return obj;
   }
@@ -362,10 +365,42 @@
       started++;
     });
     exitBatchMode(st);
-    if (started) toast('已开始投屏 ' + started + ' 台');
+    if (started) toast('正在启动 ' + started + ' 台设备的投屏');
+  }
+
+  var batchDeviceKeys = {};
+  function reconcileBatchDeviceKeys(st) {
+    var next = {};
+    (st.devices || []).forEach(function (d) {
+      var key = devKey(d), old = batchDeviceKeys[d.serial];
+      var epoch = d.identityEpoch || 0;
+      next[d.serial] = { key: key, epoch: epoch };
+      var pane = appWins[d.serial];
+      if (pane && pane.identity && pane.identity.indexOf('pending:') === 0 && pane.identityEpoch === epoch) {
+        pane.identity = key;
+      }
+      if (old && (old.key !== key || old.epoch !== epoch)) {
+        if (old.epoch === epoch && old.key.indexOf('pending:') === 0 && key.indexOf('pending:') !== 0) {
+          if (batchSel[old.key]) batchSel[key] = true;
+          if (renameDraft[old.key] !== undefined) renameDraft[key] = renameDraft[old.key];
+        }
+        if (old.key !== key || old.key.indexOf('pending:') === 0) {
+          delete batchSel[old.key];
+          delete renameDraft[old.key];
+        }
+      }
+    });
+    Object.keys(batchDeviceKeys).forEach(function (serial) {
+      if (!next[serial] && batchDeviceKeys[serial].key.indexOf('pending:') === 0) {
+        delete batchSel[batchDeviceKeys[serial].key];
+        delete renameDraft[batchDeviceKeys[serial].key];
+      }
+    });
+    batchDeviceKeys = next;
   }
 
   function renderDevices(st) {
+    reconcileBatchDeviceKeys(st);
     // gui44：拖拽排序进行中跳过重建（下轮快照照常，轮询继续）
     if (el('device-list').classList.contains('drag-active')) return;
     // v2.1.67：条子退场动画在播（'playing'）→ 整页重建推迟（60ms 后重试，动画结束由
@@ -455,6 +490,7 @@
       var deletingCard = !!deletingKeys[key];
       if (deletingCard) card.className += ' deleting';
       card.style.viewTransitionName = 'dev-' + vtSafeName(key);
+      var appBarKeys = [], appBarList = [], appBarCount = 0;
       if (batchMode) {
         // gui51：批量模式——灰框未选 / 绿框选中；整卡点击切换选中
         card.className += selected ? ' selected' : ' dim';
@@ -469,12 +505,14 @@
         // v2.1.59：应用投屏键/数量（卡片跳转与条子共用；提前计算）。
         // v2.1.64：并入档案全键（serials ∪ addrs）——插拔形态切换后应用窗口的键可能
         // 还是旧形态键，档案=权威映射（主人拍板"按档案查"）。
-        var appBarKeys = [d.serial];
+        appBarKeys = [d.serial];
         if (d.wireless) appBarKeys.push(d.wireless);
         if (sess && sess.serial) appBarKeys.push(sess.serial);
         appBarKeys = AppWinBar.appendExtraKeys(appBarKeys, profileKeysFor(d));
-        var appBarList = AppWinBar.keysForDevice(openAppCards, appBarKeys, d.identity || '', deviceIdentityOf);
-        var appBarCount = AppWinBar.countFor(openAppCards, appBarList);
+        appBarList = AppWinBar.keysForDevice(openAppCards, appBarKeys, d.identity || '', function (key) {
+          return (appWins[key] && appWins[key].identity) || deviceIdentityOf(key);
+        });
+        appBarCount = AppWinBar.countFor(openAppCards, appBarList);
         // 卡片点击跳转（v2.1.59 三态）：主投屏在 → 窗口总览页（既有语义）；只有应用
         // 投屏 → 该设备的应用窗口标签页（懒建蓝灯页）；无任何投屏 → 不跳转（原有语义）。
         var jump = AppWinBar.jumpAction(casting, appBarCount);
@@ -586,21 +624,15 @@
           // 与「投屏」同色同规格（主人 0919：区分度要么做大要么一样，略小=像褪色）；
           // 仅以文字区分（「应用」/「投屏」）。
           appBtn.className = 'btn primary tiny';
-          if (d.appBusy) {
-            // 二期：应用列表枚举中——按钮遮罩态（「读取中…」禁用+半透明；同「连接中…」语义）。
-            // 后端按设备（identity）下发；枚举完毕或 10s 兜底后自动清除。
-            appBtn.textContent = '读取中…';
-            appBtn.disabled = true;
-            appBtn.style.opacity = '0.55';
-          } else {
-            appBtn.textContent = '应用';
+          appBtn.textContent = d.appBusy ? '读取中…' : '应用';
+          appBtn.disabled = !!d.appBusy;
+          appBtn.style.opacity = d.appBusy ? '0.55' : '';
             appBtn.addEventListener('click', function (ev) {
               ev.stopPropagation();
               // 主人 0919：先跳到「窗口总览」（应用窗口的家），再打开应用面板选择应用。
               switchView('cast');
               openAppWin(d.serial, d.name || d.serial);
             });
-          }
           card.appendChild(appBtn);
         }
         if (deletingCard) {
@@ -756,6 +788,13 @@
         return d.identity || '';
       }
     }
+    var ps = lastState.profiles || [];
+    for (var j = 0; j < ps.length; j++) {
+      var p = ps[j];
+      if (p.key === serial || (p.serials || []).indexOf(serial) >= 0 || (p.addrs || []).indexOf(serial) >= 0) return p.key;
+    }
+    if (sessions[serial] && sessions[serial].identity) return sessions[serial].identity;
+    if (appWins[serial] && appWins[serial].identity) return appWins[serial].identity;
     return '';
   }
 
@@ -771,7 +810,7 @@
     for (var i = 0; i < ps.length; i++) {
       var p = ps[i] || {};
       var hit = !!(d.identity && p.key === d.identity);
-      if (!hit && cand.length) {
+      if (!hit && !d.identity && cand.length) {
         hit = (p.serials || []).some(function (k) { return cand.indexOf(k) >= 0; }) ||
               (p.addrs || []).some(function (k) { return cand.indexOf(k) >= 0; });
       }
@@ -782,8 +821,8 @@
 
   // findAppKeyFor：设备键 → 已存在的 appWins 键（serial 直配 → identity 兜底；无=null）。
   function findAppKeyFor(serial, identity) {
-    if (appWins[serial]) return serial;
     var id = identity || deviceIdentityOf(serial);
+    if (appWins[serial] && (!id || !appWins[serial].identity || appWins[serial].identity === id)) return serial;
     if (!id) return null;
     var hit = null;
     Object.keys(appWins).forEach(function (k) {
@@ -794,8 +833,8 @@
 
   // sessionKeyOf：应用窗口键（appWins/openAppCards）→ 会话键（sessions）；无=''。
   function sessionKeyOf(appKey) {
-    if (sessions[appKey]) return appKey;
-    var id = deviceIdentityOf(appKey) || (appWins[appKey] && appWins[appKey].identity) || '';
+    var id = (appWins[appKey] && appWins[appKey].identity) || deviceIdentityOf(appKey);
+    if (sessions[appKey] && (!id || !sessions[appKey].identity || sessions[appKey].identity === id)) return appKey;
     if (!id) return '';
     var hit = '';
     Object.keys(sessions).forEach(function (k) {
@@ -806,8 +845,9 @@
 
   // appKeyOf：会话键 → 应用窗口数据键（openAppCards/appWins 键）；无命中回原键。
   function appKeyOf(sessionSerial) {
-    if (openAppCards[sessionSerial] || appWins[sessionSerial]) return sessionSerial;
-    var id = deviceIdentityOf(sessionSerial);
+    var id = (sessions[sessionSerial] && sessions[sessionSerial].identity) || deviceIdentityOf(sessionSerial);
+    if ((openAppCards[sessionSerial] || appWins[sessionSerial]) &&
+        (!id || !appWins[sessionSerial] || !appWins[sessionSerial].identity || appWins[sessionSerial].identity === id)) return sessionSerial;
     if (!id) return sessionSerial;
     var hit = '';
     Object.keys(appWins).forEach(function (k) {
@@ -821,47 +861,64 @@
     return hit || sessionSerial;
   }
 
-  // 图标缓存（内存态）：pkg → data URL（''=确认无图标，不再重复请求）。
-  // 懒加载：卡片先渲彩块占位 → 异步拉取后原地替换（不整网格重渲染）。
-  var iconCache = {};
-  var iconPending = {};
-  var iconWaiters = {};
-  var iconGeneration = {};
-
-  function applyIcon(node, pkg) {
-    var d = iconCache[pkg];
-    if (!d || !node) return;
-    node.textContent = '';
-    node.style.backgroundImage = 'url("' + d + '")';
-    node.classList.add('has-img');
+  // The cache follows the immutable profile identity across USB/WiFi changes.
+  var deviceIcons = SCEZAppIconCache.create(function (serial, pkg) {
+    return window.GetAppIcon(serial, pkg);
+  }, function (identity, pkgs) {
+    var icons = {};
+    function read(batch) {
+      return window.GetAppIcons(identity, batch).then(function (result) {
+        Object.keys((result && result.icons) || {}).forEach(function (pkg) { icons[pkg] = result.icons[pkg]; });
+        if (result && result.remaining && result.remaining.length && result.remaining.length < batch.length) {
+          return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () { return read(result.remaining); });
+        }
+        return icons;
+      });
+    }
+    return read(pkgs);
+  });
+  function iconIdentity(serial) {
+    return (appWins[serial] && appWins[serial].identity) ||
+           (sessions[serial] && sessions[serial].identity) || deviceIdentityOf(serial) || serial;
+  }
+  function requestIcon(serial, pkg, node) {
+    return deviceIcons.request(iconIdentity(serial), serial, pkg, node);
   }
 
-  // requestIcon：异步拉图标（去重 + 同 pkg 多卡片共享）。serial 用打开浮窗时的设备。
-  function requestIcon(serial, pkg, node) {
-    if (iconCache[pkg] !== undefined) { applyIcon(node, pkg); return; }
-    if (iconPending[pkg]) {
-      (iconWaiters[pkg] = iconWaiters[pkg] || []).push(node);
-      return;
-    }
-    iconPending[pkg] = true;
-    iconWaiters[pkg] = [node];
-    var generation = iconGeneration[pkg] || 0;
-    try {
-      window.GetAppIcon(serial, pkg).then(function (dataUrl) {
-        if ((iconGeneration[pkg] || 0) !== generation) return;
-        iconCache[pkg] = dataUrl || '';
-        (iconWaiters[pkg] || []).forEach(function (n) { applyIcon(n, pkg); });
-        iconPending[pkg] = false;
-        iconWaiters[pkg] = null;
-      }).catch(function () {
-        if ((iconGeneration[pkg] || 0) !== generation) return;
-        iconCache[pkg] = ''; // 失败也标记（本轮不再重试）
-        iconPending[pkg] = false;
-        iconWaiters[pkg] = null;
+  // Backend appBusy is restricted to the first completely empty icon archive.
+  function appEntryBusy(serial) {
+    var identity = iconIdentity(serial);
+    return ((lastState && lastState.devices) || []).some(function (d) {
+      return !!d.appBusy && (d.identity || d.serial) === identity;
+    });
+  }
+
+  function setAppEntryMask(button, busy) {
+    if (!button) return;
+    busy = !!busy;
+    if (button._appEntryBusy === busy) return;
+    button._appEntryBusy = busy;
+    if (button._appEntryHTML === undefined) button._appEntryHTML = button.innerHTML;
+    button.disabled = !!busy;
+    button.style.opacity = busy ? '0.55' : '';
+    button.innerHTML = busy ? '读取中…' : button._appEntryHTML;
+  }
+
+  function syncAppEntryMasks() {
+    [sessions, appWins].forEach(function (entries) {
+      Object.keys(entries).forEach(function (serial) {
+        var pane = entries[serial].pane;
+        if (pane) setAppEntryMask(pane.querySelector('.btn-appwin'), appEntryBusy(serial));
       });
-    } catch (e) {
-      iconPending[pkg] = false;
-      iconWaiters[pkg] = null;
+    });
+    // Cover a panel already opened during identity discovery or a stale snapshot.
+    var w = appWinModalSerial && appWins[appWinModalSerial];
+    if (w) {
+      var busy = appEntryBusy(appWinModalSerial);
+      if (!!w.initialIconBusy !== busy) {
+        w.initialIconBusy = busy;
+        renderAppWinGrid(appWinModalSerial);
+      }
     }
   }
 
@@ -969,6 +1026,7 @@
     // ① 服务器有：补卡 / 同步 closing 状态。
     Object.keys(bySerial).forEach(function (serial) {
       bySerial[serial].forEach(function (w) {
+        if (appWins[serial] && w.identity) appWins[serial].identity = w.identity;
         var list = openAppCards[serial] || (openAppCards[serial] = []);
         var a = null;
         for (var i = 0; i < list.length; i++) {
@@ -1193,6 +1251,21 @@
           restartTag.textContent = '重新连接中…';
           actions.appendChild(restartTag);
         } else {
+          if (a.phase === 'retry-wait') {
+            var bRetry = document.createElement('button');
+            bRetry.type = 'button';
+            bRetry.className = 'openapp-btn';
+            bRetry.textContent = '重新投屏';
+            bRetry.addEventListener('click', function (ev) {
+              ev.stopPropagation();
+              if (typeof window.RestartAppWin === 'function') {
+                window.RestartAppWin(serial, a.pkg).catch(function (e) {
+                  toast('重新投屏失败：' + (e && e.message ? e.message : e));
+                });
+              }
+            });
+            actions.appendChild(bRetry);
+          }
           var bSet = document.createElement('button');
           bSet.type = 'button';
           bSet.className = 'openapp-btn';
@@ -1300,6 +1373,8 @@
   // openAppWin：应用入口总调度——懒建数据、维护蓝灯标签及其标签页(仅无投屏时)、
   // 跳到对应设备标签页（主人 0919 问题3）、打开选择浮窗。
   function openAppWin(serial, name) {
+    if (appEntryBusy(serial)) return;
+    serial = deviceIdentityOf(serial) || serial;
     var w = appWins[serial];
     if (!w) {
       // v2.1.52：同设备多形态键——先按 identity 找已有条目（防卡片数据分裂/双条目）。
@@ -1310,7 +1385,8 @@
       }
     }
     if (!w) {
-      w = appWins[serial] = { name: name || serial, tab: null, pane: null, apps: null, loaded: false, pollLeft: 40, identity: deviceIdentityOf(serial) };
+      var device = ((lastState && lastState.devices) || []).filter(function (d) { return d.serial === serial; })[0];
+      w = appWins[serial] = { name: name || serial, tab: null, pane: null, apps: null, loaded: false, pollLeft: 40, identity: deviceIdentityOf(serial), identityEpoch: device ? (device.identityEpoch || 0) : 0 };
       if (!sessions[serial] && !sessionKeyOf(serial)) ensureAppWinPane(serial);
     } else {
       if (!w.identity) w.identity = deviceIdentityOf(serial);
@@ -1328,6 +1404,7 @@
 
   // openAppWinModal：打开应用选择浮窗（模态；样式/交互同参数浮窗）。
   function openAppWinModal(serial) {
+    if (appEntryBusy(serial)) return;
     var w = appWins[serial];
     if (!w) return;
     appWinModalSerial = serial;
@@ -1957,7 +2034,7 @@
     window.GetAppList(serial).then(function (items) {
       items = items || [];
       var changed = !sameAppList(w.apps, items);
-      if (changed) invalidateAppIconsForChanges(w.apps, items);
+      if (changed) invalidateAppIconsForChanges(serial, w.apps, items);
       if (w.loaded) {
         if (!changed) return;
         w.apps = items;
@@ -1981,17 +2058,13 @@
     return true;
   }
 
-  function invalidateAppIconsForChanges(oldItems, newItems) {
-    var oldByPkg = {};
+  function invalidateAppIconsForChanges(serial, oldItems, newItems) {
+    var oldByPkg = {}, newByPkg = {};
     (oldItems || []).forEach(function (item) { oldByPkg[item.pkg] = item; });
-    (newItems || []).forEach(function (item) {
-      var old = oldByPkg[item.pkg];
-      if (!old || old.name !== item.name) {
-        iconGeneration[item.pkg] = (iconGeneration[item.pkg] || 0) + 1;
-        delete iconCache[item.pkg];
-        iconPending[item.pkg] = false;
-        iconWaiters[item.pkg] = null;
-      }
+    (newItems || []).forEach(function (item) { newByPkg[item.pkg] = item; });
+    Object.keys(oldByPkg).concat(Object.keys(newByPkg)).forEach(function (pkg) {
+      var old = oldByPkg[pkg], current = newByPkg[pkg];
+      if (!old || !current || old.name !== current.name) deviceIcons.invalidate(iconIdentity(serial), pkg);
     });
   }
 
@@ -2011,12 +2084,20 @@
       function poll() {
         if (appWins[serial] !== w || w.listCheckToken !== token) { finish(); return; }
         window.IsAppListCheckBusy(serial).then(function (status) {
+          if (appWins[serial] !== w || w.listCheckToken !== token) { finish(); return; }
+          if (!!w.initialIconBusy !== !!(status && status.initialIconBusy)) {
+            w.initialIconBusy = !!(status && status.initialIconBusy);
+            renderAppWinGrid(serial);
+          }
           if (status && status.busy) { setTimeout(poll, 900); return; }
+          if (status && status.icons && status.icons.length) {
+            deviceIcons.refresh(w.identity || iconIdentity(serial), status.icons);
+          }
           if (!status || !status.changed) { finish(); return; }
           return window.GetAppList(serial).then(function (items) {
             items = items || [];
             if (!sameAppList(w.apps, items)) {
-              invalidateAppIconsForChanges(w.apps, items);
+              invalidateAppIconsForChanges(serial, w.apps, items);
               w.apps = items;
               w.loaded = true;
               w.pollLeft = 0;
@@ -2048,6 +2129,11 @@
     var box = el('appwin-modal-grid');
     var q = (el('appwin-modal-search').value || '').trim().toLowerCase();
     var list = w.apps || [];
+    el('appwin-modal-search').disabled = !!w.initialIconBusy;
+    if (w.initialIconBusy) {
+      box.innerHTML = '<div class="appwin-loading">正在读取应用图标…</div>';
+      return;
+    }
     if (!w.loaded && list.length === 0) {
       box.innerHTML = '<div class="appwin-loading">正在读取应用列表…</div>';
       return;
@@ -2536,7 +2622,7 @@
       modeTitle = '投屏中 · 无线模式';
     }
     // gui43 实时形态标注：会话实际连接走 TLS → 标题附加 TLS加密（5555 连接不显示）
-    if (c.tls) {
+    if (c.tls && c.phase === 'casting') {
       modeTitle = (modeTitle || '投屏中') + ' · TLS加密';
     }
     r.phase.textContent = modeTitle || (c.phaseText || (c.active ? '投屏中…' : ''));
@@ -2604,7 +2690,7 @@
         var hint = document.createElement('span');
         hint.className = 'hint';
         hint.textContent = c.prompt === 2
-          ? 'bat 会按自己的超时自动重试；按钮=重启整个会话'
+          ? '可重新投屏，或停止当前会话'
           : '按钮=会话级操作（重启/退出），GUI 不直接替 bat 按键';
         r.prompt.appendChild(hint);
       } else {
@@ -2730,7 +2816,7 @@
   }
 
   function describeCast(c) {
-    if (c.keyboardMode) return '键盘模式 ' + c.keyboardMode + (c.spec && c.spec.legacy ? ' · 老设备兼容档' : ' · 规格分配已生效');
+    if (c.keyboardMode) return '键盘模式 ' + fmtKeyboardMode(c.keyboardMode) + (c.spec && c.spec.legacy ? ' · 老设备兼容档' : ' · 规格分配已生效');
     return '正在连接设备…';
   }
 
@@ -2764,7 +2850,7 @@
     if (spec && spec.legacy) out.push('<div class="spec">老设备兼容档</div>');
     if (spec && spec.vcodec) out.push('<div class="spec">' + esc(fmtVCodec(spec.vcodec)) + '</div>');
     if (spec && spec.acodec) out.push('<div class="spec">' + esc(fmtACodec(spec.acodec)) + '</div>');
-    if (kbd) out.push('<div class="spec">键盘 ' + esc(kbd) + '</div>');
+    if (kbd) out.push('<div class="spec">键盘 ' + esc(fmtKeyboardMode(kbd)) + '</div>');
     return out.join('');
   }
 
@@ -2788,8 +2874,8 @@
         ];
       case 2:
         return [
-          { action: 'restart', label: '立即重投 (R)', primary: true },
-          { action: 'stop', label: '退出循环 (Q)' },
+          { action: 'restart', label: '重新投屏', primary: true },
+          { action: 'stop', label: '停止投屏' },
         ];
       default:
         return [{ action: 'restart', label: '重启投屏（跳过等待）', primary: true }];
@@ -3735,6 +3821,7 @@
   var ACODEC_LABELS = { opus: 'Opus', aac: 'AAC', flac: 'FLAC', raw: 'RAW' };
   function fmtVCodec(v) { return VCODEC_LABELS[v] || v; }
   function fmtACodec(v) { return ACODEC_LABELS[v] || v; }
+  function fmtKeyboardMode(v) { return String(v || '').toUpperCase(); }
 
   // 档位列表 = 阶梯构造：最左=baseline 值（选中），右侧=标准档中小于 baseline 的
   function ladderTiers(std, x) {
@@ -4069,7 +4156,7 @@
   // ---------- 设置面板（右上角齿轮；两个开关即时保存，重启后保持） ----------
   // Go 侧 settings.json 是权威值：每次快照回家；面板打开时按它渲染开关状态。
   // 点击开关先本地翻转（即时反馈）再调 SetSettings 落盘，失败提示（快照下一轮会纠正）。
-  var settingsState = { showParamOverlay: true, closeToTray: false };
+  var settingsState = { showParamOverlay: true, closeToTray: false, otherAppWinSystemDecorations: true };
 
   function setSwitch(node, on) {
     if (!node) return;
@@ -4080,12 +4167,14 @@
   function renderSettings() {
     setSwitch(el('set-overlay'), settingsState.showParamOverlay);
     setSwitch(el('set-tray'), settingsState.closeToTray);
+    setSwitch(el('set-appwin-decor'), settingsState.otherAppWinSystemDecorations);
   }
 
   function syncSettings(st) {
     if (!st || !st.settings) return;
     settingsState.showParamOverlay = !!st.settings.showParamOverlay;
     settingsState.closeToTray = !!st.settings.closeToTray;
+    settingsState.otherAppWinSystemDecorations = st.settings.otherAppWinSystemDecorations !== false;
     // 面板没开时不碰 DOM（避免与用户点击抢状态）
     if (el('settings-modal').style.display !== 'none') renderSettings();
   }
@@ -4115,12 +4204,22 @@
     renderSettings();
     saveSettings();
   });
+  el('set-appwin-decor').addEventListener('click', function () {
+    settingsState.otherAppWinSystemDecorations = !settingsState.otherAppWinSystemDecorations;
+    renderSettings();
+    SetOtherAppWinSystemDecorations(settingsState.otherAppWinSystemDecorations).catch(function (e) {
+      toast('设置保存失败：' + (e && e.message ? e.message : e));
+    });
+  });
 
+  var lastProfileSaveError = '';
   // ---------- 轮询主循环 ----------
   function refreshNow() {
     tickAppWins(); // 二期：应用面板数据轮询（枚举未完成时重拉；独立于快照 diff）
     GetState().then(function (st) {
       lastState = st;
+      if (st.profileSaveError && st.profileSaveError !== lastProfileSaveError) toast('设备档案保存失败，当前连接可继续使用：' + st.profileSaveError);
+      lastProfileSaveError = st.profileSaveError || '';
       syncSettings(st);
       syncAppWins(st.appWins || []);
       var j = JSON.stringify(st);
@@ -4131,6 +4230,7 @@
         renderNewDevice(st);
         renderPairStatus(st);
       }
+      syncAppEntryMasks();
     }).catch(function (e) {
       toast('桥接异常：' + (e && e.message ? e.message : e));
     });

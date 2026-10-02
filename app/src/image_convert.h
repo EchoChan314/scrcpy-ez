@@ -14,4 +14,10 @@ bool
 sc_image_bmp_to_jpeg(const uint8_t *bmp_data, size_t bmp_size,
                      uint8_t **out_data, size_t *out_size);
 
+// Decode supported clipboard formats to tightly packed BGRA without resizing.
+// Limit decoded storage to 256 MiB; the caller retains the original encoding.
+bool
+sc_image_to_bgra(const uint8_t *data, size_t size, const char *mime,
+                 uint8_t **pixels, unsigned *width, unsigned *height);
+
 #endif

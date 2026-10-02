@@ -10,7 +10,7 @@ import (
 
 func mdns9SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555", "192.0.2.197:45005"}),
 	})
 }
@@ -96,8 +96,8 @@ func TestGui48Mdns9AbsentDeviceProfileActiveGetsDecoratedCard(t *testing.T) {
 func TestGui48Mdns9AllStaleNoDevicesOfflineCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	mdns9SeedK80(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555")
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:45005")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:45005")
 	out := mdns9Commit(t, a, nil)
 	if len(out) != 1 {
 		t.Fatalf("全 stale + 无设备流应只有一张离线卡: %+v", out)

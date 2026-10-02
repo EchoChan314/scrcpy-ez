@@ -30,19 +30,19 @@ func TestGui51ProfileCardNameCustomPriority(t *testing.T) {
 func TestGui51RenameNonEmptyAndClear(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555"}),
 	})
 	if err := a.RenameDevicesJSON(`{"REDMI K80":"客厅 K80"}`); err != nil {
 		t.Fatal(err)
 	}
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !e.DisplayNameSet || e.DisplayName != "客厅 K80" {
 		t.Fatalf("非空改名应标=1: %+v", e)
 	}
 	if err := a.RenameDevicesJSON(`{"REDMI K80":"   "}`); err != nil {
 		t.Fatal(err)
 	}
-	e, _ = a.profiles.Entry("REDMI K80")
+	e, _ = a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if e.DisplayNameSet || e.DisplayName != "" {
 		t.Fatalf("空改名应清标=0: %+v", e)
 	}
@@ -63,14 +63,14 @@ func TestGui51DeleteWirelessDisconnectAndArchiveRemove(t *testing.T) {
 
 	a := New(Config{AdbPath: fake, ConfigPath: "", ProfilesPath: filepath.Join(dir, "profiles.json"), Version: "test"})
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"}, []string{"192.0.2.197:5555", "192.0.2.197:45005"}),
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"}, []string{"192.0.2.197:5555", "192.0.2.197:45005"}),
 	})
 	a.profiles.SetDeviceOrder([]string{"REDMI K80"})
 
-	if err := a.DeleteDevices([]string{"REDMI K80"}); err != nil {
+	if err := a.DeleteDevices([]string{fixtureArchiveKey(a.profiles, "REDMI K80")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := a.profiles.Entry("REDMI K80"); ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80")); ok {
 		t.Fatal("档案设备应被删除")
 	}
 	if len(a.profiles.DeviceOrder()) != 0 {
@@ -87,7 +87,7 @@ func TestGui51DeleteWirelessDisconnectAndArchiveRemove(t *testing.T) {
 func TestGui51LegacyProfilesLoadWithoutNewFields(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "profiles.json")
-	legacy := `{"devices":{"REDMI K80":{"marketname":"REDMI K80","model":"MODEL123","serials":["TEST0001"],"addrs":[],"profiles":{"usb":{"res":2560,"fps":120,"bitrate":60},"wifi":{"res":1920,"fps":60,"bitrate":15}}}}}`
+	legacy := `{"devices":{"REDMI K80":{"marketname":"REDMI K80","model":"12345TESTA","serials":["TEST0001"],"addrs":[],"profiles":{"usb":{"res":2560,"fps":120,"bitrate":60},"wifi":{"res":1920,"fps":60,"bitrate":15}}}}}`
 	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestGui51LegacyProfilesLoadWithoutNewFields(t *testing.T) {
 	if err := s.Load(); err != nil {
 		t.Fatal(err)
 	}
-	e, ok := s.Entry("REDMI K80")
+	e, ok := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	if !ok || e.DisplayNameSet || e.DisplayName != "" {
 		t.Fatalf("旧档案加载应无自定义名称字段: %+v", e)
 	}
@@ -108,27 +108,27 @@ func TestGui51DeleteUsbMarkPreventsRebuildUntilReplug(t *testing.T) {
 
 	dev := teachfix3DeviceUSB()
 	a.applyTrackUpdate([]adb.Device{dev}) // 首次插线：建档
-	if _, ok := a.profiles.Entry("REDMI K80"); !ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80")); !ok {
 		t.Fatal("首次插线应建档")
 	}
-	if err := a.DeleteDevices([]string{"REDMI K80"}); err != nil {
+	if err := a.DeleteDevices([]string{fixtureArchiveKey(a.profiles, "REDMI K80")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := a.profiles.Entry("REDMI K80"); ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80")); ok {
 		t.Fatal("删除后档案应消失")
 	}
 
 	// 同一插线周期再次同步（非 added）：删除标记生效，不得重建档。
 	dev.Battery = 90
 	a.applyTrackUpdate([]adb.Device{dev})
-	if _, ok := a.profiles.Entry("REDMI K80"); ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80")); ok {
 		t.Fatal("删除标记期内不得重建档")
 	}
 
 	// 新的插线事件（removed→added）：清标记，重新学习入档。
 	a.applyTrackUpdate(nil)
 	a.applyTrackUpdate([]adb.Device{dev})
-	if _, ok := a.profiles.Entry("REDMI K80"); !ok {
+	if _, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80")); !ok {
 		t.Fatal("新插线事件后应重新入档")
 	}
 }

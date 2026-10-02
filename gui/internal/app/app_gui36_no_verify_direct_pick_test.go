@@ -81,7 +81,7 @@ func TestGui36NoBroadcastNoCandidatesFallbackToSerial(t *testing.T) {
 func TestGui36BroadcastStillDirectSelect(t *testing.T) {
 	a, f := newWirelessApp()
 	k80Gui32Archive(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:42449")
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:42449")
 	k80Gui32WifiCard(a)
 	var mu sync.Mutex
 	var calls []string
@@ -170,7 +170,7 @@ func TestGui36ThrottledEntryExcludedFromCandidates(t *testing.T) {
 		return nil
 	}
 
-	got := a.profiles.OrderedAddrs("TEST0001")
+	got := a.profiles.OrderedAddrs(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if len(got) != 1 || got[0].Addr != "192.0.2.197:5555" {
 		t.Fatalf("60s 节流期内的 tls 条目不应出现在候选里: %+v", got)
 	}

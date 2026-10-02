@@ -84,6 +84,8 @@ public class Options {
     private boolean listCameras;
     private boolean listCameraSizes;
     private boolean listApps;
+    private boolean appCatalog;
+    private String exportAppIconsDir;
     // ez 自定义：导出应用图标 PNG（二期 Step 1c；v2.1.16 起支持定向）
     //   "true" = 全量导出；"pkg1,pkg2" = 只导出这些包；"false"/空 = 关。
     private String exportAppIcons;
@@ -299,7 +301,7 @@ public class Options {
     }
 
     public boolean getList() {
-        return listEncoders || listDisplays || listCameras || listCameraSizes || listApps || getExportAppIcons();
+        return listEncoders || listDisplays || listCameras || listCameraSizes || listApps || appCatalog || getExportAppIcons();
     }
 
     public boolean getListEncoders() {
@@ -321,6 +323,10 @@ public class Options {
     public boolean getListApps() {
         return listApps;
     }
+
+    public boolean getAppCatalog() { return appCatalog; }
+
+    public String getExportAppIconsDir() { return exportAppIconsDir; }
 
     public boolean getExportAppIcons() {
         return exportAppIcons != null && !exportAppIcons.isEmpty() && !"false".equals(exportAppIcons);
@@ -528,6 +534,15 @@ public class Options {
                     break;
                 case "list_apps":
                     options.listApps = Boolean.parseBoolean(value);
+                    break;
+                case "app_catalog":
+                    options.appCatalog = Boolean.parseBoolean(value);
+                    break;
+                case "export_app_icons_dir":
+                    if (!value.matches("/data/local/tmp/scrcpy/icons-job-[a-f0-9]+")) {
+                        throw new IllegalArgumentException("Invalid icon staging directory");
+                    }
+                    options.exportAppIconsDir = value;
                     break;
                 case "export_app_icons":
                     options.exportAppIcons = value;

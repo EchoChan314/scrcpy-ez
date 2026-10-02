@@ -20,7 +20,7 @@ func TestGui52Fix11MergeKeepsMainActiveTls(t *testing.T) {
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "model": "MODEL789",
+      "model": "25091RP04C",
       "serials": ["TEST0002"],
       "tlsGuid": "adb-TEST0002-On9v2R",
       "addrs": [
@@ -42,7 +42,7 @@ func TestGui52Fix11MergeKeepsMainActiveTls(t *testing.T) {
 	}
 	// Load 阶段即执行 fix1 孤儿合并（cleanOrphanIPPortLocked），此处校验合并结果。
 	s.CleanOrphanIPPort() // 幂等：Load 后无孤儿应无改动
-	e, ok := s.Entry("Xiaomi Pad 8 Pro")
+	e, ok := s.Entry(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatalf("主档案应存在: %+v", s.Entries())
 	}
@@ -74,7 +74,7 @@ func TestGui52Fix11MergeAppendsWhenNoMainActive(t *testing.T) {
     },
     "Xiaomi Pad 8 Pro": {
       "marketname": "Xiaomi Pad 8 Pro",
-      "model": "MODEL789",
+      "model": "25091RP04C",
       "serials": ["TEST0002"],
       "tlsGuid": "adb-TEST0002-On9v2R",
       "addrs": [
@@ -96,7 +96,7 @@ func TestGui52Fix11MergeAppendsWhenNoMainActive(t *testing.T) {
 	}
 	// Load 阶段即执行 fix1 孤儿合并（cleanOrphanIPPortLocked），此处校验合并结果。
 	s.CleanOrphanIPPort() // 幂等：Load 后无孤儿应无改动
-	e, ok := s.Entry("Xiaomi Pad 8 Pro")
+	e, ok := s.Entry(fixtureArchiveKey(s, "Xiaomi Pad 8 Pro"))
 	if !ok {
 		t.Fatal("主档案应存在")
 	}

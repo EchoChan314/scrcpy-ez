@@ -133,31 +133,22 @@ public final class Device {
         return clipboardManager.getImage();
     }
 
-    public static boolean setClipboardText(String text) {
+    public static boolean setClipboardText(String text, long epoch, long version) {
         ClipboardManager clipboardManager = ServiceManager.getClipboardManager();
         if (clipboardManager == null) {
             return false;
         }
 
-        String currentClipboard = getClipboardText();
-        if (currentClipboard != null && currentClipboard.equals(text)) {
-            // The clipboard already contains the requested text.
-            // Since pasting text from the computer involves setting the device clipboard, it could be set twice on a copy-paste. This would cause
-            // the clipboard listeners to be notified twice, and that would flood the Android keyboard clipboard history. To workaround this
-            // problem, do not explicitly set the clipboard text if it already contains the expected content.
-            return false;
-        }
-
-        return clipboardManager.setText(text);
+        return clipboardManager.setText(text, epoch, version);
     }
 
-    public static boolean setClipboardImage(byte[] imageData, String mimeType) {
+    public static boolean setClipboardImage(byte[] imageData, String mimeType, long epoch, long version) {
         ClipboardManager clipboardManager = ServiceManager.getClipboardManager();
         if (clipboardManager == null) {
             return false;
         }
 
-        return clipboardManager.setImage(imageData, mimeType);
+        return clipboardManager.setImage(imageData, mimeType, epoch, version);
     }
 
     public static boolean setDisplayPower(int displayId, boolean on) {
@@ -289,8 +280,12 @@ public final class Device {
      * @return 成功导出的数量
      */
     public static int exportAppIcons(String onlyPkgs) {
+        return exportAppIcons(onlyPkgs, null);
+    }
+
+    public static int exportAppIcons(String onlyPkgs, String directory) {
         PackageManager pm = FakeContext.get().getPackageManager();
-        File baseDir = new File(ICONS_DIR);
+        File baseDir = new File(directory == null ? ICONS_DIR : directory);
         if (onlyPkgs == null) {
             // 全量：先清旧目录
             File[] olds = baseDir.listFiles();
@@ -323,7 +318,7 @@ public final class Device {
         int ok = 0;
         for (String raw : onlyPkgs.split(",")) {
             String pkg = raw.trim();
-            if (pkg.isEmpty()) {
+            if (!pkg.matches("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*")) {
                 continue;
             }
             File out = new File(baseDir, pkg + ".png");

@@ -13,15 +13,15 @@ import (
 // + 经典 _adb._tcp 5555；档案只有 5555 tcpip active（BestAddr 会落 5555）。
 func k80Snap() []discovery.MdnsService {
 	return []discovery.MdnsService{
-		{Type: "_adb-tls-connect._tcp", Name: "adb-MODEL123-Kk80Xx", Addr: "192.0.2.197:45005", Mode: discovery.MdnsModeTls},
-		{Type: "_adb._tcp", Name: "adb-MODEL123", Addr: "192.0.2.197:5555", Mode: discovery.MdnsModeTcpip},
+		{Type: "_adb-tls-connect._tcp", Name: "adb-12345TESTA-Kk80Xx", Addr: "192.0.2.197:45005", Mode: discovery.MdnsModeTls},
+		{Type: "_adb._tcp", Name: "adb-12345TESTA", Addr: "192.0.2.197:5555", Mode: discovery.MdnsModeTcpip},
 	}
 }
 
 // seedK80Profile 播种 K80 档案：serial + 5555 tcpip active（45005 不在此——未入档）。
 func seedK80Profile(a *App) {
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "MODEL123", State: "device", ConnType: "usb", Marketname: "Redmi K80",
+		{Serial: "12345TESTA", State: "device", ConnType: "usb", Marketname: "Redmi K80",
 			Wireless: "192.0.2.197:5555"},
 	})
 }
@@ -40,7 +40,7 @@ func seedK80WifiCard(a *App) {
 func TestStartCastMdnsTlsBroadcastFirst(t *testing.T) {
 	a, f := newWirelessApp()
 	seedK80Profile(a)
-	a.profiles.AddrSuccessWithMode("Redmi K80", "192.0.2.197:45005", ModeTls)
+	a.profiles.AddrSuccessWithMode(fixtureArchiveKey(a.profiles, "Redmi K80"), "192.0.2.197:45005", ModeTls)
 	seedK80WifiCard(a)
 
 	if err := a.StartCast("192.0.2.197:5555"); err != nil {
@@ -80,7 +80,7 @@ func TestStartCastNoMdnsFallsBackToBestAddr(t *testing.T) {
 func TestStartCastNoProfileAddrFallsBackToSerial(t *testing.T) {
 	a, f := newWirelessApp()
 	a.profiles.SyncDevices([]adb.Device{
-		{Serial: "MODEL123", State: "device", ConnType: "usb", Marketname: "Redmi K80"},
+		{Serial: "12345TESTA", State: "device", ConnType: "usb", Marketname: "Redmi K80"},
 	})
 	seedK80WifiCard(a)
 
@@ -102,7 +102,7 @@ func TestStartCastMdnsTcpipBroadcastSecondTier(t *testing.T) {
 	a, f := newWirelessApp()
 	gui15Seed(a.profiles, "Redmi K80", &DeviceEntry{
 		Marketname: "Redmi K80",
-		Serials:    []string{"MODEL123"},
+		Serials:    []string{"12345TESTA"},
 		Addrs:      []AddrEntry{{Addr: "192.0.2.88:5555", State: AddrStateActive, LastOk: 100, Mode: ModeTcpip}},
 		Profiles:   DefaultProfile(),
 	})
@@ -131,27 +131,27 @@ func TestStartCastMdnsTcpipBroadcastSecondTier(t *testing.T) {
 func TestMdnsWirelessAddrTiersAndRules(t *testing.T) {
 	s := NewProfileStore("")
 	s.SyncDevices([]adb.Device{
-		{Serial: "MODEL123", State: "device", ConnType: "usb", Marketname: "Redmi K80",
+		{Serial: "12345TESTA", State: "device", ConnType: "usb", Marketname: "Redmi K80",
 			Wireless: "192.0.2.197:5555"},
 	})
 	svcs := []MdnsMatch{
-		{Name: "adb-MODEL123", Addr: "192.0.2.88:5555", Mode: discovery.MdnsModeTcpip},
-		{Name: "adb-MODEL123-Kk80Xx", Addr: "192.0.2.197:45005", Mode: discovery.MdnsModeTls},
-		{Name: "adb-MODEL123-Kk80Xx", Addr: "192.0.2.197:45006", Mode: discovery.MdnsModeTls},
-		{Name: "adb-MODEL123-Kk80Xx", Addr: "192.0.2.197:37033", Mode: discovery.MdnsModePairing},
+		{Name: "adb-12345TESTA", Addr: "192.0.2.88:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-12345TESTA-Kk80Xx", Addr: "192.0.2.197:45005", Mode: discovery.MdnsModeTls},
+		{Name: "adb-12345TESTA-Kk80Xx", Addr: "192.0.2.197:45006", Mode: discovery.MdnsModeTls},
+		{Name: "adb-12345TESTA-Kk80Xx", Addr: "192.0.2.197:37033", Mode: discovery.MdnsModePairing},
 		{Name: "adb-R58T00WA0YM-Xy9zQ2", Addr: "192.0.2.77:41234", Mode: discovery.MdnsModeTls},
-		{Name: "adb-MODEL123", Addr: "", Mode: discovery.MdnsModeTcpip}, // 未解析 → 忽略
+		{Name: "adb-12345TESTA", Addr: "", Mode: discovery.MdnsModeTcpip}, // 未解析 → 忽略
 	}
 	// tls 层优先于 tcpip，层内按出现序取首条（45005 在 45006 之前）
-	if got := s.MdnsWirelessAddr("MODEL123", svcs); got != "192.0.2.197:45005" {
+	if got := s.MdnsWirelessAddr("12345TESTA", svcs); got != "192.0.2.197:45005" {
 		t.Fatalf("tls 层首条应为 45005: %q", got)
 	}
 	// 无 tls → tcpip 广播（别家 tcpip 不串线）
 	tcpOnly := []MdnsMatch{
 		{Name: "adb-R58T00WA0YM", Addr: "192.0.2.77:5555", Mode: discovery.MdnsModeTcpip},
-		{Name: "adb-MODEL123", Addr: "192.0.2.88:5555", Mode: discovery.MdnsModeTcpip},
+		{Name: "adb-12345TESTA", Addr: "192.0.2.88:5555", Mode: discovery.MdnsModeTcpip},
 	}
-	if got := s.MdnsWirelessAddr("MODEL123", tcpOnly); got != "192.0.2.88:5555" {
+	if got := s.MdnsWirelessAddr("12345TESTA", tcpOnly); got != "192.0.2.88:5555" {
 		t.Fatalf("无 tls 时应取本机 tcpip 广播: %q", got)
 	}
 	// tlsGuid 命中（serial 名对不上——serial 不入档、仅 guid 入档）仍属本机
@@ -170,7 +170,7 @@ func TestMdnsWirelessAddrTiersAndRules(t *testing.T) {
 	known := []MdnsMatch{
 		{Name: "adb-unknown", Addr: "192.0.2.197:5555", Mode: discovery.MdnsModeTcpip},
 	}
-	if got := s.MdnsWirelessAddr("MODEL123", known); got != "192.0.2.197:5555" {
+	if got := s.MdnsWirelessAddr("12345TESTA", known); got != "192.0.2.197:5555" {
 		t.Fatalf("地址已在档案的广播应命中: %q", got)
 	}
 	// 无档案 → ""（未建档设备走 BestAddr/serial 兜底，原行为）

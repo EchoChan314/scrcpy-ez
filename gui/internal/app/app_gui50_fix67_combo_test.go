@@ -20,7 +20,7 @@ func gui50Fix67InstallGetpropFakes(a *App) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "MODEL123", nil
+			return "12345TESTA", nil
 		}
 		return "", nil
 	}
@@ -65,7 +65,7 @@ func TestGui50Fix6ConnectFastPathSkipsPair(t *testing.T) {
 	if pairCalls != 0 {
 		t.Fatalf("connect 先行成功时不应调用 adb pair，got %d", pairCalls)
 	}
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok || !gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls) {
 		t.Fatalf("快路径应建立 TLS 档案: %+v", e)
 	}

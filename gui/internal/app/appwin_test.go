@@ -30,7 +30,7 @@ func newAppWinEnv(t *testing.T) *appWinEnv {
 	})
 	// 预置物理参数（跳过 adb 查询）：等比 dpi 按各套尺寸现算（v2.1.48 起默认档=设备推导）。
 	e.a.physMu.Lock()
-	e.a.physCache["MODEL123"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
+	e.a.physCache["device:12345TESTA"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
 	e.a.physMu.Unlock()
 	return e
 }
@@ -69,9 +69,9 @@ func waitAppWins(t *testing.T, a *App, n int) []AppWinItem {
 func TestAppWinStartInjectsVdParams(t *testing.T) {
 	e := newAppWinEnv(t)
 	setDevices(e.a, []adb.Device{
-		{Serial: "MODEL123", State: "device", ConnType: "usb", Name: "K80", Identity: "K80", Res: "3200x1440", FPS: 120},
+		{Serial: "12345TESTA", State: "device", ConnType: "usb", Name: "K80", Identity: "K80", Res: "3200x1440", FPS: 120},
 	})
-	if err := e.a.StartAppWin("MODEL123", "com.android.browser", "浏览器"); err != nil {
+	if err := e.a.StartAppWin("12345TESTA", "com.android.browser", "浏览器"); err != nil {
 		t.Fatal(err)
 	}
 	p := e.f.waitParams(t, 1)
@@ -85,7 +85,7 @@ func TestAppWinStartInjectsVdParams(t *testing.T) {
 	if p.WinTitle != "浏览器" {
 		t.Fatalf("WinTitle=%q，期望 浏览器", p.WinTitle)
 	}
-	if p.Serial != "MODEL123" {
+	if p.Serial != "12345TESTA" {
 		t.Fatalf("设备锁定注入丢失: Serial=%q", p.Serial)
 	}
 	list := waitAppWins(t, e.a, 1)
@@ -98,13 +98,13 @@ func TestAppWinStartInjectsVdParams(t *testing.T) {
 // runner.Stop → bat 退出（onExit）→ 摘除（前端卡片淡出）。
 func TestAppWinStopClosingThenExit(t *testing.T) {
 	e := newAppWinEnv(t)
-	setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
-	if err := e.a.StartAppWin("MODEL123", "com.android.browser", "浏览器"); err != nil {
+	setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
+	if err := e.a.StartAppWin("12345TESTA", "com.android.browser", "浏览器"); err != nil {
 		t.Fatal(err)
 	}
 	e.f.waitStarts(t, 1)
 
-	if err := e.a.StopAppWin("MODEL123", "com.android.browser"); err != nil {
+	if err := e.a.StopAppWin("12345TESTA", "com.android.browser"); err != nil {
 		t.Fatal(err)
 	}
 	// 受理后：条目仍在、closing=true。
@@ -119,7 +119,7 @@ func TestAppWinStopClosingThenExit(t *testing.T) {
 	waitAppWins(t, e.a, 0)
 
 	// 幂等：已无会话，再停止不报错。
-	if err := e.a.StopAppWin("MODEL123", "com.android.browser"); err != nil {
+	if err := e.a.StopAppWin("12345TESTA", "com.android.browser"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -127,19 +127,19 @@ func TestAppWinStopClosingThenExit(t *testing.T) {
 // 幂等：重复启动不新建会话；停止受理后重复点击不重复杀。
 func TestAppWinIdempotent(t *testing.T) {
 	e := newAppWinEnv(t)
-	setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
-	if err := e.a.StartAppWin("MODEL123", "pkg.a", "A"); err != nil {
+	setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
+	if err := e.a.StartAppWin("12345TESTA", "pkg.a", "A"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.a.StartAppWin("MODEL123", "pkg.a", "A"); err != nil {
+	if err := e.a.StartAppWin("12345TESTA", "pkg.a", "A"); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.f.startsN(); n != 1 {
 		t.Fatalf("重复启动不应新建会话（starts=%d）", n)
 	}
 
-	_ = e.a.StopAppWin("MODEL123", "pkg.a")
-	_ = e.a.StopAppWin("MODEL123", "pkg.a")
+	_ = e.a.StopAppWin("12345TESTA", "pkg.a")
+	_ = e.a.StopAppWin("12345TESTA", "pkg.a")
 	e.f.waitStops(t, 1)
 	time.Sleep(50 * time.Millisecond)
 	if n := e.f.stopsN(); n != 1 {
@@ -150,8 +150,8 @@ func TestAppWinIdempotent(t *testing.T) {
 // 用户手关窗口：无停止受理，bat 直接退出（scrcpy 码 0）→ 摘除。
 func TestAppWinUserCloseRemoves(t *testing.T) {
 	e := newAppWinEnv(t)
-	setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
-	if err := e.a.StartAppWin("MODEL123", "pkg.x", "X"); err != nil {
+	setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
+	if err := e.a.StartAppWin("12345TESTA", "pkg.x", "X"); err != nil {
 		t.Fatal(err)
 	}
 	e.f.waitStarts(t, 1)
@@ -168,7 +168,7 @@ func TestAppWinStopFailureResetsClosing(t *testing.T) {
 	})
 	setDevices(a, []adb.Device{{Serial: "S1", State: "device", ConnType: "usb"}})
 	a.physMu.Lock()
-	a.physCache["S1"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
+	a.physCache["device:S1"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
 	a.physMu.Unlock()
 
 	if err := a.StartAppWin("S1", "pkg.b", "B"); err != nil {
@@ -201,7 +201,7 @@ func TestAppWinParallelTwoApps(t *testing.T) {
 	})
 	setDevices(a, []adb.Device{{Serial: "S2", State: "device", ConnType: "wifi"}})
 	a.physMu.Lock()
-	a.physCache["S2"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
+	a.physCache["device:S2"] = devPhys{longSide: 3200, dpi: 600, at: time.Now()}
 	a.physMu.Unlock()
 
 	if err := a.StartAppWin("S2", "pkg.one", "一"); err != nil {
@@ -219,12 +219,12 @@ func TestAppWinParallelTwoApps(t *testing.T) {
 func TestAppWinStartFastOnPhysCacheMiss(t *testing.T) {
 	e := newAppWinEnv(t)
 	e.a.physMu.Lock()
-	delete(e.a.physCache, "MODEL123") // 清掉预置缓存 → 触发 miss 路径
+	delete(e.a.physCache, "device:12345TESTA") // 清掉预置缓存 → 触发 miss 路径
 	e.a.physMu.Unlock()
-	setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
+	setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
 
 	start := time.Now()
-	if err := e.a.StartAppWin("MODEL123", "com.android.browser", "浏览器"); err != nil {
+	if err := e.a.StartAppWin("12345TESTA", "com.android.browser", "浏览器"); err != nil {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
@@ -252,8 +252,8 @@ func TestAppWinUserCloseLineSetsClosing(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newAppWinEnv(t)
-			setDevices(e.a, []adb.Device{{Serial: "MODEL123", State: "device", ConnType: "usb"}})
-			if err := e.a.StartAppWin("MODEL123", "pkg.c", "C"); err != nil {
+			setDevices(e.a, []adb.Device{{Serial: "12345TESTA", State: "device", ConnType: "usb"}})
+			if err := e.a.StartAppWin("12345TESTA", "pkg.c", "C"); err != nil {
 				t.Fatal(err)
 			}
 			e.f.waitStarts(t, 1)

@@ -75,7 +75,7 @@ func (o *teachfix2Ops) probes() []string {
 
 func teachfix2SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 }
@@ -206,7 +206,7 @@ func TestTeachfix2LearnPicksPhysicalReachableCandidate(t *testing.T) {
 func TestTeachfix2RemovedNoLongerClearsMask(t *testing.T) {
 	a, _ := newWirelessApp()
 	teachfix2SeedK80(a)
-	a.profiles.AddrSuccess("REDMI K80", "192.0.2.197:5555", ModeTcpip)
+	a.profiles.AddrSuccess(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555", ModeTcpip)
 
 	a.applyTrackUpdate([]adb.Device{teachfix2Usb("offline")})
 	if !teachfix2PlugActive(a, "REDMI K80") {

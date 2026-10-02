@@ -62,7 +62,7 @@ func TestIsTlsFormAddr(t *testing.T) {
 func TestFoldGhostMdnsTokenMergesIntoIdentityCard(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555", "192.0.2.197:33895"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
@@ -105,7 +105,7 @@ func TestFoldGhostMdnsTokenUnknownFiltered(t *testing.T) {
 func TestFoldGhostMdnsTokenDeviceStateFolded(t *testing.T) {
 	a, _ := newWirelessApp()
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 	devs := a.foldGhostWireless([]adb.Device{
@@ -146,7 +146,7 @@ func TestNormalizeArchivedMode(t *testing.T) {
   "devices": {
     "REDMI K80": {
       "marketname": "REDMI K80",
-      "model": "MODEL123",
+      "model": "12345TESTA",
       "serials": ["TEST0001"],
       "addrs": [
         {"addr": "192.0.2.197:33895", "state": "active", "fail": 0, "lastOk": 1750000001},
@@ -165,7 +165,7 @@ func TestNormalizeArchivedMode(t *testing.T) {
 	if err := s.Load(); err != nil {
 		t.Fatal(err)
 	}
-	e, ok := s.Entry("REDMI K80")
+	e, ok := s.Entry(fixtureArchiveKey(s, "REDMI K80"))
 	if !ok {
 		t.Fatalf("档案应加载成功: %v", s.Entries())
 	}
@@ -202,7 +202,7 @@ func TestNormalizeArchivedMode(t *testing.T) {
 	if string(b1) != string(b2) {
 		t.Fatalf("二次加载不应再改写档案（幂等）:\n--- 第一次 ---\n%s\n--- 第二次 ---\n%s", b1, b2)
 	}
-	e2, ok := s2.Entry("REDMI K80")
+	e2, ok := s2.Entry(fixtureArchiveKey(s2, "REDMI K80"))
 	if !ok || len(e2.Addrs) != 2 || e2.Addrs[0].Addr != "192.0.2.197:41234" ||
 		e2.Addrs[1].Addr != "192.0.2.197:5555" || e2.Addrs[1].State != AddrStateStale {
 		t.Fatalf("二次加载档案异常（应保持二态单记忆）: %+v", e2)

@@ -84,7 +84,7 @@ func TestReadTrackBlockInvalidPrefix(t *testing.T) {
 }
 
 func TestParseTrackDevicesNormal(t *testing.T) {
-	block := "TEST0001\tdevice\n192.0.2.162:5555\tdevice model:MODEL123\n"
+	block := "TEST0001\tdevice\n192.0.2.162:5555\tdevice model:12345TESTA\n"
 	devs := ParseTrackDevices(block)
 	if len(devs) != 2 {
 		t.Fatalf("应解析 2 台设备: %+v", devs)
@@ -92,7 +92,7 @@ func TestParseTrackDevicesNormal(t *testing.T) {
 	if devs[0].Serial != "TEST0001" || devs[0].ConnType != "usb" || devs[0].State != "device" {
 		t.Fatalf("USB 条目错误: %+v", devs[0])
 	}
-	if devs[1].Serial != "192.0.2.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "MODEL123" {
+	if devs[1].Serial != "192.0.2.162:5555" || devs[1].ConnType != "wifi" || devs[1].Model != "12345TESTA" {
 		t.Fatalf("无线条目错误: %+v", devs[1])
 	}
 }
@@ -110,15 +110,14 @@ func TestParseTrackDevicesOffline(t *testing.T) {
 	}
 }
 
-func TestParseTrackDevicesMergesTransportByModel(t *testing.T) {
-	block := "192.0.2.162:5555\tdevice model:Xiaomi_Pad_8_Pro\nTEST0002\tdevice model:Xiaomi_Pad_8_Pro\n"
-	devs := ParseTrackDevices(block)
-	if len(devs) != 1 {
-		t.Fatalf("同 model 双 transport 应合并为一台设备: %+v", devs)
+func TestParseTrackDevicesRequiresConfirmedTransportIdentity(t *testing.T) {
+	devs := ParseTrackDevices("192.0.2.162:5555\tdevice model:SAME_MODEL\nPHONE_A\tdevice model:SAME_MODEL\nPHONE_B\tdevice model:SAME_MODEL\n")
+	if len(devs) != 3 {
+		t.Fatalf("model-only grouping hid devices: %+v", devs)
 	}
-	d := devs[0]
-	if d.Serial != "TEST0002" || d.ConnType != "usb" || d.Wireless != "192.0.2.162:5555" {
-		t.Fatalf("USB 优先合并错误: %+v", d)
+	devs = ParseTrackDevices("adb-PHONE_A-Ab12Cd._adb-tls-connect._tcp\tdevice model:SAME_MODEL\nPHONE_A\tdevice model:SAME_MODEL\n")
+	if len(devs) != 1 || devs[0].StableSerial != "PHONE_A" {
+		t.Fatalf("confirmed same-device transports split: %+v", devs)
 	}
 }
 

@@ -6,18 +6,6 @@ import (
 	"strings"
 )
 
-// stopSteps 是 BatRunner.Stop 的固定执行顺序（修复"双投屏"后契约）：
-//  1. treekill —— 先 taskkill /F /T <cmd pid>（cmd 存活时整树杀：cmd+scrcpy+watcher，
-//     scrcpy 不会因父进程先死而逃逸成孤儿）；
-//  2. killcmd —— 再 Process.Kill 兜底（taskkill 失败/未完全退出时确保 cmd 主进程死）；
-//  3. watchtag —— 按本会话 WATCH_TAG 补杀残留 watcher powershell；
-//  4. residual —— 等 500ms 后复查本会话 scrcpy（父链=cmd pid 或命令行含本会话 serial）
-//     仍存活则 taskkill /F 补杀（防 taskkill /T 128 失败后的孤儿窗口）；
-//  5. adbserver —— 杀服门（仅当无其他活动会话才兜底 kill-server）。
-//
-// 顺序不可乱：先 Kill 后 taskkill 是历史 bug（cmd 已死 → taskkill 128 → scrcpy 逃逸）。
-var stopSteps = []string{"treekill", "killcmd", "watchtag", "residual", "adbserver"}
-
 // scrcpyProc 是残余 scrcpy 进程枚举结果（powershell 输出解析）。
 type scrcpyProc struct {
 	pid     int

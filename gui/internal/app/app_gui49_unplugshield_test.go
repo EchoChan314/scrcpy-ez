@@ -14,7 +14,7 @@ import (
 
 func gui49SeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 }
@@ -186,7 +186,7 @@ func gui49FastRetry(t *testing.T) {
 func TestGui49ConnectConfirmSuccessActiveAndClear(t *testing.T) {
 	a, _ := newWirelessApp()
 	gui49SeedK80(a)
-	a.profiles.MarkAddrStale("REDMI K80", "192.0.2.197:5555") // 先 stale：验证复活
+	a.profiles.MarkAddrStale(fixtureArchiveKey(a.profiles, "REDMI K80"), "192.0.2.197:5555") // 先 stale：验证复活
 	ops := &teachfix3Ops{port: "5555"}
 	ops.install(a)
 
@@ -213,6 +213,11 @@ func TestGui49ConnectConfirmSuccessActiveAndClear(t *testing.T) {
 	if n == 0 {
 		t.Fatal("应执行 connect 确认")
 	}
+	// Shield state clears before the asynchronous display commit completes.
+	waitForMdns(t, "connect 成功后应提交正常无线卡", func() bool {
+		out := a.Snapshot().Devices
+		return len(out) == 1 && !out[0].Connecting && out[0].Serial == "192.0.2.197:5555"
+	})
 	out := a.Snapshot().Devices
 	if len(out) != 1 || out[0].Connecting || out[0].ConnType != "wifi" ||
 		out[0].Serial != "192.0.2.197:5555" {

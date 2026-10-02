@@ -51,7 +51,7 @@ func TestGui55MdnsClaimByIPClassicBackfillsSerial(t *testing.T) {
 	if len(got) != 1 || got[0].Addr != "192.0.2.159:5555" || got[0].Mode != ModeTcpip {
 		t.Fatalf("经典广播应按 IP 认领为候选: %+v", got)
 	}
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		t.Fatal("主档案应保留")
 	}
@@ -73,7 +73,7 @@ func TestGui55MdnsClaimByIPClassicBackfillsSerial(t *testing.T) {
 	if len(got2) != 1 || got2[0].Addr != "192.0.2.160:5555" {
 		t.Fatalf("短号直认应命中新 IP: %+v", got2)
 	}
-	e, _ = a.profiles.Entry("REDMI K80")
+	e, _ = a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if gui24FindAddr(e, "192.0.2.160:5555") == nil {
 		t.Fatalf("新 IP 应写入同一档案: %+v", e.Addrs)
 	}
@@ -93,7 +93,7 @@ func TestGui55MdnsClaimByIPTlsBackfillsGuid(t *testing.T) {
 	if len(got) != 1 || got[0].Mode != ModeTls {
 		t.Fatalf("TLS 广播应认领为 tls 候选: %+v", got)
 	}
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !contains(e.Serials, "TEST0001") || e.TlsGuid != "adb-TEST0001-KWqpio" {
 		t.Fatalf("短号/tlsGuid 应回填: serials=%v guid=%q", e.Serials, e.TlsGuid)
 	}
@@ -123,7 +123,7 @@ func TestGui55MdnsClaimRefusedOnSerialConflict(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("短号冲突时不得认领: %+v", got)
 	}
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if contains(e.Serials, "TEST0001") {
 		t.Fatalf("冲突短号不得混入档案: %+v", e.Serials)
 	}
@@ -204,7 +204,7 @@ func TestGui55ReconcileSnapshotClaimsByIP(t *testing.T) {
 		}}, nil
 	}
 	a.reconcileMdnsSnapshot(context.Background())
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		t.Fatal("档案应保留")
 	}
@@ -231,7 +231,7 @@ func TestGui55PairingServiceNeverArchived(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("配对服务不得作为候选: %+v", got)
 	}
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if gui24FindAddr(e, "192.0.2.159:36405") != nil {
 		t.Fatalf("配对端点不得写进档案: %+v", e.Addrs)
 	}
@@ -244,7 +244,7 @@ func TestGui55PairingServiceNeverArchived(t *testing.T) {
 	if !changed {
 		t.Fatal("normalize 应清理 mode=pairing 条目")
 	}
-	e2, _ := a.profiles.Entry("REDMI K80")
+	e2, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if gui24FindAddr(e2, "192.0.2.159:36405") != nil {
 		t.Fatalf("normalize 后不得残留配对端点: %+v", e2.Addrs)
 	}
@@ -265,7 +265,7 @@ func TestGui55MatchMdnsLearnsSerialWhenAddrAlreadyArchived(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("地址已在档仍应作为候选: %+v", got)
 	}
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !contains(e.Serials, "TEST0001") {
 		t.Fatalf("应按广播自举补学短号: %+v", e.Serials)
 	}
@@ -286,7 +286,7 @@ func TestGui55MatchMdnsAddrConflictNotRevived(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("短号冲突不得作为候选（不得复活）: %+v", got)
 	}
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	if contains(e.Serials, "TEST0001") {
 		t.Fatalf("冲突短号不得混入档案: %+v", e.Serials)
 	}
@@ -318,7 +318,7 @@ func TestGui55ReconcileWritesEvenWhenDiffEmpty(t *testing.T) {
 		return []discovery.MdnsService{svc}, nil
 	}
 	a.reconcileMdnsSnapshot(context.Background())
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !contains(e.Serials, "TEST0001") {
 		t.Fatalf("diff 为空也必须按全量快照补写短号: %+v", e.Serials)
 	}
@@ -363,7 +363,7 @@ func TestGui55PairLearnsSerialViaGetSerialNo(t *testing.T) {
 	if calls == 0 {
 		t.Fatal("应走 get-serialno 直读保底")
 	}
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		t.Fatalf("档案应入档: %v", a.profiles.Entries())
 	}
@@ -410,7 +410,7 @@ func TestGui55PairLearnsSerialByMdnsRetry(t *testing.T) {
 	if scans < 2 {
 		t.Fatalf("服务名解析应重试（scans=%d）", scans)
 	}
-	e, ok := a.profiles.Entry("TEST0001")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "TEST0001"))
 	if !ok {
 		t.Fatalf("应以短号建档: %v", a.profiles.Entries())
 	}
@@ -515,7 +515,7 @@ func TestGui55ProbeVerifyRejectsForeignDevice(t *testing.T) {
 
 	a.startMdnsProbe("Xiaomi Pad 8 Pro", "192.0.2.242:5555", mdnsProbeKindIdle)
 	time.Sleep(200 * time.Millisecond) // 等探测 goroutine 落定
-	e, _ := a.profiles.Entry("Xiaomi Pad 8 Pro")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 	ae := gui24FindAddr(e, "192.0.2.242:5555")
 	if ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("验身不符不得写活（平板不得莫名在线）: %+v", ae)
@@ -542,7 +542,7 @@ func TestGui55ProbeVerifyAcceptsOwnDevice(t *testing.T) {
 	}
 	a.startMdnsProbe("Xiaomi Pad 8 Pro", "192.0.2.242:44125", mdnsProbeKindIdle)
 	waitFor(t, 2*time.Second, func() bool {
-		e, ok := a.profiles.Entry("Xiaomi Pad 8 Pro")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "Xiaomi Pad 8 Pro"))
 		if !ok {
 			return false
 		}
@@ -566,7 +566,7 @@ func TestGui55ColdSearchSkipsUnverifiable(t *testing.T) {
 		return "TEST0001", nil // 读到了设备短号，但档案里没有可比的短号
 	}
 	a.coldSearch5555(context.Background())
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	ae := gui24FindAddr(e, "192.0.2.159:39377")
 	if ae == nil || ae.State != AddrStateStale {
 		t.Fatalf("残缺档案无短号可比时不得仅凭 IP 写 active: %+v", ae)
@@ -592,7 +592,7 @@ func TestGui55ColdSearchVerifiesOwnDevice(t *testing.T) {
 		return "TEST0001", nil
 	}
 	a.coldSearch5555(context.Background())
-	e, _ := a.profiles.Entry("REDMI K80")
+	e, _ := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	ae := gui24FindAddr(e, "192.0.2.159:5555")
 	if ae == nil || ae.State != AddrStateActive {
 		t.Fatalf("验身一致应写 active: %+v", ae)

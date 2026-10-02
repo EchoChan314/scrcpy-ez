@@ -4,9 +4,33 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestDebugLogCloseDuringWrites(t *testing.T) {
+	DisableDebugLog()
+	EnableDebugLog(filepath.Join(t.TempDir(), "concurrent.log"))
+	var wg sync.WaitGroup
+	started := make(chan struct{}, 8)
+	for n := 0; n < 8; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			DebugLog("writer started")
+			started <- struct{}{}
+			for i := 0; i < 1000; i++ {
+				DebugLog("line %d", i)
+			}
+		}()
+	}
+	for n := 0; n < 8; n++ {
+		<-started
+	}
+	DisableDebugLog()
+	wg.Wait()
+}
 
 // 关闭状态零开销：只做一次原子读，零分配、零文件。
 func TestDebugLogDisabledZeroOverhead(t *testing.T) {

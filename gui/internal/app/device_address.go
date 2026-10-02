@@ -18,7 +18,7 @@ func (a *App) deviceLockParams(serial string, devices []adb.Device) bridge.CastP
 	key := serial
 	if target != nil {
 		id := a.identityOf(target)
-		if id != "" && a.profiles.ResolveKey(id) != "" {
+		if id != "" {
 			key = id
 		}
 		if target.ConnType == "usb" || (target.ConnType == "" && !strings.Contains(target.Serial, ":")) {
@@ -28,9 +28,23 @@ func (a *App) deviceLockParams(serial string, devices []adb.Device) bridge.CastP
 		}
 	}
 	entry, main, alternate, _ := a.profiles.connectionInfo(key)
+	if target != nil {
+		params.ExpectedSerial = deviceShortSerial(target)
+	}
+	if params.ExpectedSerial == "" && len(entry.Serials) == 1 {
+		params.ExpectedSerial = entry.Serials[0]
+	}
 	params.Addr, params.Addr2 = main, alternate
 	if params.Addr == "" && target != nil && target.ConnType == "wifi" {
 		params.Addr = target.Serial
+	}
+	if params.Serial == "" && params.Addr == "" && !strings.HasPrefix(serial, "device:") && !strings.HasPrefix(serial, "pending:") {
+		if IsIPPort(serial) {
+			params.Addr = serial
+		} else {
+			params.Serial = serial
+			params.ExpectedSerial = adb.StableSerial(serial)
+		}
 	}
 	if params.Serial != "" || params.Addr != "" {
 		params.Market, params.Model = entry.Marketname, entry.Model

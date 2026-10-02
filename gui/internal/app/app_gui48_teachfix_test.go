@@ -78,7 +78,7 @@ func (o *teachfixOps) order() []string {
 
 func teachfixSeedK80(a *App) {
 	seedProfiles(a, map[string]*DeviceEntry{
-		"REDMI K80": mkEntry("REDMI K80", "MODEL123", []string{"TEST0001"},
+		"REDMI K80": mkEntry("REDMI K80", "12345TESTA", []string{"TEST0001"},
 			[]string{"192.0.2.197:5555"}),
 	})
 }
@@ -91,7 +91,7 @@ func teachfixUsb(serial, state string) adb.Device {
 }
 
 func teachfixAddrState(a *App, key, addr string) *AddrEntry {
-	e, ok := a.profiles.Entry(key)
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, key))
 	if !ok {
 		return nil
 	}

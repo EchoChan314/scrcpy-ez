@@ -35,7 +35,7 @@ func gui50PairFakes(a *App) (*string, *[]string, *string) {
 		case "ro.product.manufacturer":
 			return "Xiaomi", nil
 		case "ro.product.model":
-			return "MODEL123", nil
+			return "12345TESTA", nil
 		}
 		return "", nil
 	}
@@ -118,11 +118,11 @@ func TestGui50PairQrAutoFlowOnPairingBroadcast(t *testing.T) {
 	// 端口入档 + mDNS 服务名 adb-TEST0001-KWqpio 解析短号写入 Serials；5555
 	// 由 mDNS _adb._tcp 广播匹配入档（MatchMdnsModes）。
 	waitFor(t, 2*time.Second, func() bool {
-		e, ok := a.profiles.Entry("REDMI K80")
+		e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 		return ok && gui50Fix45EntryHasAddr(e, "192.168.1.2:33895", ModeTls) &&
 			contains(e.Serials, "TEST0001")
 	}, "TLS 入档 + 短号学习应完成")
-	e, ok := a.profiles.Entry("REDMI K80")
+	e, ok := a.profiles.Entry(fixtureArchiveKey(a.profiles, "REDMI K80"))
 	if !ok {
 		t.Fatalf("配对成功应建档: %+v", st)
 	}
