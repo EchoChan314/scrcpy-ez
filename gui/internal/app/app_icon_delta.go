@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -82,26 +84,66 @@ func parseAppCatalog(out string) (string, []AppListItem, error) {
 	return adb.StableSerial(catalog.Serial), items, nil
 }
 
+type appServerHelper struct {
+	local   string
+	remote  string
+	version string
+}
+
+var appServerVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*([-._][A-Za-z0-9]+)*$`)
+
+func parseAppServerVersion(out string) (string, error) {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "scrcpy" && len(fields[1]) <= 80 && appServerVersionPattern.MatchString(fields[1]) {
+			return fields[1], nil
+		}
+	}
+	return "", errors.New("cannot read bundled scrcpy protocol version")
+}
+
+func probeAppServerVersion(client string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, client, "--version")
+	adb.HideConsole(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("read bundled scrcpy version: %w", err)
+	}
+	return parseAppServerVersion(string(out))
+}
+
+func (h appServerHelper) command(options string) string {
+	return "CLASSPATH=" + h.remote + " app_process / com.genymobile.scrcpy.Server " + h.version + " cleanup=false " + options
+}
+
+// Resolve the protocol from the adjacent client once per background catalog job.
+// Public and development packages can brand the protocol independently of the GUI.
 // A content-addressed helper never replaces the server file used by a live cast.
-func (a *App) appCatalogServer() (string, string, error) {
+func (a *App) appCatalogServer() (appServerHelper, error) {
 	local := filepath.Join(filepath.Dir(a.cfg.BatPath), "scrcpy-server")
 	b, err := os.ReadFile(local)
 	if err != nil {
-		return "", "", err
+		return appServerHelper{}, err
+	}
+	version, err := probeAppServerVersion(a.scrcpyExePath())
+	if err != nil {
+		return appServerHelper{}, err
 	}
 	hash := sha256.Sum256(b)
-	return local, fmt.Sprintf("/data/local/tmp/scrcpy-ez-apps-%x", hash[:8]), nil
+	return appServerHelper{local: local, remote: fmt.Sprintf("/data/local/tmp/scrcpy-ez-apps-%x", hash[:8]), version: version}, nil
 }
 
-func (a *App) listAppCatalogOnce(identity, serial string) ([]AppListItem, string, error) {
-	local, remote, err := a.appCatalogServer()
+func (a *App) listAppCatalogOnce(identity, serial string) ([]AppListItem, appServerHelper, error) {
+	helper, err := a.appCatalogServer()
 	if err != nil {
-		return nil, "", err
+		return nil, appServerHelper{}, err
 	}
 	query := func() (string, []AppListItem, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), appListTimeout)
 		defer cancel()
-		out, err := a.adb.ShellOut(ctx, serial, "CLASSPATH="+remote+" app_process / com.genymobile.scrcpy.Server "+serverVersion+" cleanup=false app_catalog=true")
+		out, err := a.adb.ShellOut(ctx, serial, helper.command("app_catalog=true"))
 		if err != nil {
 			return "", nil, err
 		}
@@ -110,24 +152,24 @@ func (a *App) listAppCatalogOnce(identity, serial string) ([]AppListItem, string
 	physical, items, err := query()
 	if err != nil && a.appListKeyFor(serial) == identity {
 		ctx, cancel := context.WithTimeout(context.Background(), iconPushTimeout)
-		err = a.adb.PushFile(ctx, serial, local, remote)
+		err = a.adb.PushFile(ctx, serial, helper.local, helper.remote)
 		cancel()
 		if err == nil {
 			physical, items, err = query()
 		}
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, appServerHelper{}, err
 	}
 	if a.appListKeyFor(serial) != identity {
-		return nil, "", errors.New("device owner changed")
+		return nil, appServerHelper{}, errors.New("device owner changed")
 	}
 	if physical != "" {
 		if entry, ok := a.profiles.Entry(identity); !ok || !contains(entry.Serials, physical) {
-			return nil, "", errors.New("app catalog physical identity mismatch")
+			return nil, appServerHelper{}, errors.New("app catalog physical identity mismatch")
 		}
 	}
-	return items, remote, nil
+	return items, helper, nil
 }
 
 type iconRecord struct {

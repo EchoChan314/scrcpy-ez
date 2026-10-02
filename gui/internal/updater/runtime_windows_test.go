@@ -209,7 +209,19 @@ func runWorkerScenario(t *testing.T, gui, archive, scenario string) {
 	closeTestGUI(t, p.Install)
 	var r Result
 	wantOK := scenario == "install" || scenario == "legacy-public"
-	if e = ReadJSON(p.ResultPath(), &r); e != nil || r.OK != wantOK {
+	e = ReadJSON(p.ResultPath(), &r)
+	if wantOK && os.IsNotExist(e) {
+		// The restarted GUI may consume success before the worker exits.
+		// Verify its per-installation receipt instead of requiring a persistent badge.
+		cache, cacheErr := CacheDir(p.Install)
+		if cacheErr != nil {
+			t.Fatal(cacheErr)
+		}
+		receipt := filepath.Join(cache, "result-seen.json")
+		e = ReadJSON(receipt, &r)
+		defer os.Remove(receipt)
+	}
+	if e != nil || r.OK != wantOK || !sameVersion(r.Version, p.Version) || r.Time <= 0 {
 		t.Fatalf("result %+v %v", r, e)
 	}
 	if _, e = os.Stat(p.Backup()); !os.IsNotExist(e) {

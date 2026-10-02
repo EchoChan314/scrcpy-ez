@@ -229,7 +229,7 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 	// Prefer available USB immediately. Do not delay every WiFi-only check by 2.5 seconds.
 	serial = a.bestEnumSerial(identity, serial)
 	var items []AppListItem
-	var remote string
+	var helper appServerHelper
 	var err error
 	for attempt := 0; attempt <= appListRetries; attempt++ {
 		if attempt > 0 {
@@ -239,7 +239,7 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 		if a.appListKeyFor(serial) != identity {
 			return
 		}
-		items, remote, err = a.listAppCatalogOnce(identity, serial)
+		items, helper, err = a.listAppCatalogOnce(identity, serial)
 		if err == nil {
 			break
 		}
@@ -269,7 +269,7 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 	if len(needed) == 0 && len(removed) == 0 {
 		return
 	}
-	a.runAppIconDelta(identity, serial, remote, items, needed, removed)
+	a.runAppIconDelta(identity, serial, helper, items, needed, removed)
 }
 
 // clearAppBusy 清「应用」按钮遮罩态（幂等）。
@@ -305,12 +305,11 @@ const (
 	iconExportTimeout = 90 * time.Second // 起 server 导出图标（实测 ~6s，大余量防老设备）
 	iconPushTimeout   = 30 * time.Second // push server
 	iconPullTimeout   = 60 * time.Second // pull 图标目录
-	serverVersion     = "4.1"            // 与 dist/scrcpy-server 一致（随构建同步）
 )
 
 // All deltas, including an initially empty archive, use a private remote staging directory.
 // A single directory transfer replaces the old one-adb-process-per-package path.
-func (a *App) runAppIconDelta(identity, serial, helper string, items []AppListItem, wanted, removed []string) {
+func (a *App) runAppIconDelta(identity, serial string, helper appServerHelper, items []AppListItem, wanted, removed []string) {
 	if a.appListKeyFor(serial) != identity {
 		return
 	}
@@ -336,7 +335,7 @@ func (a *App) runAppIconDelta(identity, serial, helper string, items []AppListIt
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), iconExportTimeout)
-			out, exportErr := a.adb.ShellOut(ctx, serial, "CLASSPATH="+helper+" app_process / com.genymobile.scrcpy.Server "+serverVersion+" cleanup=false export_app_icons="+strings.Join(chunk, ",")+" export_app_icons_dir="+remote)
+			out, exportErr := a.adb.ShellOut(ctx, serial, helper.command("export_app_icons="+strings.Join(chunk, ",")+" export_app_icons_dir="+remote))
 			cancel()
 			if exportErr != nil || !strings.Contains(out, "Exported icons:") || !a.iconExportOwnerMatches(identity, out) {
 				bridge.DebugLog("[appwin] icon export identity=%q err=%v ownerValid=%v", identity, exportErr, a.iconExportOwnerMatches(identity, out))
