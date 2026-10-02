@@ -371,6 +371,7 @@
   var batchDeviceKeys = {};
   function reconcileBatchDeviceKeys(st) {
     var next = {};
+    var promoted = {};
     (st.devices || []).forEach(function (d) {
       var key = devKey(d), old = batchDeviceKeys[d.serial];
       var epoch = d.identityEpoch || 0;
@@ -383,6 +384,7 @@
         if (old.epoch === epoch && old.key.indexOf('pending:') === 0 && key.indexOf('pending:') !== 0) {
           if (batchSel[old.key]) batchSel[key] = true;
           if (renameDraft[old.key] !== undefined) renameDraft[key] = renameDraft[old.key];
+          promoted[old.key] = key;
         }
         if (old.key !== key || old.key.indexOf('pending:') === 0) {
           delete batchSel[old.key];
@@ -397,10 +399,52 @@
       }
     });
     batchDeviceKeys = next;
+    return promoted;
+  }
+
+  function collectRenameCards(box, promoted) {
+    var cards = {};
+    if (!batchMode || !renameMode) return cards;
+    Array.prototype.slice.call(box.querySelectorAll('.device-card')).forEach(function (card) {
+      var key = promoted[card.dataset.key] || card.dataset.key;
+      if (!batchSel[key] || !card.querySelector('.rename-input')) return;
+      card.dataset.key = key;
+      if (!cards[key] || card.contains(document.activeElement)) cards[key] = card;
+    });
+    return cards;
+  }
+
+  // Keep the native rename input attached, including its selection and IME state.
+  // If card order changes, move its siblings rather than the focused card itself.
+  function commitDeviceCards(box, cards) {
+    var active = document.activeElement;
+    var focused = active && active.classList && active.classList.contains('rename-input') ? active.closest('.device-card') : null;
+    var anchor = cards.indexOf(focused);
+    Array.prototype.slice.call(box.children).forEach(function (child) {
+      if (cards.indexOf(child) < 0) box.removeChild(child);
+    });
+    if (anchor >= 0) {
+      var before = focused;
+      for (var i = anchor - 1; i >= 0; i--) {
+        if (cards[i].nextSibling !== before) box.insertBefore(cards[i], before);
+        before = cards[i];
+      }
+      var after = focused.nextSibling;
+      for (var j = anchor + 1; j < cards.length; j++) {
+        if (cards[j] !== after) box.insertBefore(cards[j], after);
+        after = cards[j].nextSibling;
+      }
+    } else {
+      cards.forEach(function (card, i) {
+        if (box.children[i] !== card) box.insertBefore(card, box.children[i] || null);
+      });
+    }
   }
 
   function renderDevices(st) {
-    reconcileBatchDeviceKeys(st);
+    var promoted = reconcileBatchDeviceKeys(st);
+    var box = el('device-list');
+    var renameCards = collectRenameCards(box, promoted);
     // gui44：拖拽排序进行中跳过重建（下轮快照照常，轮询继续）
     if (el('device-list').classList.contains('drag-active')) return;
     // v2.1.67：条子退场动画在播（'playing'）→ 整页重建推迟（60ms 后重试，动画结束由
@@ -415,14 +459,13 @@
     el('dev-count').textContent = String(st.devices.length);
     syncBatchUI(st);
 
-    var box = el('device-list');
-    box.innerHTML = '';
+    var cards = [];
     box.classList.toggle('batch', batchMode);
     if (!st.adbOK) {
       var bad = document.createElement('div');
       bad.className = 'banner error';
       bad.textContent = '⚠ 无法连接 adb（adb.exe 缺失或未响应），请检查程序目录';
-      box.appendChild(bad);
+      commitDeviceCards(box, [bad]);
       return;
     }
     // 真空期去抖：adb 仍可用但当前连续失败（点投屏后 bat 重置 adb 服务的 1-2s 真空）——
@@ -431,7 +474,7 @@
       var trying = document.createElement('div');
       trying.className = 'banner info';
       trying.textContent = '⟳ 设备列表刷新中…（adb 服务忙，稍候自动恢复）';
-      box.appendChild(trying);
+      cards.push(trying);
     }
     if (st.devices.length === 0) {
       var tip = document.createElement('div');
@@ -447,7 +490,8 @@
           tip.textContent += ' · 已找到 ' + st.discovery.found;
         }
       }
-      box.appendChild(tip);
+      cards.push(tip);
+      commitDeviceCards(box, cards);
       return;
     }
 
@@ -482,12 +526,25 @@
       var key = devKey(d);
       var selected = !!batchSel[key]; // gui51：批量选中态
       var inRename = renameMode && selected;
+      var deletingCard = !!deletingKeys[key];
+      var dotClass = 'dot ' + (online ? (d.connType === 'usb' ? 'usb' : 'wifi') : 'off') + (casting ? ' casting' : '');
+      var retained = inRename && renameCards[key];
+      if (retained && (key.indexOf('pending:') !== 0 || retained.dataset.identityEpoch === String(d.identityEpoch || 0))) {
+        retained.dataset.key = key;
+        retained.dataset.identityEpoch = String(d.identityEpoch || 0);
+        retained.className = 'device-card selected' + (deletingCard ? ' deleting' : '');
+        retained.style.viewTransitionName = 'dev-' + vtSafeName(key);
+        retained.querySelector('.dot').className = dotClass;
+        retained.querySelector('.rename-input').disabled = deletingCard;
+        cards.push(retained);
+        return;
+      }
 
       var card = document.createElement('div');
       card.dataset.key = key; // gui44：拖拽排序 key
+      card.dataset.identityEpoch = String(d.identityEpoch || 0);
       card.className = 'device-card';
       // gui52-fix15：删除中 —— 整卡灰化禁点，视口过渡按 key 命名（删除后下方卡片平滑上移）
-      var deletingCard = !!deletingKeys[key];
       if (deletingCard) card.className += ' deleting';
       card.style.viewTransitionName = 'dev-' + vtSafeName(key);
       var appBarKeys = [], appBarList = [], appBarCount = 0;
@@ -496,7 +553,7 @@
         card.className += selected ? ' selected' : ' dim';
         card.addEventListener('click', function (ev) {
           if (ev.target && ev.target.classList && ev.target.classList.contains('rename-input')) return;
-          toggleBatchSelect(key, lastState);
+          toggleBatchSelect(card.dataset.key, lastState);
         });
       } else {
         // gui53：普通模式所有卡片统一边框（不再给第一张卡单独 .selected 绿框——
@@ -543,7 +600,7 @@
 
       // 状态点：投屏中 = 呼吸绿光动画
       var dot = document.createElement('div');
-      dot.className = 'dot ' + (online ? (d.connType === 'usb' ? 'usb' : 'wifi') : 'off') + (casting ? ' casting' : '');
+      dot.className = dotClass;
 
       var info = document.createElement('div');
       info.className = 'dev-info';
@@ -553,7 +610,8 @@
         rn.type = 'text';
         rn.className = 'rename-input';
         rn.value = (renameDraft[key] !== undefined) ? renameDraft[key] : devDisplayName(d);
-        rn.addEventListener('input', function () { renameDraft[key] = rn.value; });
+        rn.disabled = deletingCard;
+        rn.addEventListener('input', function () { renameDraft[card.dataset.key] = rn.value; });
         rn.addEventListener('click', function (ev) { ev.stopPropagation(); });
         info.appendChild(rn);
       } else {
@@ -752,9 +810,9 @@
         delete renderedBars[key]; // 条子已真退场——下次重新出现时再播入场
       }
 
-      box.appendChild(card);
+      cards.push(card);
     });
-
+    commitDeviceCards(box, cards);
   }
 
   // ---------- 投屏 ----------
@@ -4261,7 +4319,7 @@
   // 空态"去设备"按钮同样只是切 tab（投屏继续运行）
   el('cast-empty-go').addEventListener('click', function () { switchView('devices'); });
 
-  // 轮询间隔 700ms（设备列表 Go 侧 2s 刷一次，这里只拉快照）
+  // 每 700ms 读取后台状态快照，日志与投屏状态可更新；设备连接监测独立运行。
   pollTimer = setInterval(refreshNow, 700);
   refreshNow();
 
