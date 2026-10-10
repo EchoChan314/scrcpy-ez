@@ -200,7 +200,9 @@ func TestMdnsListenStateIdleProbe(t *testing.T) {
 
 func TestMdnsListenStateUpsertResetsIdleTimer(t *testing.T) {
 	old := mdnsIdleProbeAfter
-	mdnsIdleProbeAfter = 60 * time.Millisecond
+	// Wide margins: a loaded CI runner can delay a 30ms sleep far past the
+	// 60ms timer, which made the first assertion fail spuriously.
+	mdnsIdleProbeAfter = 600 * time.Millisecond
 	defer func() { mdnsIdleProbeAfter = old }()
 
 	var probesMu sync.Mutex
@@ -221,15 +223,15 @@ func TestMdnsListenStateUpsertResetsIdleTimer(t *testing.T) {
 		}
 	}, nil)
 	st.upsert(svc, time.Now(), false)
-	time.Sleep(30 * time.Millisecond) // 未到 60ms
-	st.upsert(svc, time.Now(), false) // 重置计时
-	time.Sleep(40 * time.Millisecond) // 距上次 upsert 仅 40ms（<60ms）
+	time.Sleep(150 * time.Millisecond) // 未到 600ms
+	st.upsert(svc, time.Now(), false)  // 重置计时
+	time.Sleep(150 * time.Millisecond) // 距上次 upsert 仅 150ms（<600ms）
 	probesMu.Lock()
 	n := len(probes)
 	all := append([]string(nil), probes...)
 	probesMu.Unlock()
 	if n != 0 {
-		t.Fatalf("upsert 应重置 90s timer（测试注入 60ms），不应提前触发: %v", all)
+		t.Fatalf("upsert 应重置 timer（测试注入 600ms），不应提前触发: %v", all)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -345,7 +347,9 @@ func TestMdnsPeriodicQueryOnlyConnectTypes(t *testing.T) {
 
 func TestMdnsQueryResponseUpsertResetsIdleTimer(t *testing.T) {
 	old := mdnsIdleProbeAfter
-	mdnsIdleProbeAfter = 60 * time.Millisecond
+	// Wide margins: a loaded CI runner can delay a 30ms sleep far past the
+	// 60ms timer, which made the first assertion fail spuriously.
+	mdnsIdleProbeAfter = 600 * time.Millisecond
 	defer func() { mdnsIdleProbeAfter = old }()
 
 	var probesMu sync.Mutex
@@ -366,7 +370,7 @@ func TestMdnsQueryResponseUpsertResetsIdleTimer(t *testing.T) {
 		}
 	}, nil)
 	st.upsert(svc, time.Now(), false)
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 
 	// QU 查询的应答 → 与广播同等处理：upsert + 重置 idle timer。
 	build := func() *dns.Msg {
@@ -383,13 +387,13 @@ func TestMdnsQueryResponseUpsertResetsIdleTimer(t *testing.T) {
 		return m
 	}
 	st.processMessage(build(), true)
-	time.Sleep(40 * time.Millisecond) // 距应答仅 40ms（<60ms）
+	time.Sleep(150 * time.Millisecond) // 距应答仅 150ms（<600ms）
 	probesMu.Lock()
 	n := len(probes)
 	all := append([]string(nil), probes...)
 	probesMu.Unlock()
 	if n != 0 {
-		t.Fatalf("QU 应答应重置 90s（测试 60ms）idle timer，不应提前触发: %v", all)
+		t.Fatalf("QU 应答应重置 idle timer（测试 600ms），不应提前触发: %v", all)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"debug/pe"
+	_ "embed"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -30,7 +31,25 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
-var requiredFiles = []string{"scrcpy-ez.exe", "scrcpy.exe", "scrcpy-server", "scrcpy-server-legacy", "adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "SDL3.dll", "投屏支持.bat"}
+// 更新包必需文件清单的唯一真源是本包的 required-runtime.txt（供 go:embed），
+// packaging/verify_package.py 直接读取同一文件，避免两边手改不同步。
+//
+//go:embed required-runtime.txt
+var requiredRuntimeList string
+
+var requiredFiles = parseRequiredRuntime(requiredRuntimeList)
+
+func parseRequiredRuntime(list string) []string {
+	var names []string
+	for _, line := range strings.Split(list, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		names = append(names, line)
+	}
+	return names
+}
 
 type File struct {
 	Name   string `json:"name"`

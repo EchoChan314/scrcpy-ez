@@ -1,0 +1,9 @@
+name: Mark release scripts executable
+description: Git checkout on Linux does not preserve the executable bit reliably; mark the scripts invoked by release/*.sh before running them.
+
+runs:
+  using: composite
+  steps:
+    - name: chmod release scripts
+      shell: bash
+      run: git ls-files -z -- '*.sh' gradlew run bump_version | xargs -0 chmod +x

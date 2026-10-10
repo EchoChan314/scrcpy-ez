@@ -24,8 +24,13 @@ if not defined SCEZ_EVENT_KIND (
     if not errorlevel 1 set "ROUTE_WIRELESS=1"
 )
 set "SCRCPY_SERVER_PATH=%~dp0scrcpy-server"
-set "ADB=adb"
-if exist "%~dp0adb.exe" set "ADB=%~dp0adb.exe"
+rem Only use bundled adb.exe (PATH fallback removed to prevent hijack)
+if not exist "%~dp0adb.exe" (
+    echo [ERROR] adb.exe not found in script directory.
+    echo [ERROR] PATH fallback disabled for security. Please reinstall.
+    exit /b 1
+)
+set "ADB=%~dp0adb.exe"
 set "SCRIPT_DIR=%~dp0"
 
 rem ----- 串流参数：有线 USB 带宽充足用高规格；无线带宽有限保持低延迟 -----
@@ -54,7 +59,12 @@ set "LEGACY_DEVICE="
 set "SDK_VER="
 set "SDK_IS_NUM="
 rem 命令必须把 !ADB! 用引号包住：路径含空格，未加引号时 FOR /F 只会执行到第一个空格
-for /f "tokens=1" %%v in ('"!ADB!" -s !PICK! shell getprop ro.build.version.sdk 2^>nul') do if not defined SDK_VER set "SDK_VER=%%v"
+rem The supervisor already read the SDK with the transport identity; reuse it.
+if defined SCEZ_EVENT_SDK set "SDK_VER=!SCEZ_EVENT_SDK!"
+rem FOR /F runs its command before the loop body: guard the whole loop, not just the assignment.
+if not defined SDK_VER (
+    for /f "tokens=1" %%v in ('"!ADB!" -s !PICK! shell getprop ro.build.version.sdk 2^>nul') do set "SDK_VER=%%v"
+)
 rem 只信任纯数字版本号：getprop 失败/异常输出时保持默认 uhid，高版本零污染
 if defined SDK_VER for /f "delims=0123456789" %%d in ("!SDK_VER!") do if not "%%d"=="" set "SDK_IS_NUM=1"
 if not defined SDK_IS_NUM if defined SDK_VER (
@@ -286,6 +296,17 @@ if "!VD_ON!"=="1" (
         if "!VD_AUDIO!"=="both" set "VD_ARGS=!VD_ARGS! --audio-dup"
         if defined SCEZ_START_APP set "VD_ARGS=!VD_ARGS! --start-app=!SCEZ_START_APP!"
         if defined SCEZ_WIN_TITLE set "VD_ARGS=!VD_ARGS! --window-title=!SCEZ_WIN_TITLE!"
+rem Perspective camera (v2.5.0): mode-specific value first, then the global one.
+set "PERSPECTIVE="
+if "!VD_WIRE!"=="0" set "PERSPECTIVE=!SCEZ_PERSPECTIVE_CAMERA_USB!"
+if "!VD_WIRE!"=="1" set "PERSPECTIVE=!SCEZ_PERSPECTIVE_CAMERA_WIFI!"
+if not defined PERSPECTIVE set "PERSPECTIVE=!SCEZ_PERSPECTIVE_CAMERA!"
+set "PERSPECTIVE_FPS="
+if "!VD_WIRE!"=="0" set "PERSPECTIVE_FPS=!SCEZ_PERSPECTIVE_INPUT_FPS_USB!"
+if "!VD_WIRE!"=="1" set "PERSPECTIVE_FPS=!SCEZ_PERSPECTIVE_INPUT_FPS_WIFI!"
+if not defined PERSPECTIVE_FPS set "PERSPECTIVE_FPS=!SCEZ_PERSPECTIVE_INPUT_FPS!"
+if "!PERSPECTIVE!"=="1" set "VD_ARGS=!VD_ARGS! --perspective-camera"
+if "!PERSPECTIVE!"=="1" if defined PERSPECTIVE_FPS set "VD_ARGS=!VD_ARGS! --perspective-input-fps=!PERSPECTIVE_FPS!"
         rem ABR 锁定（GUI 窗口设置「锁定」）：锁定维度不被自适应调整
         if "!VD_WIRE!"=="0" (
             if defined SCEZ_VD_LOCK_FPS_USB set "VD_ARGS=!VD_ARGS! --abr-lock-fps"
@@ -311,6 +332,8 @@ for /f "tokens=2 delims=:" %%c in ('chcp') do set "OLD_CP=%%c"
 set "OLD_CP=!OLD_CP: =!"
 if not defined OLD_CP set "OLD_CP=936"
 rem ----- 声音档位（v2.1.78）：phone=--no-audio / both=--audio-dup（pc=不加参数；虚拟屏走上方 VD 段映射）-----
+rem Main cast window title (virtual displays already get it via VD_ARGS).
+if not "!VD_ON!"=="1" if defined SCEZ_WIN_TITLE set "CAST_ARGS=!CAST_ARGS! --window-title=!SCEZ_WIN_TITLE!"
 if not "!VD_ON!"=="1" (
     if "!AUDIO_MODE!"=="phone" set "CAST_ARGS=!CAST_ARGS! --no-audio"
     if "!AUDIO_MODE!"=="both" set "CAST_ARGS=!CAST_ARGS! --audio-dup"

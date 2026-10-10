@@ -19,7 +19,11 @@ allprojects {
         google()
         mavenCentral()
     }
+    // The server keeps minSdk 21 compatibility, so it must call framework APIs
+    // that newer SDKs deprecated (Looper.prepareMainLooper, Display.getRealMetrics,
+    // BaseBundle.get, …). Reporting them on every release build only adds noise
+    // to the CI annotations, so deprecation warnings stay off.
     tasks.withType(JavaCompile) {
-        options.compilerArgs << "-Xlint:deprecation"
+        options.compilerArgs << "-Xlint:-deprecation"
     }
 }
