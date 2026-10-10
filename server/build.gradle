@@ -22,6 +22,12 @@ android {
     }
     lint {
         disable 'UseRequiresApi'
+        // The server is injected via app_process under the adb shell uid and
+        // reaches hidden framework APIs (ActivityTaskManager.getService, …) by
+        // reflection by design — that is how scrcpy controls app tasks and
+        // virtual displays. Lint's BlockedPrivateApi check is meant for regular
+        // apps and flags those reflective calls as fatal under targetSdk 36.
+        disable 'BlockedPrivateApi'
     }
 }
 

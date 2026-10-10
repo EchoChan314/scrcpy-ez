@@ -1,0 +1,12 @@
+# apt 包清单（CI 缓存 key 的唯一输入）：改动本文件即让 apt 缓存失效。
+# win64 交叉编译只需要 x86_64-w64-mingw32-*；不装 mingw-w64 元包，
+# 以避免连带下载 i686 那半套（约 137MB）。posix/win32 两个变体都保留。
+meson
+ninja-build
+nasm
+mingw-w64-tools
+libz-mingw-w64-dev
+binutils-mingw-w64-x86-64
+mingw-w64-x86-64-dev
+gcc-mingw-w64-x86-64
+g++-mingw-w64-x86-64
