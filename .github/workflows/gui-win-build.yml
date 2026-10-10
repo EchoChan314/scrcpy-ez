@@ -1,22 +1,157 @@
-name: gui-win-build
+name: build ez win64 full release
 
+# 完整发版流水线（原独立文件 build-release.yml 已并入本文件）：
+# 源码一有更新就自动构建「完整发行包」——投屏引擎（scrcpy.exe 等 win64
+# 客户端 + Android server）+ v2.0 GUI 壳（scrcpy-ez.exe）+ 投屏支持.bat
+# （GUI 启动投屏所需的 bat，取自 packaging/投屏启动.bat），打成一个 zip
+# 发布到 GitHub Release，本地用 update-scrcpy-ez.ps1 一键拉取。
+#
+# 说明：文件名沿用上游的 gui-win-build.yml（fork 的 workflow 文件集合与上游
+# 保持一致），但内容已扩为完整发版流水线：build-gui job 产出的 GUI 壳
+# （artifact 名保持 scrcpy-ez-win64）与整包打包/发布都在这里完成。
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - 'gui-*'
+    branches: [ master ]
+  workflow_dispatch:
+
+# 同一分支连推时取消上一轮未完成的构建，避免重复跑整条发行流水线。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-scrcpy-server:
+    runs-on: ubuntu-latest
+    env:
+      GRADLE: gradle
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Mark release scripts executable
+        uses: ./.github/actions/mark-scripts-executable
+
+      - name: Build server
+        run: release/build_server.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/scrcpy-server
+
+  build-win64-client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # app/deps/work 存放依赖的源码/构建树/安装产物；各依赖脚本本就支持增量
+      # （源在跳过下载、build 目录在跳过 configure），命中缓存后 make 近乎空转，
+      # 省去每次从源码重编 SDL2/dav1d/ffmpeg/libusb。
+      # key 含 app/deps/** 哈希：依赖版本或脚本一变即自动失效并重建。
+      - name: Cache win64 deps
+        uses: actions/cache@v4
+        with:
+          path: app/deps/work
+          key: win64-deps-${{ runner.os }}-${{ hashFiles('app/deps/**', 'release/build_windows.sh', 'release/build_common') }}
+          restore-keys: |
+            win64-deps-${{ runner.os }}-
+
+      # apt 的 .deb 缓存到 runner 可写目录（/var/cache 归 root，无法直接缓存），
+      # 配合 APT::Keep-Downloaded-Packages 让 apt 装完不删包：命中缓存后 apt
+      # 直接用本地包，不再走网络下载。key 只绑定包清单文件，改包清单才失效，
+      # 改 workflow 其它无关内容不会白白重建缓存。
+      # 背景：2026-10-09 那次 azure 镜像降速到 20~130 KB/s，单是 apt 装交叉
+      # 工具链就耗了 51 分钟（约 280MB），而真正的构建只用了 15 秒。
+      - name: Cache apt archives
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: win64-apt-${{ runner.os }}-${{ hashFiles('.github/apt-packages.txt') }}
+          restore-keys: |
+            win64-apt-${{ runner.os }}-
+
+      # win64 只用 x86_64-w64-mingw32-*（见 cross_win64.txt），原来的
+      # mingw-w64 元包会连带装 i686 那半套（约 137MB，占下载量近一半，且是那次
+      # 最慢的几个包），故改为只装 x86-64 子集：posix/win32 两个变体都保留，
+      # 与原先 alternatives 选出的编译器完全一致，不改变构建行为。
+      # 包清单见 .github/apt-packages.txt（同时作为缓存 key 的输入）。
+      # Acquire::Retries 抗镜像抖动；timeout-minutes 让镜像再出问题时快速失败，
+      # 而不是像上次那样干等 50 分钟。
+      - name: Install dependencies
+        timeout-minutes: 15
+        run: |
+          mkdir -p "$HOME/apt-archives/partial"
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -y \
+             -o Acquire::Retries=5 \
+             -o APT::Keep-Downloaded-Packages=true \
+             -o Dir::Cache::archives="$HOME/apt-archives" \
+             install $(grep -v '^\s*#' .github/apt-packages.txt | xargs)
+          # apt 以 root 写这个缓存目录，留下的 lock/partial 归 root 且不可读，
+          # 会让 actions/cache 收尾保存时报 tar 权限错误、缓存等于白存。
+          # 只留可读的 .deb，并把属主交回 runner 用户。
+          sudo rm -f "$HOME/apt-archives/lock"
+          sudo rm -rf "$HOME/apt-archives/partial"
+          sudo chown -R "$(id -u):$(id -g)" "$HOME/apt-archives"
+
+      - name: Mark release scripts executable
+        uses: ./.github/actions/mark-scripts-executable
+
+      - name: Build win64 client
+        run: release/build_windows.sh 64
+
+      - name: Tar
+        run: |
+          cd release/work/build-win64
+          mkdir dist-tar
+          cd dist-tar
+          tar -C .. -cvf dist.tar dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-win64-intermediate
+          path: release/work/build-win64/dist-tar/
+
+  build-gui:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v6
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.23.x'
+          go-version: '1.26.x'
+          cache-dependency-path: gui/go.sum
+
+      - name: Test GUI (regression)
+        working-directory: gui
+        shell: pwsh
+        run: |
+          $env:GOPROXY = 'https://goproxy.cn,direct'
+          go mod tidy
+          # tidy 只允许作为校验手段：若它改动了 go.mod/go.sum 说明提交的依赖文件
+          # 与代码不一致，直接失败，避免依赖文件在构建时被静默改写。
+          # 先落地差异再判定，避免管道包装下的 diff 输出被吞掉。
+          git --no-pager diff -- go.mod go.sum | Out-Host
+          # setup-go 在这台 Windows runner 上会以 autocrlf=true 运行，diff 的
+          # 换行符提示不能当作依赖漂移；这里只看内容是否真的变了。
+          git -c core.autocrlf=false diff --quiet -- go.mod go.sum
+          if ($LASTEXITCODE -ne 0) { throw 'go.mod/go.sum 与提交不一致，请本地运行 go mod tidy' }
+          go test ./...
 
       - name: Build GUI (trimpath, windowsgui)
         working-directory: gui
@@ -26,8 +161,123 @@ jobs:
           go build -trimpath -ldflags="-s -w -H windowsgui" -o dist/scrcpy-ez.exe .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scrcpy-ez-win64
           path: gui/dist/scrcpy-ez.exe
           if-no-files-found: error
+
+  package:
+    needs:
+      - build-scrcpy-server
+      - build-win64-client
+      - build-gui
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v8
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-win64
+        uses: actions/download-artifact@v8
+        with:
+          name: build-win64-intermediate
+          path: release/work/build-win64/dist-tar/
+
+      - name: Download GUI exe
+        uses: actions/download-artifact@v8
+        with:
+          name: scrcpy-ez-win64
+          path: gui-dist/
+
+      - name: Detar
+        run: |
+          cd release/work/build-win64
+          tar xf dist-tar/dist.tar
+
+      - name: Mark release scripts executable
+        uses: ./.github/actions/mark-scripts-executable
+
+      - name: Package client + server (base zip)
+        run: release/package_client.sh win64 zip
+
+      - name: Inject GUI shell and launcher bat
+        run: |
+          cd release/output
+          # 仅允许一个基础包，出现多个就说明打包环节不符合预期，直接失败。
+          shopt -s nullglob
+          zips=(scrcpy-win64-*.zip)
+          if [[ ${#zips[@]} -ne 1 ]]; then
+            echo "expected exactly one scrcpy-win64-*.zip, found ${#zips[@]}" >&2
+            exit 1
+          fi
+          BASE=${zips[0]}
+          # 发行目录名固定为 scrcpy-win64-<version>（见 release/package_client.sh），
+          # 由包名直接推导，避免依赖解压后的目录数量。
+          ROOT="${BASE%.zip}"
+          TARGET_DIR="stage/$ROOT"
+          unzip -q "$BASE" -d stage
+          if [[ ! -d "$TARGET_DIR" ]]; then
+            echo "unexpected archive layout: $TARGET_DIR not found" >&2
+            exit 1
+          fi
+          cp "$GITHUB_WORKSPACE/gui-dist/scrcpy-ez.exe" "$TARGET_DIR"
+          # GUI 默认找 exe 同目录的「投屏支持.bat」；仓库内其源文件为
+          # packaging/投屏启动.bat，发行时复制改名，保证开箱即用。
+          # 该 bat 必须 CRLF 检出（见 .gitattributes），否则 cmd.exe 解析失败。
+          cp "$GITHUB_WORKSPACE/packaging/投屏启动.bat" "$TARGET_DIR/投屏支持.bat"
+          # 发布包为平铺结构（verify_package.py 与更新器都要求条目在 zip 根下，
+          # 不带发行目录前缀），因此进入发行目录再打包。
+          (cd "$TARGET_DIR" && zip -qr "$GITHUB_WORKSPACE/release/output/scrcpy-ez-win64.zip" .)
+          rm -rf stage "$BASE"
+          ls -la scrcpy-ez-win64.zip
+
+      # CI 包是自用构建包（不含 README/LICENSE 等正式发行附加项），只校验
+      # A 级运行时清单（gui/internal/updater/required-runtime.txt，与更新器共用）。
+      - name: Verify package (CI runtime only)
+        run: python3 packaging/verify_package.py --ci release/output/scrcpy-ez-win64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-full-win64
+          path: release/output/scrcpy-ez-win64.zip
+
+  publish-release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download full win64 package
+        uses: actions/download-artifact@v8
+        with:
+          name: release-full-win64
+          path: out
+
+      - name: Publish build release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd out
+          ls -la
+          # One release per build, tagged with the exact commit: the
+          # auto-generated "Source code" archives then always match the
+          # binary. A rolling tag cannot be moved from Actions (the git
+          # refs API is 403 for the GITHUB_TOKEN on this fork), which is
+          # why the previous latest-build release drifted.
+          TAG="build-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA:0:7}"
+          gh release create "$TAG" \
+            --title "scrcpy-ez build ${GITHUB_SHA:0:7}" \
+            --notes "commit $GITHUB_SHA | built $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            scrcpy-ez-win64.zip
+          # Prune old build releases, keeping only the newest; --cleanup-tag also
+          # deletes the tag so build-* refs do not accumulate.
+          gh release list --limit 50 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("build-"))] | sort_by(.createdAt) | reverse | .[1:][] | .tagName' \
+            | xargs -r -n1 sh -c 'gh release delete "$0" --yes --cleanup-tag'
+          echo "Published: https://github.com/$GH_REPO/releases/tag/$TAG"

@@ -1,0 +1,12 @@
+# 运行时必需文件（单一真源）。
+# 由 gui/internal/updater（更新包校验）与 packaging/verify_package.py（发行包校验）共同读取。
+# 只列「任何可运行包都必须有」的文件；README/LICENSE/图标许可/profiles.json/
+# FILE_SHA256SUMS.txt 这类正式发行包附加项属于 B 级，写在 verify_package.py 里。
+scrcpy-ez.exe
+scrcpy.exe
+scrcpy-server
+adb.exe
+AdbWinApi.dll
+AdbWinUsbApi.dll
+SDL3.dll
+投屏支持.bat
