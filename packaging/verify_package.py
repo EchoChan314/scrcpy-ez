@@ -6,8 +6,12 @@ import re
 import sys
 import zipfile
 
+# scrcpy-ez fork: 移除 'scrcpy-server-legacy'。
+# 上游 v2.4.0 已将其定性为历史备份（协议与 5.0.1 客户端不同，不可与当前客户端
+# 混用，回退应恢复完整旧包），且 CI、release/ 脚本与 package.ps1 均不产出该文件，
+# git 历史中也从未提交过；保留在必需集合里会让自动构建的包一律校验失败。
 REQUIRED = {
-    'scrcpy-ez.exe', 'scrcpy.exe', 'scrcpy-server', 'scrcpy-server-legacy',
+    'scrcpy-ez.exe', 'scrcpy.exe', 'scrcpy-server',
     'adb.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll', 'SDL3.dll',
     'WebView2Loader.dll', '投屏支持.bat', 'profiles.json', 'README.txt',
     'LICENSE.txt', 'Lucide图标许可.txt', 'FILE_SHA256SUMS.txt',
