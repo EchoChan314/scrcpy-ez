@@ -30,7 +30,14 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
-var requiredFiles = []string{"scrcpy-ez.exe", "scrcpy.exe", "scrcpy-server", "scrcpy-server-legacy", "adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "SDL3.dll", "投屏支持.bat"}
+// scrcpy-ez fork: 不再把 scrcpy-server-legacy 列为更新包必需文件。
+//
+// 上游 v2.4.0 已将其定性为历史备份——其协议与 5.0.1 客户端不同，不可与当前
+// 客户端混用，回退应恢复完整旧包（见 docs/release-2.4.0.md 与投屏启动.bat 注释）。
+// 同时，CI 工作流、release/ 脚本与 packaging/package.ps1 均不产出该文件，git
+// 历史中也从未作为文件提交过。因此保留在必需清单里，会让任何自动构建出的
+// 更新包都无法通过校验（报错「更新包缺少 scrcpy-server-legacy」）。
+var requiredFiles = []string{"scrcpy-ez.exe", "scrcpy.exe", "scrcpy-server", "adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "SDL3.dll", "投屏支持.bat"}
 
 type File struct {
 	Name   string `json:"name"`
