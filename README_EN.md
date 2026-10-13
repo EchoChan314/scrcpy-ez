@@ -101,6 +101,8 @@ New phone notifications can appear in Windows whenever a paired device has an ac
 
 Copy a detected code by clicking its body or copy button. On Xiaomi system SMS notifications, a separate code field may remain available while the phone is locked; ez can display and copy that field. If both text and code are hidden, ez only has the system-supplied summary, and code-only mode skips notifications without a recognizable code. This depends on the ROM and source app; tested on REDMI K80 / Android 16, with other brands not yet individually verified.
 
+<p align="center"><img src="images/notify-code.png" alt="Verification code notification" width="480"></p>
+
 ### 🔋 Keep the Phone Awake During Main Mirroring
 
 The global **keep-awake setting is enabled by default** for wired and wireless main mirroring on all devices. Changes apply after restarting main mirroring. Ending main mirroring restores normal idle sleep; app mirroring does not enable keep-awake. **Ctrl+P** still locks or wakes the phone manually, and holding the shortcut does not send a long power-button press.
