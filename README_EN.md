@@ -95,6 +95,16 @@ Open the **Specs panel** to adjust the mirroring parameters for the current devi
 
 <p align="center"><img src="images/gui-spec.png" alt="Specs panel" width="480"></p>
 
+### 📱 App Casting (App Windows)
+
+Beyond full-device mirroring, cast a **single app** from the phone to the PC and run it in its own window — several apps can be cast at once, fully independent of each other. Click **App windows** in the Window Overview and pick an app from the list to start; the overview lets you check each app window's status, adjust its settings, stop it individually, or close all at once.
+
+App windows prefer to **keep the task already in use on the phone**: open pages are carried over without restarting the app. If the app is in use, ez asks for confirmation ("Close and cast") before moving over, so unsaved content is never silently lost; when a restart or an incompatible layout gets in the way, ez gives a clear prompt with explicit choices.
+
+<p align="center"><img src="images/appwin-overview.png" alt="App window overview" width="480"></p>
+
+<p align="center"><img src="images/appwin-apps.png" alt="App picker" width="480"></p>
+
 ### 🔔 Phone Notifications and Verification Codes
 
 New phone notifications can appear in Windows whenever a paired device has an active ADB connection. **Mirroring and a companion phone app are not required.** Configure global, per-device and per-app rules, code-only delivery, message previews and copy retention. Notification management is available from the app-window panel and batch management.
