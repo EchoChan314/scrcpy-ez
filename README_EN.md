@@ -121,14 +121,6 @@ Copy a detected code by clicking its body or copy button. On Xiaomi system SMS n
 
 <p align="center"><img src="images/notify-batch.png" alt="Batch notification settings" width="480"></p>
 
-### 🔋 Keep the Phone Awake During Main Mirroring
-
-The global **keep-awake setting is enabled by default** for wired and wireless main mirroring on all devices. Changes apply after restarting main mirroring. Ending main mirroring restores normal idle sleep; app mirroring does not enable keep-awake. **Ctrl+P** still locks or wakes the phone manually, and holding the shortcut does not send a long power-button press.
-
-### 🔧 Upload Permission Repair for Rooted Devices
-
-Normal devices retain the usual startup flow. On an already rooted device, enable automatic root repair in its specs panel. Repair starts only after a server upload permission error and requires authorizing the Shell `su` request on the phone. It repairs the server directory/file permissions and labels, then runs the server as ordinary Shell. Automated regression tests pass; repair on a physical rooted device remains unverified.
-
 ### 🎮 Shortcuts
 
 | Shortcut | Function |
@@ -195,6 +187,8 @@ ninja -C build
 ---
 
 > 💻 **Requirements**: Windows 10 / 11 (64-bit). The GUI relies on the Microsoft WebView2 Runtime — included in Windows 11; most Windows 10 systems already have it via system updates (if missing, install the Evergreen Runtime from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/)). All other components are bundled — no extra runtimes needed.
+
+> 🔧 **Rooted devices**: if the mirroring server hits an upload permission error, enable automatic root repair from the Specs panel (authorize the Shell `su` request on the phone); normal devices keep the standard flow. Automated regression tests pass; on-device verification pending.
 
 ## 📄 License
 
