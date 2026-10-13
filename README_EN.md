@@ -101,9 +101,9 @@ Beyond full-device mirroring, cast a **single app** from the phone to the PC and
 
 App windows prefer to **keep the task already in use on the phone**: open pages are carried over without restarting the app. If the app is in use, ez asks for confirmation ("Close and cast") before moving over, so unsaved content is never silently lost; when a restart or an incompatible layout gets in the way, ez gives a clear prompt with explicit choices.
 
-<p align="center"><img src="images/appwin-overview.png" alt="App window overview" width="480"></p>
-
 <p align="center"><img src="images/appwin-apps.png" alt="App picker" width="480"></p>
+
+<p align="center"><img src="images/appwin-overview.png" alt="App window overview" width="480"></p>
 
 ### 🔔 Phone Notifications and Verification Codes
 
@@ -112,6 +112,12 @@ New phone notifications can appear in Windows whenever a paired device has an ac
 Copy a detected code by clicking its body or copy button. On Xiaomi system SMS notifications, a separate code field may remain available while the phone is locked; ez can display and copy that field. If both text and code are hidden, ez only has the system-supplied summary, and code-only mode skips notifications without a recognizable code. This depends on the ROM and source app; tested on REDMI K80 / Android 16, with other brands not yet individually verified.
 
 <p align="center"><img src="images/notify-code.png" alt="Verification code notification" width="480"></p>
+
+**App notifications** are managed per app: in the app-notification panel, click an app icon to toggle its notification sync, with the allowed app count shown below the list (right-click to invert the selection). The **Dark Notifications** entry at the end of the list covers **sources outside the app list** (the complement of the apps shown) — when checked, sources not in the list (such as system notifications) are delivered as well; when unchecked, only the checked apps are. Multiple devices can also be configured together in **Batch Management**: turn notification sync off, code-only, or enable all app notifications.
+
+<p align="center"><img src="images/notify-apps.png" alt="App notification panel" width="480"></p>
+
+<p align="center"><img src="images/notify-batch.png" alt="Batch notification settings" width="480"></p>
 
 ### 🔋 Keep the Phone Awake During Main Mirroring
 
