@@ -115,6 +115,8 @@ Copy a detected code by clicking its body or copy button. On Xiaomi system SMS n
 
 **App notifications** are managed per app: in the app-notification panel, click an app icon to toggle its notification sync, with the allowed app count shown below the list (right-click to invert the selection). The **Dark Notifications** entry at the end of the list covers **sources outside the app list** (the complement of the apps shown) — when checked, sources not in the list (such as system notifications) are delivered as well; when unchecked, only the checked apps are. Multiple devices can also be configured together in **Batch Management**: turn notification sync off, code-only, or enable all app notifications.
 
+**Click a notification to jump into casting** (per-device toggle, enabled by default): once enabled, clicking a Windows notification takes you **straight to the corresponding app** — click a WeChat message notification, and you land right in WeChat inside the casting window. It matches the behavior you already expect from notifications — intuitive by nature; verification-code notifications remain copy-only and never jump.
+
 <p align="center"><img src="images/notify-apps.png" alt="App notification panel" width="480"></p>
 
 <p align="center"><img src="images/notify-batch.png" alt="Batch notification settings" width="480"></p>
