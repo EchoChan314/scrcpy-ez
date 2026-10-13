@@ -121,6 +121,12 @@ Copy a detected code by clicking its body or copy button. On Xiaomi system SMS n
 
 <p align="center"><img src="images/notify-batch.png" alt="Batch notification settings" width="480"></p>
 
+### 📲 Device Notification & Stop from Phone
+
+While mirroring, a persistent "scrcpy-ez is mirroring" notification appears on the phone (tablet) — **tap it to stop mirroring directly from the device**, no need to return to the PC. The notification disappears automatically when mirroring stops.
+
+<p align="center"><img src="images/notify-stop.jpeg" alt="Device notification" width="600"></p>
+
 ### 🎮 Shortcuts
 
 | Shortcut | Function |
@@ -137,12 +143,6 @@ Copy a detected code by clicking its body or copy button. On Xiaomi system SMS n
 <p align="center"><img src="images/overlay-indicator-1.png" alt="Pin indicator 1" width="380"></p>
 
 <p align="center"><img src="images/overlay-indicator-2.png" alt="Pin indicator 2" width="380"></p>
-
-### 📲 Device Notification & Stop from Phone
-
-While mirroring, a persistent "scrcpy-ez is mirroring" notification appears on the phone (tablet) — **tap it to stop mirroring directly from the device**, no need to return to the PC. The notification disappears automatically when mirroring stops.
-
-<p align="center"><img src="images/notify-stop.jpeg" alt="Device notification" width="600"></p>
 
 ---
 

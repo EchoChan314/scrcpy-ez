@@ -121,6 +121,12 @@
 
 <p align="center"><img src="images/notify-batch.png" alt="批量管理通知设置" width="480"></p>
 
+### 📲 手机端通知与主动停止投屏
+
+投屏时，设备通知栏会显示一条常驻的「scrcpy-ez 正在投屏」通知——**点按通知即可直接从手机（平板）停止投屏**，无需回到电脑操作；投屏结束后通知会自动撤下。
+
+<p align="center"><img src="images/notify-stop.jpeg" alt="手机端通知" width="600"></p>
+
 ### 🎮 快捷键
 
 | 快捷键 | 功能 |
@@ -137,12 +143,6 @@
 <p align="center"><img src="images/overlay-indicator-1.png" alt="置顶指示灯 1" width="380"></p>
 
 <p align="center"><img src="images/overlay-indicator-2.png" alt="置顶指示灯 2" width="380"></p>
-
-### 📲 手机端通知与主动停止投屏
-
-投屏时，设备通知栏会显示一条常驻的「scrcpy-ez 正在投屏」通知——**点按通知即可直接从手机（平板）停止投屏**，无需回到电脑操作；投屏结束后通知会自动撤下。
-
-<p align="center"><img src="images/notify-stop.jpeg" alt="手机端通知" width="600"></p>
 
 ---
 
