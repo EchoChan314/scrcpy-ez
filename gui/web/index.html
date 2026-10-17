@@ -162,7 +162,10 @@
     <div class="appwin-grid" id="appwin-modal-grid"><div class="appwin-loading">正在读取应用列表…</div></div>
     <div class="appwin-bottom">
       <div class="appwin-hint" id="appwin-modal-hint" role="status">点击应用 → 在独立窗口打开</div>
-      <button class="notification-options-trigger" id="notification-options" type="button" aria-expanded="false" aria-controls="notification-options-panel" style="display:none"><svg class="notification-symbol" viewBox="0 0 24 24" aria-hidden="true" data-notification-icon="sliders-horizontal"></svg>通知选项<svg class="notification-chevron" viewBox="0 0 24 24" aria-hidden="true" data-notification-icon="chevron-down"></svg></button>
+      <div class="appwin-bottom-actions">
+        <div class="appwin-read-status" id="appwin-read-status" style="display:none" role="status" aria-live="polite"><span id="appwin-read-message"></span><button class="btn tiny" id="appwin-read-retry" type="button" style="display:none">重试</button></div>
+        <button class="notification-options-trigger" id="notification-options" type="button" aria-expanded="false" aria-controls="notification-options-panel" style="display:none"><svg class="notification-symbol" viewBox="0 0 24 24" aria-hidden="true" data-notification-icon="sliders-horizontal"></svg>通知选项<svg class="notification-chevron" viewBox="0 0 24 24" aria-hidden="true" data-notification-icon="chevron-down"></svg></button>
+      </div>
     </div>
     <div id="notification-options-panel" class="notification-options-panel" style="display:none">
       <div class="notification-device-options" role="group" aria-label="当前设备通知选项">
@@ -280,7 +283,7 @@
   </div>
 </div>
 
-<!-- ================= 设置面板（右上角齿轮；两个开关，独立 settings.json 持久化） ================= -->
+<!-- ================= 设置面板（独立 settings.json 持久化） ================= -->
 <div class="modal-mask" id="notification-batch-modal" style="display:none">
   <div class="modal-card notification-batch-card" role="dialog" aria-modal="true" aria-labelledby="notification-batch-title">
     <div class="modal-head"><b id="notification-batch-title">通知管理</b><button class="modal-close notification-close" id="notification-batch-close" type="button" aria-label="关闭通知管理"><svg class="notification-symbol" viewBox="0 0 24 24" data-notification-icon="x" aria-hidden="true"></svg></button></div>
@@ -293,8 +296,11 @@
   </div>
 </div>
 <div class="modal-mask" id="settings-modal" style="display:none">
-  <div class="modal-card">
-    <div class="modal-head"><b>设置</b><span class="modal-close" id="settings-close">✕</span></div>
+  <div class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-head"><b id="settings-title">设置</b><span class="modal-close" id="settings-close">✕</span></div>
+    <div class="settings-body">
+    <section class="settings-section" aria-labelledby="settings-window-title">
+    <h3 class="settings-section-title" id="settings-window-title">窗口与显示</h3>
     <div class="set-row">
       <div class="set-main">
         <div class="set-title">启动投屏时显示参数控件</div>
@@ -304,6 +310,16 @@
     </div>
     <div class="set-row">
       <div class="set-main">
+        <div class="set-title">关闭窗口时最小化到托盘</div>
+        <div class="set-note">关闭后窗口收进托盘、投屏不中断，托盘菜单可恢复或退出</div>
+      </div>
+      <div class="switch" id="set-tray" role="switch" aria-checked="false"><span class="knob"></span></div>
+    </div>
+    </section>
+    <section class="settings-section" aria-labelledby="settings-device-title">
+    <h3 class="settings-section-title" id="settings-device-title">设备与应用</h3>
+    <div class="set-row">
+      <div class="set-main">
         <div class="set-title">主投屏期间手机不自动休眠</div>
         <div class="set-note">所有设备的主投屏均适用，有线、无线均可；修改后重新主投屏生效，结束主投屏后恢复正常休眠。应用投屏不受影响，Ctrl+P 仍可手动锁屏</div>
       </div>
@@ -311,17 +327,30 @@
     </div>
     <div class="set-row">
       <div class="set-main">
-        <div class="set-title">关闭窗口时最小化到托盘</div>
-        <div class="set-note">关闭后窗口收进托盘、投屏不中断，托盘菜单可恢复或退出</div>
-      </div>
-      <div class="switch" id="set-tray" role="switch" aria-checked="false"><span class="knob"></span></div>
-    </div>
-    <div class="set-row">
-      <div class="set-main">
         <div class="set-title">应用投屏显示导航栏和桌面</div>
         <div class="set-note">在应用投屏窗口显示导航栏和桌面，方便返回或切换应用，界面或手机手势异常时可关闭，重新打开应用投屏后生效，小米、REDMI、POCO 已自动关闭，不受此开关影响</div>
       </div>
       <div class="switch" id="set-appwin-decor" role="switch" aria-checked="true"><span class="knob"></span></div>
+    </div>
+    </section>
+    <section class="settings-section" aria-labelledby="settings-video-title">
+    <h3 class="settings-section-title" id="settings-video-title">画面体验</h3>
+    <div class="set-row">
+      <div class="set-main">
+        <div class="set-title">自动平滑（实验）</div>
+        <div class="set-note">缓解画面节奏抖动，增加少量延迟；主投屏和应用投屏均适用，重新投屏后生效</div>
+      </div>
+      <div class="switch" id="set-smoothing" role="switch" aria-checked="false" tabindex="0" aria-label="自动平滑"><span class="knob"></span></div>
+    </div>
+    <div class="smoothing-options">
+      <span class="set-note">缓冲上限</span>
+      <div class="smoothing-frames" role="group" aria-label="自动平滑缓冲上限">
+        <button id="set-smoothing-one" type="button" aria-pressed="false" disabled>1 帧</button>
+        <button id="set-smoothing-two" type="button" aria-pressed="true" disabled>2 帧</button>
+      </div>
+    </div>
+    <div class="set-note smoothing-help">1 帧偏低延迟，2 帧多一些缓冲余量；实际等待自动调节，最多 32ms，不补帧。</div>
+    </section>
     </div>
   </div>
 </div>

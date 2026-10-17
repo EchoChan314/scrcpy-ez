@@ -23,7 +23,7 @@ public final class Streamer {
     private final boolean sendStreamMeta;
     private final boolean sendFrameMeta;
 
-    private final ByteBuffer headerBuffer = ByteBuffer.allocate(12);
+    private final ByteBuffer headerBuffer = ByteBuffer.allocate(20);
 
     public Streamer(FileDescriptor fd, Codec codec, boolean sendCodecMeta, boolean sendFrameMeta) {
         this.fd = fd;
@@ -99,6 +99,7 @@ public final class Streamer {
             headerBuffer.putInt(flags);
             headerBuffer.putInt(width);
             headerBuffer.putInt(height);
+            headerBuffer.putLong(0);
             headerBuffer.flip();
             IO.writeFully(fd, headerBuffer);
         }
@@ -119,6 +120,7 @@ public final class Streamer {
 
         headerBuffer.putLong(ptsAndFlags);
         headerBuffer.putInt(packetSize);
+        headerBuffer.putLong(android.os.SystemClock.elapsedRealtimeNanos() / 1000);
         headerBuffer.flip();
         IO.writeFully(fd, headerBuffer);
     }

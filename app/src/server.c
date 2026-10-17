@@ -332,6 +332,8 @@ execute_server(struct sc_server *server,
     if (params->video_bit_rate) {
         ADD_PARAM("video_bit_rate=%" PRIu32, params->video_bit_rate);
     }
+    const char *legacy_abr = getenv("SCEZ_ABR_LEGACY");
+    if (legacy_abr && !strcmp(legacy_abr, "1")) ADD_PARAM("abr_legacy=true");
     if (params->abr_lock_fps) {
         ADD_PARAM("abr_lock_fps=true");
     }

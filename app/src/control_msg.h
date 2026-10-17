@@ -10,6 +10,7 @@
 #include "android/input.h"
 #include "android/keycodes.h"
 #include "coords.h"
+#include "abr_monitor.h"
 #include "hid/hid_event.h"
 
 // 256M: protocol limit for lossless large image clipboard support. Buffers
@@ -60,6 +61,8 @@ enum sc_control_msg_type {
     SC_CONTROL_MSG_TYPE_SAVE_CLIPBOARD_IMAGE_TO_GALLERY,
     SC_CONTROL_MSG_TYPE_SET_CLIPBOARD_VERSIONED,
     SC_CONTROL_MSG_TYPE_SET_IMAGE_CLIPBOARD_VERSIONED,
+    SC_CONTROL_MSG_TYPE_KEEP_AWAKE_HEARTBEAT,
+    SC_CONTROL_MSG_TYPE_ABR_FEEDBACK,
 };
 
 enum sc_copy_key {
@@ -74,6 +77,7 @@ struct sc_control_msg {
     uint64_t clipboard_version;
     uint32_t clipboard_pc_sequence;
     union {
+        struct sc_abr_sample abr_feedback;
         struct {
             enum android_keyevent_action action;
             enum android_keycode keycode;

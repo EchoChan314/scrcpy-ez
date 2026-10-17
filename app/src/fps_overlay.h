@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "util/fps_sample.h"
 
 enum sc_overlay_mode {
     SC_OVERLAY_MODE_USB,
@@ -15,8 +16,7 @@ struct sc_fps_overlay {
     SDL_Texture *texture;      // current text texture (e.g. "60fps 15M USB")
     int tex_w;                 // texture logical width
     int tex_h;                 // texture logical height
-    unsigned frame_count;      // rendered frames in the 500ms window
-    uint64_t last_tick;        // last update time (sc_tick)
+    struct sc_fps_sample sample; // successful new-frame texture submissions
     int fps;                   // currently displayed fps
     int bitrate;               // current ABR bitrate (server-reported)
     int abr_fps;               // ABR target fps level (server-reported)
@@ -34,8 +34,11 @@ struct sc_fps_overlay {
 
 bool sc_fps_overlay_init(struct sc_fps_overlay *overlay, SDL_Renderer *renderer);
 void sc_fps_overlay_destroy(struct sc_fps_overlay *overlay);
-// call once per rendered frame (in sc_screen_apply_frame)
+// call once after each successful new-frame texture update (not redraws)
 void sc_fps_overlay_on_frame(struct sc_fps_overlay *overlay);
+// UI-thread periodic refresh also expires stale rates without new frames.
+bool sc_fps_overlay_refresh(struct sc_fps_overlay *overlay);
+void sc_fps_overlay_reset(struct sc_fps_overlay *overlay);
 // call before present (at the end of sc_screen_render)
 void sc_fps_overlay_draw(struct sc_fps_overlay *overlay, SDL_Renderer *renderer);
 // set the connection mode shown in the overlay (USB / WIFI); marks dirty

@@ -2,6 +2,7 @@
 #define SC_CONTROLLER_H
 
 #include "common.h"
+#include "abr_monitor.h"
 
 #include <stdbool.h>
 
@@ -15,11 +16,13 @@
 struct sc_control_msg_queue SC_VECDEQUE(struct sc_control_msg);
 
 struct sc_controller {
+    struct sc_abr_monitor *abr_monitor; // owned by the connection; outlives threads
     sc_socket control_socket;
     sc_thread thread;
     sc_mutex mutex;
     sc_cond msg_cond;
     bool stopped;
+    bool keep_awake;
 
     struct sc_control_msg_queue queue;
 
@@ -44,6 +47,7 @@ struct sc_controller_callbacks {
 
 bool
 sc_controller_init(struct sc_controller *controller, sc_socket control_socket,
+                   bool keep_awake,
                    const struct sc_controller_callbacks *cbs,
                    void *cbs_userdata);
 

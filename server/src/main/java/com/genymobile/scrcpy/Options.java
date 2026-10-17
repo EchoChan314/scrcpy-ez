@@ -63,6 +63,8 @@ public class Options {
     private boolean downsizeOnError = true;
     // ez 自定义 ABR 锁定（GUI「锁定」按钮）：锁定后该维度不被 ABR 自动调整
     // （fps 锁定=gui79；码率锁定=gui79；双锁=ABR 整体禁用，最稳定）。
+    private boolean abrLegacy;
+    public boolean isAbrLegacy() { return abrLegacy; }
     private boolean abrLockFps;
     private boolean abrLockBitrate;
     private boolean cleanup = true;
@@ -291,7 +293,7 @@ public class Options {
     }
 
     public boolean getKeepActive() {
-        return keepActive;
+        return keepActive && displayId == 0 && newDisplay == null && videoSource == VideoSource.DISPLAY;
     }
 
     public boolean getFlexDisplay() {
@@ -514,6 +516,9 @@ public class Options {
                     break;
                 case "clipboard_autosync":
                     options.clipboardAutosync = Boolean.parseBoolean(value);
+                    break;
+                case "abr_legacy":
+                    options.abrLegacy = Boolean.parseBoolean(value);
                     break;
                 case "abr_lock_fps":
                     options.abrLockFps = Boolean.parseBoolean(value);

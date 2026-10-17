@@ -6,13 +6,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"scrcpy-ez/gui/internal/adbparse"
 )
 
 type Transport struct {
@@ -213,34 +214,17 @@ func (h *Hub) expireHold(serial string, version uint64) {
 func Parse(block string) []Transport {
 	var out []Transport
 	for _, line := range strings.Split(block, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 || f[0] == "List" {
+		d, ok := adbparse.ParseDeviceLine(line)
+		if !ok {
 			continue
 		}
-		t := Transport{Serial: f[0], State: f[1], Kind: "other"}
-		for _, v := range f[2:] {
+		t := Transport{Serial: d.Serial, State: d.State, Kind: adbparse.TransportKind(d.Serial, d.Attributes)}
+		for _, v := range d.Attributes {
 			if strings.HasPrefix(v, "model:") {
 				t.Model = strings.TrimPrefix(v, "model:")
 			}
 			if strings.HasPrefix(v, "transport_id:") {
 				t.ID = strings.TrimPrefix(v, "transport_id:")
-			}
-			if strings.HasPrefix(v, "usb:") {
-				t.Kind = "usb"
-			}
-		}
-		if t.Kind != "usb" {
-			switch {
-			case strings.HasPrefix(t.Serial, "emulator-"):
-			case strings.Contains(t.Serial, "_adb-tls-connect"), strings.Contains(t.Serial, "._adb._tcp"):
-				t.Kind = "wifi"
-			case strings.Contains(t.Serial, "_adb-tls"):
-			case strings.Contains(t.Serial, ":"):
-				if _, _, err := net.SplitHostPort(t.Serial); err == nil {
-					t.Kind = "wifi"
-				}
-			default:
-				t.Kind = "usb" // ADB short snapshots expose the USB serial only.
 			}
 		}
 		out = append(out, t)

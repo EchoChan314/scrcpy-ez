@@ -41,6 +41,16 @@ public final class ControlMessage {
 
     public static final int TYPE_SET_CLIPBOARD_VERSIONED = 25;
     public static final int TYPE_SET_IMAGE_CLIPBOARD_VERSIONED = 26;
+    public static final int TYPE_KEEP_AWAKE_HEARTBEAT = 27;
+    public static final int TYPE_ABR_FEEDBACK = 28;
+    private int[] abrFeedback;
+    public static ControlMessage createAbrFeedback(int epoch, int sequence, int queueMs, int deliveryMs, int flags, int queueCount, int workUs, int receiveBps) {
+        ControlMessage msg = new ControlMessage();
+        msg.type = TYPE_ABR_FEEDBACK;
+        msg.abrFeedback = new int[] {epoch, sequence, queueMs, deliveryMs, flags, queueCount, workUs, receiveBps};
+        return msg;
+    }
+    public int[] getAbrFeedback() { return abrFeedback; }
 
     private int type;
     private long clipboardEpoch;

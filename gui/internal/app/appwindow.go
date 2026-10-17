@@ -5,13 +5,12 @@ package app
 // 【背景】task_vd_appwindow_0919（总纲）+ 主人在线拍板（0919 晚）：
 //   - 应用列表是"应用窗口"功能的数据底座（Step 2 面板 / Step 5 应用档案都靠它）；
 //   - 枚举时机 = 设备"稳定就绪"边沿（配对完成 / 离线卡→在线卡），不追 adb 早期瞬态；
-//   - 图标与列表同批交付（Step 1b：server 导出 + adb pull）——本文件先落列表部分；
+//   - 列表先交付；图标以有界批次导出、传输并逐批呈现；
 //   - 结果入档（设备 identity 键）——离线可读、切换连接不重枚举；
 //   - 抗打断（插线学习等会瞬时打断 adb）：失败静默 + 重试一次，不影响任何会话。
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -30,10 +29,10 @@ import (
 
 const (
 	appListTTL           = 5 * time.Minute         // 读缓存保鲜期
-	appListTimeout       = 20 * time.Second        // 单次 --list-apps 超时（实测 ~5s，留 4x 余量）
+	appListTimeout       = 20 * time.Second        // Legacy --list-apps helper only; structured catalogs use adaptive budgets.
 	appListRetries       = 1                       // 失败重试次数（额外的）
 	appListRetryGap      = 6 * time.Second         // 重试间隔（跨 adbd 重启窗口）
-	appListMaxApps       = 500                     // 解析上限（防异常输出）
+	appListMaxApps       = 10000                   // Resource guard; ordinary thousand-app devices are supported.
 	appListUsbWaitWindow = 2500 * time.Millisecond // 枚举前"等 USB 出现"窗口（v2.1.21 修复：启动瞬间无线卡先到，USB 晚 ~2s）
 )
 
@@ -104,7 +103,7 @@ func (a *App) kickAppListOnReadyChange(devs []adb.Device) {
 			// 但实际 connect 超时）→ 曾出现"GUI 重启后应用列表读不出（枚举
 			// 超时）"。USB 物理连接必通；首个就绪卡兜底。
 			cur, ok := serialOf[d.Identity]
-			if !ok || (strings.Contains(cur, ":") && !strings.Contains(d.Serial, ":")) {
+			if !ok || (appReadWireless(cur) && !appReadWireless(d.Serial)) {
 				serialOf[d.Identity] = d.Serial
 			}
 		} else if _, ok := readyMap[d.Identity]; !ok {
@@ -131,6 +130,14 @@ func (a *App) kickAppListOnReadyChange(devs []adb.Device) {
 	a.mu.Unlock()
 
 	for _, j := range jobs {
+		// Refresh the physical mode snapshot after reconnect while retaining
+		// the last good values during the asynchronous read.
+		a.physMu.Lock()
+		if p, ok := a.physCache[j.identity]; ok {
+			p.at = time.Time{}
+			a.physCache[j.identity] = p
+		}
+		a.physMu.Unlock()
 		a.prepareInitialAppIconGate(j.identity)
 		bridge.DebugLog("[appwin] 就绪边沿 → 应用列表枚举 serial=%q identity=%q", j.serial, j.identity)
 		go a.runAppListEnum(j.identity, j.serial)
@@ -152,7 +159,7 @@ func (a *App) bestEnumSerial(identity, fallback string) string {
 		if d.Identity != identity || d.State != "device" || d.Connecting || d.Pairing || d.Serial == "" {
 			continue
 		}
-		if !strings.Contains(d.Serial, ":") {
+		if !appReadWireless(d.Serial) {
 			return d.Serial // USB 最优
 		}
 		if wifi == "" {
@@ -170,11 +177,11 @@ func (a *App) bestEnumSerial(identity, fallback string) string {
 func (a *App) waitBestEnumSerial(identity, fallback string, timeout time.Duration) string {
 	deadline := time.Now().Add(timeout)
 	best := a.bestEnumSerial(identity, fallback)
-	for strings.Contains(best, ":") && time.Now().Before(deadline) {
+	for appReadWireless(best) && time.Now().Before(deadline) {
 		time.Sleep(250 * time.Millisecond)
 		if s := a.bestEnumSerial(identity, fallback); s != best {
 			best = s
-			if !strings.Contains(best, ":") {
+			if !appReadWireless(best) {
 				return best
 			}
 		}
@@ -223,9 +230,14 @@ func (a *App) runAppListEnum(identity, serial string) {
 }
 
 func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
-	defer a.clearAppBusy(identity)
+	job := a.startAppReadJob(identity, serial)
+	if job == nil {
+		return
+	}
+	var jobErr error
+	defer func() { a.finishAppReadJob(identity, job, jobErr) }()
 	a.prepareInitialAppIconGate(identity)
-	a.waitSrvReady(context.Background())
+	a.waitSrvReady(job.ctx)
 	// Prefer available USB immediately. Do not delay every WiFi-only check by 2.5 seconds.
 	serial = a.bestEnumSerial(identity, serial)
 	var items []AppListItem
@@ -233,19 +245,33 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 	var err error
 	for attempt := 0; attempt <= appListRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(appListRetryGap)
+			select {
+			case <-job.ctx.Done():
+				jobErr = job.ctx.Err()
+				return
+			case <-time.After(appListRetryGap):
+			}
 			serial = a.bestEnumSerial(identity, serial)
 		}
-		if a.appListKeyFor(serial) != identity {
+		if !a.appReadValid(identity, serial, job) {
+			jobErr = errors.New("device owner changed")
 			return
 		}
-		items, helper, err = a.listAppCatalogOnce(identity, serial)
+		a.selectAppReadSerial(identity, serial, job)
+		items, helper, err = a.listAppCatalogForJob(identity, serial, job)
 		if err == nil {
 			break
 		}
 		bridge.DebugLog("[appwin] catalog attempt=%d identity=%q err=%v", attempt+1, identity, err)
+		if strings.Contains(err.Error(), "too many apps") || strings.Contains(err.Error(), "catalog too large") || strings.Contains(err.Error(), "invalid app catalog") || strings.Contains(err.Error(), "identity mismatch") || strings.Contains(err.Error(), "owner changed") {
+			break
+		}
 	}
 	if err != nil || a.appListKeyFor(serial) != identity {
+		jobErr = err
+		if jobErr == nil {
+			jobErr = errors.New("device owner changed")
+		}
 		return
 	}
 	var old []AppListItem
@@ -255,6 +281,7 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 	same, _, _, _ := appListDiff(old, items)
 	if err = a.profiles.SetApps(identity, items); err != nil {
 		bridge.DebugLog("[appwin] catalog persist identity=%q err=%v", identity, err)
+		jobErr = err
 		return
 	}
 	a.mu.Lock()
@@ -262,7 +289,17 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 		a.appListCache = map[string]appListEntry{}
 	}
 	a.appListCache[identity] = appListEntry{items: items, at: time.Now()}
+	a.releaseInitialAppIconGateLocked(identity)
 	a.mu.Unlock()
+	a.updateAppReadState(identity, job, func(s *appReadState) {
+		s.HasCatalog = true
+		s.AppCount = len(items)
+		s.Revision++
+		s.Phase = "icons"
+		if !s.Partial {
+			s.Error = ""
+		}
+	})
 	a.markAppListCheckChanged(identity, !same)
 	if !same {
 		a.reconcileNotifications()
@@ -272,7 +309,7 @@ func (a *App) runAppListEnumMode(identity, serial string, silentDiff bool) {
 	if len(needed) == 0 && len(removed) == 0 {
 		return
 	}
-	a.runAppIconDelta(identity, serial, helper, items, needed, removed)
+	jobErr = a.runAppIconDeltaForJob(identity, serial, helper, items, needed, removed, job)
 }
 
 // clearAppBusy 清「应用」按钮遮罩态（幂等）。
@@ -304,65 +341,15 @@ func (a *App) touchAppBusy(identity string) {
 
 // ---------- 二期 Step 1c：图标导出与入库 ----------
 
-const (
-	iconExportTimeout = 90 * time.Second // 起 server 导出图标（实测 ~6s，大余量防老设备）
-	iconPushTimeout   = 30 * time.Second // push server
-	iconPullTimeout   = 60 * time.Second // pull 图标目录
-)
-
 // All deltas, including an initially empty archive, use a private remote staging directory.
-// A single directory transfer replaces the old one-adb-process-per-package path.
+// Each bounded batch uses a directory transfer rather than per-package ADB calls.
 func (a *App) runAppIconDelta(identity, serial string, helper appServerHelper, items []AppListItem, wanted, removed []string) {
-	if a.appListKeyFor(serial) != identity {
+	job := a.startAppReadJob(identity, serial)
+	if job == nil {
 		return
 	}
-	dir := a.iconsDirFor(identity)
-	if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
-		return
-	}
-	stage, err := os.MkdirTemp(filepath.Dir(dir), ".export-")
-	if err != nil {
-		return
-	}
-	defer os.RemoveAll(stage)
-	start := time.Now()
-	if len(wanted) > 0 {
-		token := make([]byte, 12)
-		if _, err = rand.Read(token); err != nil {
-			return
-		}
-		remote := fmt.Sprintf("/data/local/tmp/scrcpy/icons-job-%x", token)
-		defer a.cleanRemoteIconStage(serial, remote)
-		for _, chunk := range iconExportChunks(wanted) {
-			if a.appListKeyFor(serial) != identity {
-				return
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), iconExportTimeout)
-			out, exportErr := a.adb.ShellOut(ctx, serial, helper.command("export_app_icons="+strings.Join(chunk, ",")+" export_app_icons_dir="+remote))
-			cancel()
-			if exportErr != nil || !strings.Contains(out, "Exported icons:") || !a.iconExportOwnerMatches(identity, out) {
-				bridge.DebugLog("[appwin] icon export identity=%q err=%v ownerValid=%v", identity, exportErr, a.iconExportOwnerMatches(identity, out))
-				return
-			}
-			a.touchAppBusy(identity)
-		}
-		if a.appListKeyFor(serial) != identity {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), iconPullTimeout)
-		err = a.adb.PullDir(ctx, serial, remote+"/.", stage)
-		cancel()
-		if err != nil {
-			bridge.DebugLog("[appwin] icon bulk pull identity=%q err=%v", identity, err)
-			return
-		}
-	}
-	changed, err := a.commitIconDelta(identity, serial, stage, items, wanted, removed)
-	a.markIconsChanged(identity, changed)
-	a.mu.Lock()
-	a.releaseInitialAppIconGateLocked(identity)
-	a.mu.Unlock()
-	bridge.DebugLog("[appwin] icon delta identity=%q requested=%d committed=%d removed=%d total=%dms err=%v", identity, len(wanted), len(changed), len(removed), time.Since(start).Milliseconds(), err)
+	err := a.runAppIconDeltaForJob(identity, serial, helper, items, wanted, removed, job)
+	a.finishAppReadJob(identity, job, err)
 }
 
 func (a *App) iconExportOwnerMatches(identity, out string) bool {
@@ -538,7 +525,7 @@ func listAppsOnce(exe, serial string) ([]AppListItem, error) {
 		return nil, errors.New("未解析到任何应用（设备可能未就绪）")
 	}
 	if len(items) > appListMaxApps {
-		items = items[:appListMaxApps]
+		return nil, errors.New("too many apps")
 	}
 	return items, nil
 }
@@ -679,6 +666,7 @@ func (a *App) CheckAppList(serial string) (bool, error) {
 }
 
 type AppListCheckStatus struct {
+	appReadState
 	Busy            bool     `json:"busy"`
 	Changed         bool     `json:"changed"`
 	Icons           []string `json:"icons,omitempty"`
@@ -692,7 +680,8 @@ func (a *App) IsAppListCheckBusy(serial string) (AppListCheckStatus, error) {
 		return AppListCheckStatus{}, errors.New("未指定设备")
 	}
 	a.mu.RLock()
-	status := AppListCheckStatus{Busy: a.appListSilent[key], Changed: a.appListSilentChanged[key], Icons: append([]string(nil), a.appIconsChanged[key]...), InitialIconBusy: a.initialAppIconBusyLocked(key, time.Now())}
+	_, running := a.appListBusy[key]
+	status := AppListCheckStatus{appReadState: a.appReadStates[key], Busy: running, Changed: a.appListSilentChanged[key], Icons: append([]string(nil), a.appIconsChanged[key]...), InitialIconBusy: a.initialAppIconBusyLocked(key, time.Now())}
 	a.mu.RUnlock()
 	return status, nil
 }

@@ -32,6 +32,8 @@ function node(id) {
 const saves = [];
 const compatSaves = [];
 const awakeSaves = [];
+const smoothingSaves = [];
+const smoothingFrameSaves = [];
 const context = {
   el: node,
   appWinModalSerial: null, notificationBatchTargets: [], notificationSaving: false,
@@ -39,11 +41,14 @@ const context = {
   SetSettings: (...args) => { saves.push(args); return Promise.resolve(); },
   SetOtherAppWinSystemDecorations: value => { compatSaves.push(value); return Promise.resolve(); },
   SetKeepDeviceAwake: value => { awakeSaves.push(value); return Promise.resolve(); },
+  SetVideoSmoothing: value => { smoothingSaves.push(value); return Promise.resolve(); },
+  SetVideoSmoothingFrames: value => { smoothingFrameSaves.push(value); return Promise.resolve(); },
   toast: message => { throw new Error(message); }
 };
 vm.createContext(context);
 vm.runInContext(source.slice(start, end), context);
 node('btn-settings').handlers.click();
+assert.equal(node('set-smoothing').attrs['aria-checked'], 'false');
 assert.equal(node('set-keep-awake').attrs['aria-checked'], 'true');
 node('set-keep-awake').handlers.click();
 assert.deepEqual(awakeSaves, [false]);
@@ -67,3 +72,39 @@ node('set-appwin-decor').handlers.click();
 assert.deepEqual(compatSaves, [false, true]);
 assert.equal(saves.length, 1);
 console.log('settings compatibility: legacy snapshots, save bindings and independent original settings passed');
+
+(async () => {
+  node('set-smoothing').handlers.click();
+  node('set-smoothing').handlers.click(); // Do not enqueue a second save while pending.
+  assert.deepEqual(smoothingSaves, [true]);
+  context.syncSettings({ settings: { videoSmoothing: false } });
+  assert.equal(context.settingsState.videoSmoothing, true);
+  await Promise.resolve();
+  assert.equal(node('set-smoothing-two').attrs['aria-pressed'], 'true');
+  assert.equal(node('set-smoothing-one').disabled, false);
+  node('set-smoothing-one').handlers.click();
+  node('set-smoothing-two').handlers.click();
+  context.syncSettings({ settings: { videoSmoothing: false, videoSmoothingFrames: 2 } });
+  assert.equal(context.settingsState.videoSmoothingFrames, 1);
+  assert.deepEqual(smoothingFrameSaves, [1]);
+  await Promise.resolve();
+  context.SetVideoSmoothingFrames = () => Promise.reject(new Error('budget failure'));
+  const budgetErrors = [];
+  context.toast = value => budgetErrors.push(value);
+  node('set-smoothing-two').handlers.click();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(context.settingsState.videoSmoothingFrames, 1);
+  assert.equal(budgetErrors.length, 1);
+  context.SetVideoSmoothing = () => Promise.reject(new Error('test failure'));
+  const errors = [];
+  context.toast = value => errors.push(value);
+  node('set-smoothing').handlers.keydown({key: 'Enter', preventDefault() {}});
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(node('set-smoothing').attrs['aria-checked'], 'true');
+  assert.equal(errors.length, 1);
+  context.syncSettings({ settings: {} });
+  assert.equal(context.settingsState.videoSmoothing, false);
+  assert.equal(context.settingsState.videoSmoothingFrames, 2);
+  assert.equal(node('set-smoothing-one').disabled, true);
+  console.log('smoothing: legacy default, independent save, pending snapshot and failed-save rollback passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });

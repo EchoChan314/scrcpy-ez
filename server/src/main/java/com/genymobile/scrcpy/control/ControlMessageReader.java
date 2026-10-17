@@ -29,6 +29,8 @@ public class ControlMessageReader {
     public ControlMessage read() throws IOException {
         int type = dis.readUnsignedByte();
         switch (type) {
+            case ControlMessage.TYPE_ABR_FEEDBACK:
+                return ControlMessage.createAbrFeedback(dis.readInt(), dis.readInt(), dis.readInt(), dis.readInt(), dis.readInt(), dis.readInt(), dis.readInt(), dis.readInt());
             case ControlMessage.TYPE_SET_CLIPBOARD_VERSIONED:
             case ControlMessage.TYPE_SET_IMAGE_CLIPBOARD_VERSIONED:
                 long epoch = dis.readLong();
@@ -60,6 +62,7 @@ public class ControlMessageReader {
             case ControlMessage.TYPE_CAMERA_ZOOM_IN:
             case ControlMessage.TYPE_CAMERA_ZOOM_OUT:
             case ControlMessage.TYPE_SAVE_CLIPBOARD_IMAGE_TO_GALLERY:
+            case ControlMessage.TYPE_KEEP_AWAKE_HEARTBEAT:
                 return ControlMessage.createEmpty(type);
             case ControlMessage.TYPE_UHID_CREATE:
                 return parseUhidCreate();

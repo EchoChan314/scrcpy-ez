@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +35,73 @@ func TestAppHelperUsesBundledProtocolForCatalogAndIcons(t *testing.T) {
 			t.Fatalf("invalid protocol accepted: %q", out)
 		}
 	}
+}
+
+// Every run uses a previously nonexistent private helper path. This catches
+// first-install regressions even when earlier manual tests warmed the device.
+func TestConnectedAppCatalogColdStart(t *testing.T) {
+	runtimeDir, serial := os.Getenv("SCEZ_APP_TEST_RUNTIME"), os.Getenv("SCEZ_APP_TEST_SERIAL")
+	if runtimeDir == "" || serial == "" {
+		t.Skip("bundled runtime/device verification is opt-in")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	physical, err := exec.CommandContext(ctx, filepath.Join(runtimeDir, "adb.exe"), "-s", serial, "shell", "getprop", "ro.serialno").Output()
+	if err != nil {
+		t.Fatal("physical identity", err)
+	}
+	raw := adb.ParseDevices(serial + "\tdevice\n")
+	if len(raw) != 1 {
+		t.Fatal("invalid test transport")
+	}
+	device := adb.BuildDevice(raw)
+	device.StableSerial = strings.TrimSpace(string(physical))
+	root := t.TempDir()
+	a := New(Config{BatPath: filepath.Join(runtimeDir, "投屏支持.bat"), AdbPath: filepath.Join(runtimeDir, "adb.exe"), ProfilesPath: filepath.Join(root, "profiles.json"), Version: "test"})
+	a.profiles.SyncDevices([]adb.Device{device})
+	a.devices = []adb.Device{device}
+	helper, err := a.appCatalogServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := make([]byte, 8)
+	if _, err = rand.Read(token); err != nil {
+		t.Fatal(err)
+	}
+	helper.remote += fmt.Sprintf("-cold-test-%x", token)
+	a.appReadOps.helper = func() (appServerHelper, error) { return helper, nil }
+	pushes := 0
+	a.appReadOps.push = func(ctx context.Context, serial, local, remote string) error {
+		pushes++
+		return a.adb.PushFile(ctx, serial, local, remote)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = a.adb.ShellOut(ctx, serial, "rm -f "+helper.remote)
+	})
+	identity := a.appListKeyFor(serial)
+	for attempt := 0; attempt < 2; attempt++ {
+		start := time.Now()
+		items, _, err := a.listAppCatalogOnce(identity, serial)
+		if err != nil || len(items) == 0 {
+			t.Fatalf("attempt=%d apps=%d err=%v", attempt, len(items), err)
+		}
+		t.Logf("attempt=%d serial=%s apps=%d helper_pushes=%d elapsed=%s", attempt, serial, len(items), pushes, time.Since(start))
+	}
+	if pushes != 1 {
+		t.Fatalf("wanted one cold deployment and no warm redeployment, got %d", pushes)
+	}
+	// Exercise the same complete job used by the GUI, with an empty profile
+	// and icon archive, then verify the bridge can retrieve its results.
+	start := time.Now()
+	a.runAppListEnum(identity, serial)
+	items, err := a.GetAppList(identity)
+	status, _ := a.IsAppListCheckBusy(identity)
+	if err != nil || len(items) == 0 || status.Busy || status.Phase != "complete" || !status.HasCatalog || status.IconDone != len(items) {
+		t.Fatalf("GUI job apps=%d status=%+v err=%v", len(items), status, err)
+	}
+	t.Logf("complete GUI job apps=%d icons=%d elapsed=%s", len(items), status.IconDone, time.Since(start))
 }
 
 func TestAppHelperDoesNotFallBackToAnOldProtocol(t *testing.T) {

@@ -28,6 +28,7 @@ import com.genymobile.scrcpy.wrappers.ServiceManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Pair;
 import android.view.InputDevice;
@@ -78,6 +79,8 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
      * the scrcpy server runs a single controller per session.
      */
     private static volatile long lastInteractionNs;
+    private final com.genymobile.scrcpy.video.ClientBacklog clientBacklog = new com.genymobile.scrcpy.video.ClientBacklog();
+    public com.genymobile.scrcpy.video.ClientBacklog getClientBacklog() { return clientBacklog; }
 
     public static long getLastInteractionNs() {
         return lastInteractionNs;
@@ -92,16 +95,14 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     // control_msg.h values of the pointerId field in inject_touch_event message
     private static final int POINTER_ID_MOUSE = -1;
 
-    // Interval between simulated user activity events
-    private static final long KEEP_ACTIVE_INTERVAL_MS = 4000;
-
     private static final ScheduledExecutorService EXECUTOR = Executors.newSingleThreadScheduledExecutor();
     private ExecutorService startAppExecutor;
     private final boolean reuseAppTask;
     private final boolean flexDisplay;
 
     private Thread thread;
-    private Thread keepActiveThread;
+    private Thread keepAwakeWatchdog;
+    private final KeepAwakeLease keepAwakeLease;
 
     private UhidManager uhidManager;
 
@@ -149,6 +150,7 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
             this.clipboardAutosync = false;
             this.powerOn = false;
             this.keepActive = false;
+            this.keepAwakeLease = null;
             return;
         }
 
@@ -157,6 +159,10 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         this.clipboardAutosync = options.getClipboardAutosync();
         this.powerOn = options.getPowerOn();
         this.keepActive = options.getKeepActive();
+        this.keepAwakeLease = keepActive ? new KeepAwakeLease(() -> {
+            final IBinder token = ServiceManager.getPowerManager().acquireScreenWakeLock(getActionDisplayId());
+            return () -> ServiceManager.getPowerManager().releaseScreenWakeLock(token);
+        }) : null;
         initPointers();
         sender = new DeviceMessageSender(controlChannel);
 
@@ -303,33 +309,43 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
         }
     }
 
-    private void startKeepActiveThread() {
-        keepActiveThread = new Thread(() -> {
+    private void startKeepAwakeWatchdog() {
+        keepAwakeWatchdog = new Thread(() -> {
             try {
-                while (true) {
-                    Thread.sleep(KEEP_ACTIVE_INTERVAL_MS);
-                    int actionDisplayId = getActionDisplayId();
-                    if (actionDisplayId != Device.DISPLAY_ID_NONE) {
-                        Device.keepActive(actionDisplayId);
-                    }
+                while (!Thread.currentThread().isInterrupted()) {
+                    Thread.sleep(1000);
+                    keepAwakeLease.expire(SystemClock.elapsedRealtime());
                 }
             } catch (InterruptedException e) {
-                // ignore
-            } catch (Throwable e) {
-                Ln.e("Keep active error", e);
+                // Normal session shutdown.
+            } catch (Exception e) {
+                Ln.e("Could not expire screen wake lock", e);
             } finally {
-                Ln.d("Keep active thread stopped");
+                releaseKeepAwake();
             }
         });
-        keepActiveThread.setName("keep-active");
-        keepActiveThread.setDaemon(true);
-        keepActiveThread.start();
+        keepAwakeWatchdog.setName("screen-awake-lease");
+        keepAwakeWatchdog.setDaemon(true);
+        keepAwakeWatchdog.start();
+    }
+
+    public void releaseKeepAwake() {
+        if (keepAwakeLease != null) {
+            try {
+                keepAwakeLease.close();
+            } catch (Exception e) {
+                Ln.e("Could not release screen wake lock", e);
+            }
+        }
+        if (keepAwakeWatchdog != null) {
+            keepAwakeWatchdog.interrupt();
+        }
     }
 
     @Override
     public void start(TerminationListener listener) {
         if (keepActive) {
-            startKeepActiveThread();
+            startKeepAwakeWatchdog();
         }
 
         thread = new Thread(() -> {
@@ -338,6 +354,7 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
             } catch (IOException e) {
                 Ln.e("Controller error", e);
             } finally {
+                releaseKeepAwake();
                 Ln.d("Controller stopped");
                 if (uhidManager != null) {
                     uhidManager.closeAll();
@@ -353,10 +370,8 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
 
     @Override
     public void stop() {
+        releaseKeepAwake();
         clipboardWorker.shutdownNow();
-        if (keepActiveThread != null) {
-            keepActiveThread.interrupt();
-        }
         if (thread != null) {
             thread.interrupt();
         }
@@ -391,6 +406,21 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
 
         // Events for all sources (display or camera)
         switch (type) {
+            case ControlMessage.TYPE_KEEP_AWAKE_HEARTBEAT:
+                if (keepAwakeLease != null && getActionDisplayId() != Device.DISPLAY_ID_NONE) {
+                    try {
+                        keepAwakeLease.heartbeat(SystemClock.elapsedRealtime());
+                    } catch (Exception e) {
+                        Ln.e("Screen keep-awake is unavailable; mirroring will continue", e);
+                    }
+                }
+                return true; // Does not count as user interaction or feed ABR.
+            case ControlMessage.TYPE_ABR_FEEDBACK:
+                int[] feedback = msg.getAbrFeedback();
+                clientBacklog.update(feedback[0], feedback[1], feedback[2], feedback[3], feedback[4], feedback[5], feedback[6], feedback[7], SystemClock.elapsedRealtime());
+                Ln.d("ABR2 feedback: epoch=" + feedback[0] + " sequence=" + feedback[1]
+                        + " queue=" + feedback[2] + "ms delivery=" + feedback[3] + "ms flags=" + feedback[4] + " queued=" + feedback[5] + " work=" + feedback[6] + "us receivedBps=" + feedback[7]);
+                return true;
             case ControlMessage.TYPE_RESET_VIDEO:
                 resetVideo();
                 return true;

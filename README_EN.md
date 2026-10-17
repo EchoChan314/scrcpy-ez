@@ -7,6 +7,8 @@
 > ✨ **Entirely developed by AI** (code and docs written by AI)
 > ⚠️ **Tested on**: Windows 11 only (other versions unverified)
 
+> **Current release: 2.4.1**. Raise the application resource guard from 500 to 10,000; improve large-list search/icon loading, native device presets, main-session wake locks and backlog-based adaptation. Grouped settings now offer one/two-frame adaptive smoothing budgets. See [release notes](docs/release-2.4.1.md).
+
 ---
 
 ## 🚀 Quick Start
@@ -95,19 +97,37 @@ Open the **Specs panel** to adjust the mirroring parameters for the current devi
 
 <p align="center"><img src="images/gui-spec.png" alt="Specs panel" width="480"></p>
 
+### 📱 App Casting (App Windows)
+
+Beyond full-device mirroring, cast a **single app** from the phone to the PC and run it in its own window — several apps can be cast at once, fully independent of each other. Click **App windows** in the Window Overview and pick an app from the list to start; the overview lets you check each app window's status, adjust its settings, stop it individually, or close all at once.
+
+App windows prefer to **keep the task already in use on the phone**: open pages are carried over without restarting the app. If the app is in use, ez asks for confirmation ("Close and cast") before moving over, so unsaved content is never silently lost; when a restart or an incompatible layout gets in the way, ez gives a clear prompt with explicit choices.
+
+<p align="center"><img src="images/appwin-apps.png" alt="App picker" width="480"></p>
+
+<p align="center"><img src="images/appwin-overview.png" alt="App window overview" width="480"></p>
+
 ### 🔔 Phone Notifications and Verification Codes
 
 New phone notifications can appear in Windows whenever a paired device has an active ADB connection. **Mirroring and a companion phone app are not required.** Configure global, per-device and per-app rules, code-only delivery, message previews and copy retention. Notification management is available from the app-window panel and batch management.
 
 Copy a detected code by clicking its body or copy button. On Xiaomi system SMS notifications, a separate code field may remain available while the phone is locked; ez can display and copy that field. If both text and code are hidden, ez only has the system-supplied summary, and code-only mode skips notifications without a recognizable code. This depends on the ROM and source app; tested on REDMI K80 / Android 16, with other brands not yet individually verified.
 
-### 🔋 Keep the Phone Awake During Main Mirroring
+<p align="center"><img src="images/notify-code.png" alt="Verification code notification" width="480"></p>
 
-The global **keep-awake setting is enabled by default** for wired and wireless main mirroring on all devices. Changes apply after restarting main mirroring. Ending main mirroring restores normal idle sleep; app mirroring does not enable keep-awake. **Ctrl+P** still locks or wakes the phone manually, and holding the shortcut does not send a long power-button press.
+**App notifications** are managed per app: in the app-notification panel, click an app icon to toggle its notification sync, with the allowed app count shown below the list (right-click to invert the selection). The **Dark Notifications** entry at the end of the list covers **sources outside the app list** (the complement of the apps shown) — when checked, sources not in the list (such as system notifications) are delivered as well; when unchecked, only the checked apps are. Multiple devices can also be configured together in **Batch Management**: turn notification sync off, code-only, or enable all app notifications.
 
-### 🔧 Upload Permission Repair for Rooted Devices
+**Click a notification to jump into casting** (per-device toggle, enabled by default): once enabled, clicking a Windows notification takes you **straight to the corresponding app** — click a WeChat message notification, and you land right in WeChat inside the casting window. It matches the behavior you already expect from notifications — intuitive by nature; verification-code notifications remain copy-only and never jump.
 
-Normal devices retain the usual startup flow. On an already rooted device, enable automatic root repair in its specs panel. Repair starts only after a server upload permission error and requires authorizing the Shell `su` request on the phone. It repairs the server directory/file permissions and labels, then runs the server as ordinary Shell. Automated regression tests pass; repair on a physical rooted device remains unverified.
+<p align="center"><img src="images/notify-apps.png" alt="App notification panel" width="480"></p>
+
+<p align="center"><img src="images/notify-batch.png" alt="Batch notification settings" width="480"></p>
+
+### 📲 Device Notification & Stop from Phone
+
+While mirroring, a persistent "scrcpy-ez is mirroring" notification appears on the phone (tablet) — **tap it to stop mirroring directly from the device**, no need to return to the PC. The notification disappears automatically when mirroring stops.
+
+<p align="center"><img src="images/notify-stop.jpeg" alt="Device notification" width="600"></p>
 
 ### 🎮 Shortcuts
 
@@ -126,18 +146,13 @@ Normal devices retain the usual startup flow. On an already rooted device, enabl
 
 <p align="center"><img src="images/overlay-indicator-2.png" alt="Pin indicator 2" width="380"></p>
 
-### 📲 Device Notification & Stop from Phone
-
-While mirroring, a persistent "scrcpy-ez is mirroring" notification appears on the phone (tablet) — **tap it to stop mirroring directly from the device**, no need to return to the PC. The notification disappears automatically when mirroring stops.
-
-<p align="center"><img src="images/notify-stop.jpeg" alt="Device notification" width="600"></p>
-
 ---
 
 ## 📜 Version History
 
 | Version | Features |
 |---|---|
+| **[v2.4.1](https://github.com/kinewe/scrcpy-ez/releases/tag/v2.4.1)** | Raise the application resource guard from **500 to 10,000**. Improve large-list loading and name/package/pinyin search usability with batched rendering, viewport-first icons and preserved search/scroll state; adapt read timeouts to list size and connection conditions, keeping usable lists when some icons fail. Add native device resolution/refresh presets, 60fps wireless defaults and automatic app-window DPI; use backlog-based ABR, correct high-refresh encoder hints and app-window frame limiting; use wake locks for main mirroring only. Group settings and offer one/two-frame smoothing budgets at the bottom (off by default). See [release notes](docs/release-2.4.1.md) |
 | **[v2.4.0](https://github.com/kinewe/scrcpy-ez/releases/tag/v2.4.0)** | Upgrade to **scrcpy 5.0.1**, default hardware decoding and the new video buffer, with updated FFmpeg / SDL. Choose higher resolution, frame-rate and bitrate settings in the Specs panel. Add per-device notification-to-mirroring actions (OTP clicks still copy only), improve notification artwork, orientation and consecutive WeChat banners, and reuse compatible background application pages with confirmation for active or incompatible apps. Remove runtime PowerShell calls in favor of native Windows COM/WMI and event supervision; retain image clipboard, ABR, multiple devices, notifications and main-mirroring keep-awake. See the [release notes](docs/release-2.4.0.md) |
 | **[v2.3.0](https://github.com/kinewe/scrcpy-ez/releases/tag/v2.3.0)** | Phone notification sync with per-device/app rules, code-only mode, previews and copy retention; Xiaomi SMS code metadata on locked phones where available, with no companion app; default global keep-awake for main mirroring only and Ctrl+P power-button shortcut; optional authorized root repair after upload permission failures; background reconnect for paired devices, notification recovery and battery refresh. See [release notes](docs/release-2.3.0.md) and the [Gitee download](https://gitee.com/kinewe/scrcpy-ez/releases/tag/v2.3.0) |
 | **v2.2.2** | Event-driven USB switching without 2-second polling; fixes missed batch starts and delayed device cards; improves profile identity/address isolation and application icon caching; protects Xiaomi/REDMI/POCO physical-screen gestures and widget sizes during application mirroring, with a compatibility setting for other brands; coordinates multi-window image/text clipboard and keeps Windows images pasteable after all sessions close; consistent UHID/SDK labels and clearer settings; fixes repeated update-success notices and bundled protocol mismatches in application list/icon queries; keeps device renaming focused and uninterrupted during mirroring |
@@ -175,6 +190,8 @@ ninja -C build
 ---
 
 > 💻 **Requirements**: Windows 10 / 11 (64-bit). The GUI relies on the Microsoft WebView2 Runtime — included in Windows 11; most Windows 10 systems already have it via system updates (if missing, install the Evergreen Runtime from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/)). All other components are bundled — no extra runtimes needed.
+
+> 🔧 **Rooted devices**: if the mirroring server hits an upload permission error, enable automatic root repair from the Specs panel (authorize the Shell `su` request on the phone); normal devices keep the standard flow. Automated regression tests pass; on-device verification pending.
 
 ## 📄 License
 

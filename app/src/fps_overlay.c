@@ -59,7 +59,6 @@ static const uint8_t FONT[25][7] = {
 #define LAMP_HOVER_FADE_MS 300
 // cross-fade between the two terminal lamp states after a toggle (Ctrl+T)
 #define LAMP_STATE_FADE_MS 300
-#define FPS_UPDATE_INTERVAL SC_TICK_FROM_MS(500)
 
 // map a character to its index in FONT, or -1 if unsupported
 static int
@@ -199,8 +198,7 @@ sc_fps_overlay_init(struct sc_fps_overlay *overlay, SDL_Renderer *renderer) {
     overlay->texture = NULL;
     overlay->tex_w = 0;
     overlay->tex_h = 0;
-    overlay->frame_count = 0;
-    overlay->last_tick = sc_tick_now();
+    sc_fps_sample_reset(&overlay->sample);
     overlay->fps = 0;
     overlay->bitrate = 0;
     overlay->abr_fps = 0;
@@ -397,24 +395,26 @@ sc_fps_overlay_update_abr(struct sc_fps_overlay *overlay, int bitrate,
 
 void
 sc_fps_overlay_on_frame(struct sc_fps_overlay *overlay) {
+    sc_fps_sample_add(&overlay->sample, sc_tick_now());
+    sc_fps_overlay_refresh(overlay);
+}
+
+void
+sc_fps_overlay_reset(struct sc_fps_overlay *overlay) {
+    sc_fps_sample_reset(&overlay->sample);
+    overlay->abr_dirty = true;
+    sc_fps_overlay_refresh(overlay);
+}
+
+bool
+sc_fps_overlay_refresh(struct sc_fps_overlay *overlay) {
     if (!overlay->texture) {
-        return;
+        return false;
     }
-
-    ++overlay->frame_count;
-
-    sc_tick now = sc_tick_now();
-    if ((uint64_t) now - overlay->last_tick < (uint64_t) FPS_UPDATE_INTERVAL) {
-        return;
-    }
-
-    // 500ms window: convert the frame count to a per-second value
-    int fps = overlay->frame_count * 2;
-    overlay->frame_count = 0;
-    overlay->last_tick = now;
-
+    sc_fps_sample_update(&overlay->sample, sc_tick_now());
+    int fps = overlay->sample.fps;
     if (fps == overlay->fps && !overlay->abr_dirty) {
-        return;
+        return false;
     }
     overlay->fps = fps;
     overlay->abr_dirty = false;
@@ -428,7 +428,7 @@ sc_fps_overlay_on_frame(struct sc_fps_overlay *overlay) {
             snprintf(text, sizeof(text), "%d/%dfps %dM %s", fps,
                      overlay->abr_fps, overlay->bitrate / 1000000, mode);
         } else {
-            // ABR state not received yet: show actual fps only
+            // ABR state not received yet: show client submission rate only
             snprintf(text, sizeof(text), "%dfps %dM %s", fps,
                      overlay->bitrate / 1000000, mode);
         }
@@ -437,13 +437,13 @@ sc_fps_overlay_on_frame(struct sc_fps_overlay *overlay) {
             snprintf(text, sizeof(text), "%d/%dfps %dk %s", fps,
                      overlay->abr_fps, overlay->bitrate / 1000, mode);
         } else {
-            // ABR state not received yet: show actual fps only
+            // ABR state not received yet: show client submission rate only
             snprintf(text, sizeof(text), "%dfps %dk %s", fps,
                      overlay->bitrate / 1000, mode);
         }
     }
     // on failure the previous texture is kept
-    render_text(overlay, text);
+    return render_text(overlay, text);
 }
 
 // fill a disc centered at (cx, cy) with the current draw color, one point at

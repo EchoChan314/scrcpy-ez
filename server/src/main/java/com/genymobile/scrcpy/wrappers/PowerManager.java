@@ -1,21 +1,25 @@
 package com.genymobile.scrcpy.wrappers;
 
 import com.genymobile.scrcpy.AndroidVersions;
+import com.genymobile.scrcpy.FakeContext;
 import com.genymobile.scrcpy.util.Ln;
 
 import android.os.Build;
+import android.os.Binder;
+import android.os.IBinder;
 import android.os.IInterface;
-import android.os.SystemClock;
+import android.os.WorkSource;
 
 import java.lang.reflect.Method;
 
 public final class PowerManager {
 
-    private static final int USER_ACTIVITY_EVENT_OTHER = 0;
+    private static final int SCREEN_BRIGHT_WAKE_LOCK = 10;
 
     private final IInterface manager;
     private Method isScreenOnMethod;
-    private Method userActivityMethod;
+    private Method acquireWakeLockMethod;
+    private Method releaseWakeLockMethod;
 
     static PowerManager create() {
         IInterface manager = ServiceManager.getService("power", "android.os.IPowerManager");
@@ -51,30 +55,63 @@ public final class PowerManager {
         }
     }
 
-    private Method getUserActivityMethod() throws NoSuchMethodException {
-        if (userActivityMethod == null) {
-            if (Build.VERSION.SDK_INT >= AndroidVersions.API_31_ANDROID_12) {
-                // userActivity(int displayId, long time, int event, int flags);
-                userActivityMethod = manager.getClass().getMethod("userActivity", int.class, long.class, int.class, int.class);
-            } else {
-                // userActivity(long time, int event, int flags);
-                userActivityMethod = manager.getClass().getMethod("userActivity", long.class, int.class, int.class);
+    private Method getAcquireWakeLockMethod() throws ReflectiveOperationException {
+        if (acquireWakeLockMethod == null) {
+            Class<?> type = manager.getClass();
+            try {
+                acquireWakeLockMethod = type.getMethod("acquireWakeLock", IBinder.class, int.class, String.class, String.class,
+                        WorkSource.class, String.class, int.class, Class.forName("android.os.IWakeLockCallback"));
+            } catch (ClassNotFoundException | NoSuchMethodException e) {
+                try {
+                    acquireWakeLockMethod = type.getMethod("acquireWakeLock", IBinder.class, int.class, String.class, String.class,
+                            WorkSource.class, String.class, int.class);
+                } catch (NoSuchMethodException e2) {
+                    acquireWakeLockMethod = type.getMethod("acquireWakeLock", IBinder.class, int.class, String.class, String.class,
+                            WorkSource.class, String.class);
+                }
             }
         }
-        return userActivityMethod;
+        return acquireWakeLockMethod;
     }
 
-    public void userActivity(int displayId) {
-        try {
-            Method method = getUserActivityMethod();
-            long time = SystemClock.uptimeMillis();
-            if (Build.VERSION.SDK_INT >= AndroidVersions.API_31_ANDROID_12) {
-                method.invoke(manager, displayId, time, USER_ACTIVITY_EVENT_OTHER, 0);
-                return;
-            }
-            method.invoke(manager, time, USER_ACTIVITY_EVENT_OTHER, 0);
-        } catch (ReflectiveOperationException e) {
-            Ln.e("Could not invoke method", e);
+    public IBinder acquireScreenWakeLock(int displayId) throws ReflectiveOperationException {
+        Method method = getAcquireWakeLockMethod();
+        int count = method.getParameterTypes().length;
+        if (count == 6 && displayId != 0) {
+            throw new UnsupportedOperationException("Display-scoped screen wake locks are unavailable");
         }
+        IBinder token = new Binder();
+        try {
+            // No ACQUIRE_CAUSES_WAKEUP or ON_AFTER_RELEASE: never simulate user activity,
+            // relight a manually locked screen, or reset its idle timer when releasing.
+            if (count == 8) {
+                method.invoke(manager, token, SCREEN_BRIGHT_WAKE_LOCK, "scrcpy-ez:screen-awake", FakeContext.PACKAGE_NAME,
+                        null, null, displayId, null);
+            } else if (count == 7) {
+                method.invoke(manager, token, SCREEN_BRIGHT_WAKE_LOCK, "scrcpy-ez:screen-awake", FakeContext.PACKAGE_NAME,
+                        null, null, displayId);
+            } else {
+                method.invoke(manager, token, SCREEN_BRIGHT_WAKE_LOCK, "scrcpy-ez:screen-awake", FakeContext.PACKAGE_NAME,
+                        null, null);
+            }
+            Ln.d("Screen wake lock acquired (display " + displayId + ")");
+            return token;
+        } catch (ReflectiveOperationException e) {
+            // A failed reply does not prove that the service did not acquire the token.
+            try {
+                releaseScreenWakeLock(token);
+            } catch (ReflectiveOperationException cleanupError) {
+                e.addSuppressed(cleanupError);
+            }
+            throw e;
+        }
+    }
+
+    public void releaseScreenWakeLock(IBinder token) throws ReflectiveOperationException {
+        if (releaseWakeLockMethod == null) {
+            releaseWakeLockMethod = manager.getClass().getMethod("releaseWakeLock", IBinder.class, int.class);
+        }
+        releaseWakeLockMethod.invoke(manager, token, 0);
+        Ln.d("Screen wake lock released");
     }
 }

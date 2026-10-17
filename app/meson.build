@@ -11,6 +11,7 @@ src = [
     'src/compat.c',
     'src/control_msg.c',
     'src/controller.c',
+    'src/abr_monitor.c',
     'src/decoder.c',
     'src/demuxer.c',
     'src/device_msg.c',
@@ -21,6 +22,7 @@ src = [
     'src/fps_counter.c',
     'src/fps_overlay.c',
     'src/frame_buffer.c',
+    'src/frame_trace.c',
     'src/hwdec.c',
     'src/icon.c',
     'src/input_manager.c',
@@ -40,6 +42,7 @@ src = [
     'src/texture.c',
     'src/version.c',
     'src/video_regulator.c',
+    'src/video_pacer.c',
     'src/hid/hid_gamepad.c',
     'src/hid/hid_keyboard.c',
     'src/hid/hid_mouse.c',
@@ -56,6 +59,7 @@ src = [
     'src/util/average.c',
     'src/util/env.c',
     'src/util/file.c',
+    'src/util/fps_sample.c',
     'src/util/intmap.c',
     'src/util/intr.c',
     'src/util/log.c',
@@ -81,6 +85,8 @@ feature_test_macros = [
 ]
 
 conf = configuration_data()
+revision = run_command('git', 'describe', '--always', '--dirty', check: false)
+conf.set_quoted('SC_SOURCE_REVISION', revision.stdout().strip())
 
 if host_machine.system() == 'windows'
     src += 'src/clipboard_sync.c'
@@ -278,6 +284,44 @@ endif
 # do not build tests in release (assertions would not be executed at all)
 if get_option('buildtype') == 'debug'
     tests = [
+        ['test_video_pacer', [
+            'tests/test_video_pacer.c',
+            'src/video_pacer.c',
+        ]],
+        ['test_video_regulator', [
+            'tests/test_video_regulator.c',
+            'src/video_regulator.c',
+            'src/video_pacer.c',
+            'src/clock.c',
+            'src/trait/frame_source.c',
+            'src/frame_trace.c',
+            'src/util/env.c',
+            'src/util/file.c',
+            'src/util/log.c',
+            'src/util/memory.c',
+            'src/util/str.c',
+            'src/util/strbuf.c',
+            'src/util/thread.c',
+            'src/util/tick.c',
+            host_machine.system() == 'windows' ? 'src/sys/win/file.c' : 'src/sys/unix/file.c',
+        ]],
+        ['test_abr_monitor', ['tests/test_abr_monitor.c', 'src/abr_monitor.c', 'src/util/thread.c', 'src/util/log.c', 'src/util/tick.c']],
+        ['test_frame_trace', [
+            'tests/test_frame_trace.c',
+            'src/frame_trace.c',
+            'src/util/env.c',
+            'src/util/file.c',
+            'src/util/log.c',
+            'src/util/str.c',
+            'src/util/strbuf.c',
+            'src/util/thread.c',
+            'src/util/tick.c',
+            host_machine.system() == 'windows' ? 'src/sys/win/file.c' : 'src/sys/unix/file.c',
+        ]],
+        ['test_fps_sample', [
+            'tests/test_fps_sample.c',
+            'src/util/fps_sample.c',
+        ]],
         ['test_image_convert', [
             'tests/test_image_convert.c',
             'src/image_convert.c',
@@ -364,7 +408,11 @@ if get_option('buildtype') == 'debug'
                          include_directories: src_dir,
                          dependencies: dependencies,
                          c_args: ['-DSC_TEST'])
-        test(t[0], exe)
+        test_env = environment()
+        if t[0] == 'test_frame_trace'
+            test_env.set('SCEZ_TRACE_TEST_DIR', meson.current_build_dir())
+        endif
+        test(t[0], exe, env: test_env)
     endforeach
 endif
 

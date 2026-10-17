@@ -619,5 +619,16 @@ int main(int argc, char *argv[]) {
     test_serialize_camera_zoom_out();
     test_serialize_resize_display();
     test_serialize_scan_file();
+    struct sc_control_msg heartbeat = {.type = SC_CONTROL_MSG_TYPE_KEEP_AWAKE_HEARTBEAT};
+    size_t size;
+    uint8_t *buf = sc_control_msg_serialize(&heartbeat, &size);
+    assert(buf && size == 1 && buf[0] == 27);
+    free(buf);
+    struct sc_control_msg feedback = {.type = SC_CONTROL_MSG_TYPE_ABR_FEEDBACK,
+        .abr_feedback = {.epoch=1, .sequence=2, .queue_ms=100, .delivery_ms=200, .flags=3, .queue_count=7, .work_us=25000, .receive_bps=500000}};
+    buf = sc_control_msg_serialize(&feedback, &size);
+    const uint8_t expected_feedback[] = {28,0,0,0,1,0,0,0,2,0,0,0,100,0,0,0,200,0,0,0,3,0,0,0,7,0,0,0x61,0xa8,0,7,0xa1,0x20};
+    assert(size == sizeof(expected_feedback) && !memcmp(buf, expected_feedback, size));
+    free(buf);
     return 0;
 }

@@ -64,7 +64,7 @@ main(void) {
     static const struct sc_controller_callbacks cbs = {.on_ended = on_ended};
     static const struct sc_key_processor_ops key_ops = {.process_key = on_key};
     struct sc_controller controller;
-    assert(sc_controller_init(&controller, SC_SOCKET_NONE, &cbs, NULL));
+    assert(sc_controller_init(&controller, SC_SOCKET_NONE, false, &cbs, NULL));
     struct sc_key_processor kp = {.ops = &key_ops};
     struct sc_screen screen = {.video = true};
     struct sc_input_manager im = {

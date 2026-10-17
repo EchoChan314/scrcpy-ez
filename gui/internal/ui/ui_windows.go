@@ -301,6 +301,7 @@ func Run(a *app.App, html string) error {
 			return cmd.Start()
 		}},
 
+		{"GetNativeDisplay", a.GetNativeDisplay},
 		{"GetProfile", func(serial string) (interface{}, error) {
 			bridge.DebugLog("[js] GetProfile serial=%q", serial)
 			return a.GetProfile(serial), nil
@@ -351,6 +352,8 @@ func Run(a *app.App, html string) error {
 			return a.SetOtherAppWinSystemDecorations(enabled)
 		}},
 		{"SetKeepDeviceAwake", func(enabled bool) error { return a.SetKeepDeviceAwake(enabled) }},
+		{"SetVideoSmoothing", func(enabled bool) error { return a.SetVideoSmoothing(enabled) }},
+		{"SetVideoSmoothingFrames", func(frames int) error { return a.SetVideoSmoothingFrames(frames) }},
 		{"SetNotificationSettings", func(enabled, preview bool) error {
 			return a.SetNotificationSettings(enabled, preview)
 		}},

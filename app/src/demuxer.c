@@ -1,15 +1,20 @@
 #include "demuxer.h"
+#include "frame_trace.h"
 
 #include <assert.h>
 #include <inttypes.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
+#ifdef SC_ABR_TEST_HOOKS
+#include <SDL3/SDL_timer.h>
+#include <stdlib.h>
+#endif
 
 #include "packet_merger.h"
 #include "util/binary.h"
 #include "util/log.h"
 
-#define SC_PACKET_HEADER_SIZE 12
+#define SC_PACKET_HEADER_SIZE 20
 
 #define SC_PACKET_FLAG_CONFIG    (UINT64_C(1) << 62)
 #define SC_PACKET_FLAG_KEY_FRAME (UINT64_C(1) << 61)
@@ -148,24 +153,44 @@ sc_demuxer_recv_packet(struct sc_demuxer *demuxer, const uint8_t *header,
         return false;
     }
 
+#ifdef SC_ABR_TEST_HOOKS
+    const char *limit = getenv("SCEZ_TEST_LINK_KBPS");
+    unsigned long kbps = limit ? strtoul(limit, NULL, 10) : 0;
+    const char *duration = getenv("SCEZ_TEST_FAULT_SECONDS");
+    unsigned long duration_s = duration ? strtoul(duration, NULL, 10) : 0;
+    static sc_tick fault_start;
+    if (!fault_start) fault_start = sc_tick_now();
+    if (kbps >= 100 && kbps <= 100000 && (!duration_s || sc_tick_now() - fault_start < SC_TICK_FROM_SEC(duration_s))) {
+        SDL_Delay((uint64_t) len * 8 / kbps);
+    }
+#endif
     ssize_t r = net_recv_all(demuxer->socket, packet->data, len);
     if (r < 0 || ((uint32_t) r) < len) {
         av_packet_unref(packet);
         return false;
     }
 
-    if (demuxer->set_recv_date) {
+    if (demuxer->abr_monitor && !(pts_flags & SC_PACKET_FLAG_CONFIG)) {
+        sc_abr_monitor_arrival(demuxer->abr_monitor, sc_read64be(&header[12]), sc_tick_now(), len);
+    }
+    bool trace_video = sc_frame_trace_enabled && !strcmp(demuxer->name, "video");
+    if (demuxer->set_recv_date || trace_video) {
         sc_tick recv_date = sc_tick_now();
 
         // Store the recv date as an opaque ref
-        packet->opaque_ref = av_buffer_alloc(sizeof(sc_tick));
+        size_t meta_size = trace_video
+                        ? sizeof(struct sc_frame_trace_meta) : sizeof(sc_tick);
+        packet->opaque_ref = av_buffer_allocz(meta_size);
         if (!packet->opaque_ref) {
-            av_packet_unref(packet);
-            LOG_OOM();
-            return false;
+            if (demuxer->set_recv_date) {
+                av_packet_unref(packet);
+                LOG_OOM();
+                return false;
+            }
+            // Lost diagnostic association must not stop unbuffered playback.
+        } else {
+            *(sc_tick *) packet->opaque_ref->data = recv_date;
         }
-
-        *(sc_tick *) packet->opaque_ref->data = recv_date;
     }
 
     if (pts_flags & SC_PACKET_FLAG_CONFIG) {
@@ -179,6 +204,25 @@ sc_demuxer_recv_packet(struct sc_demuxer *demuxer, const uint8_t *header,
     }
 
     packet->dts = packet->pts;
+    if (trace_video) {
+        if (packet->pts != AV_NOPTS_VALUE) {
+            if (demuxer->trace_last_pts != AV_NOPTS_VALUE
+                    && packet->pts <= demuxer->trace_last_pts) {
+                ++demuxer->trace_epoch;
+            }
+            demuxer->trace_last_pts = packet->pts;
+        }
+        ++demuxer->trace_packet_id;
+        if (packet->opaque_ref) {
+            struct sc_frame_trace_meta *meta =
+                (struct sc_frame_trace_meta *) packet->opaque_ref->data;
+            meta->packet_id = demuxer->trace_packet_id;
+            meta->epoch = demuxer->trace_epoch;
+        }
+        SC_TRACE(SC_TRACE_PACKET_RECV, packet->opaque_ref, packet->pts, 0,
+                 packet->size, (packet->pts == AV_NOPTS_VALUE ? 1 : 0)
+                               | ((packet->flags & AV_PKT_FLAG_KEY) ? 2 : 0));
+    }
     return true;
 }
 
@@ -247,6 +291,7 @@ run_demuxer(void *data) {
 
         session = &session_data;
         sc_demuxer_parse_session(header, session);
+        if (demuxer->abr_monitor) sc_abr_monitor_epoch(demuxer->abr_monitor, true);
 
         if (!session_data.video.width || !session_data.video.height) {
             LOGE("Invalid session video size: %" PRIu32 "x%" PRIu32,
@@ -301,6 +346,11 @@ run_demuxer(void *data) {
 
         if (sc_demuxer_is_session(header)) {
             sc_demuxer_parse_session(header, &session_data);
+                if (demuxer->abr_monitor) sc_abr_monitor_epoch(demuxer->abr_monitor, true);
+            if (sc_frame_trace_enabled && !strcmp(demuxer->name, "video")) {
+                ++demuxer->trace_epoch;
+                demuxer->trace_last_pts = AV_NOPTS_VALUE;
+            }
             enum sc_sink_result result =
                 sc_packet_source_sinks_push_session(&demuxer->packet_source,
                                                     &session_data);
@@ -354,11 +404,15 @@ sc_demuxer_init(struct sc_demuxer *demuxer, const char *name, sc_socket socket,
                 const struct sc_demuxer_callbacks *cbs, void *cbs_userdata) {
     assert(socket != SC_SOCKET_NONE);
 
-    demuxer->name = name; // statically allocated
+    demuxer->name = name;
+    demuxer->abr_monitor = NULL; // statically allocated
     demuxer->socket = socket;
     sc_packet_source_init(&demuxer->packet_source);
 
     demuxer->set_recv_date = set_recv_date;
+    demuxer->trace_packet_id = 0;
+    demuxer->trace_epoch = 1;
+    demuxer->trace_last_pts = AV_NOPTS_VALUE;
 
     assert(cbs && cbs->on_ended);
 

@@ -124,6 +124,8 @@ sc_control_msg_serialized_size(const struct sc_control_msg *msg) {
         return 16 + sc_control_msg_serialized_size(&base);
     }
     switch (msg->type) {
+        case SC_CONTROL_MSG_TYPE_ABR_FEEDBACK:
+            return 33;
         case SC_CONTROL_MSG_TYPE_INJECT_KEYCODE:
             return 14;
         case SC_CONTROL_MSG_TYPE_INJECT_TEXT:
@@ -172,6 +174,7 @@ sc_control_msg_serialized_size(const struct sc_control_msg *msg) {
         case SC_CONTROL_MSG_TYPE_RESET_VIDEO:
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_IN:
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_OUT:
+        case SC_CONTROL_MSG_TYPE_KEEP_AWAKE_HEARTBEAT:
             // no additional data
             return 1;
         default:
@@ -197,6 +200,16 @@ serialize_into(const struct sc_control_msg *msg, uint8_t *buf) {
     }
     buf[0] = msg->type;
     switch (msg->type) {
+        case SC_CONTROL_MSG_TYPE_ABR_FEEDBACK:
+            sc_write32be(&buf[1], msg->abr_feedback.epoch);
+            sc_write32be(&buf[5], msg->abr_feedback.sequence);
+            sc_write32be(&buf[9], msg->abr_feedback.queue_ms);
+            sc_write32be(&buf[13], msg->abr_feedback.delivery_ms);
+            sc_write32be(&buf[17], msg->abr_feedback.flags);
+            sc_write32be(&buf[21], msg->abr_feedback.queue_count);
+            sc_write32be(&buf[25], msg->abr_feedback.work_us);
+            sc_write32be(&buf[29], msg->abr_feedback.receive_bps);
+            return 33;
         case SC_CONTROL_MSG_TYPE_INJECT_KEYCODE:
             buf[1] = msg->inject_keycode.action;
             sc_write32be(&buf[2], msg->inject_keycode.keycode);
@@ -312,6 +325,7 @@ serialize_into(const struct sc_control_msg *msg, uint8_t *buf) {
         case SC_CONTROL_MSG_TYPE_RESET_VIDEO:
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_IN:
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_OUT:
+        case SC_CONTROL_MSG_TYPE_KEEP_AWAKE_HEARTBEAT:
             // no additional data
             return 1;
         default:
@@ -491,6 +505,11 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
             break;
         case SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_OUT:
             LOG_CMSG("camera zoom out");
+            break;
+        case SC_CONTROL_MSG_TYPE_ABR_FEEDBACK:
+            return;
+        case SC_CONTROL_MSG_TYPE_KEEP_AWAKE_HEARTBEAT:
+            LOG_CMSG("keep-awake heartbeat");
             break;
         case SC_CONTROL_MSG_TYPE_SCAN_FILE:
             LOG_CMSG("scan file \"%s\"", msg->scan_file.path);
