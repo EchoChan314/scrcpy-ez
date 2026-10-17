@@ -1,4 +1,5 @@
 #include "video_regulator.h"
+#include "frame_trace.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -8,6 +9,19 @@
 
 /** Downcast frame_sink to sc_video_regulator */
 #define DOWNCAST(SINK) container_of(SINK, struct sc_video_regulator, frame_sink)
+
+static sc_tick
+sc_pacer_frame_deadline(const struct sc_video_regulator *vr,
+                        const struct sc_delayed_packet *packet) {
+    // A later session/PTS epoch must not retime already queued old frames.
+    if (packet->pacing_generation != vr->pacing_generation) {
+        return packet->pacing_deadline;
+    }
+    const AVFrame *frame = packet->frame;
+    sc_tick recv = *(const sc_tick *) frame->opaque_ref->data;
+    return sc_video_pacer_bounded_deadline(&vr->pacer,
+                                          SC_TICK_FROM_US(frame->pts), recv);
+}
 
 static bool
 sc_delayed_packet_init_frame(struct sc_delayed_packet *dpacket,
@@ -66,14 +80,16 @@ run_buffering(void *data) {
 
         enum sc_sink_result result;
         if (dpacket.type == SC_DELAYED_PACKET_TYPE_FRAME) {
-            sc_tick max_deadline = sc_tick_now() + vr->delay;
+            sc_tick max_deadline = sc_tick_now() + (vr->automatic ? SC_TICK_FROM_MS(32) : vr->delay);
             // PTS (written by the server) are expressed in microseconds
             sc_tick pts = SC_TICK_FROM_US(dpacket.frame->pts);
 
             bool timed_out = false;
+            sc_tick deadline = max_deadline;
             while (!vr->stopped && !timed_out) {
-                sc_tick deadline = sc_clock_to_system_time(&vr->clock, pts)
-                                 + vr->delay;
+                deadline = vr->automatic
+                    ? sc_pacer_frame_deadline(vr, &dpacket)
+                    : sc_clock_to_system_time(&vr->clock, pts) + vr->delay;
                 if (deadline > max_deadline) {
                     deadline = max_deadline;
                 }
@@ -82,6 +98,24 @@ run_buffering(void *data) {
                     !sc_cond_timedwait(&vr->wait_cond, &vr->mutex, deadline);
             }
 
+            // Shed obsolete decoded frames only when a newer frame is ready
+            // and due. Never skip a session barrier or compressed references.
+            bool obsolete = false;
+            if (vr->automatic && !sc_vecdeque_is_empty(&vr->queue)) {
+                struct sc_delayed_packet *next = &vr->queue.data[vr->queue.origin];
+                obsolete = next->type == SC_DELAYED_PACKET_TYPE_FRAME
+                    && next->pacing_generation == dpacket.pacing_generation
+                    && next->frame->pts > dpacket.frame->pts
+                    && sc_pacer_frame_deadline(vr, next) <= sc_tick_now();
+            }
+            if (obsolete && !vr->stopped) {
+                SC_TRACE(SC_TRACE_PACING_DROP, dpacket.frame->opaque_ref,
+                         dpacket.frame->pts, sc_vecdeque_size(&vr->queue),
+                         sc_tick_now() - deadline, 0);
+                sc_mutex_unlock(&vr->mutex);
+                sc_delayed_packet_destroy(&dpacket);
+                continue;
+            }
             bool stopped = vr->stopped;
             sc_mutex_unlock(&vr->mutex);
 
@@ -89,6 +123,8 @@ run_buffering(void *data) {
                 sc_delayed_packet_destroy(&dpacket);
                 goto stopped;
             }
+            SC_TRACE(SC_TRACE_REGULATOR_RELEASE, dpacket.frame->opaque_ref,
+                     dpacket.frame->pts, 0, deadline, 0);
 
 #ifdef SC_BUFFERING_DEBUG
             LOGD("Buffering: %" PRItick ";%" PRItick ";%" PRItick,
@@ -141,6 +177,10 @@ sc_video_regulator_frame_sink_open(struct sc_frame_sink *sink,
     (void) session;
 
     sc_clock_init(&vr->clock);
+    sc_video_pacer_init(&vr->pacer, vr->automatic_frames);
+    vr->pacer_last_trace = 0;
+    vr->pacing_generation = 0;
+    vr->stopped = false;
     sc_vecdeque_init(&vr->queue);
 
     if (!sc_frame_source_sinks_open(&vr->frame_source, ctx, session)) {
@@ -182,15 +222,32 @@ sc_video_regulator_frame_sink_push(struct sc_frame_sink *sink,
     }
 
     assert(frame->opaque_ref);
-    assert(frame->opaque_ref->size == sizeof(sc_tick));
+    assert(frame->opaque_ref->size >= sizeof(sc_tick));
     // Retrieve the recv date set on the AVPacket by the demuxer
     sc_tick recv_date = *(const sc_tick *) frame->opaque_ref->data;
 
     sc_tick pts = SC_TICK_FROM_US(frame->pts);
     sc_clock_update(&vr->clock, recv_date, pts);
+    if (vr->automatic) {
+        unsigned previous_resets = vr->pacer.resets;
+        sc_video_pacer_update(&vr->pacer, pts, recv_date, sc_tick_now());
+        if (vr->pacer.resets != previous_resets) {
+            ++vr->pacing_generation;
+        }
+        if (recv_date - vr->pacer_last_trace >= SC_TICK_FROM_MS(250)) {
+            SC_TRACE(SC_TRACE_PACING_STATE, frame->opaque_ref, frame->pts,
+                     sc_vecdeque_size(&vr->queue), vr->pacer.delay,
+                     (uint32_t) vr->pacer.period);
+            SC_TRACE(SC_TRACE_PACING_CLOCK, frame->opaque_ref, frame->pts, 0,
+                     pts + vr->pacer.offset - recv_date, 0);
+            vr->pacer_last_trace = recv_date;
+        }
+    }
     sc_cond_signal(&vr->wait_cond);
 
     if (vr->first_frame_asap && vr->clock.range == 1) {
+        SC_TRACE(SC_TRACE_REGULATOR_RELEASE, frame->opaque_ref, frame->pts,
+                 0, sc_tick_now(), 1);
         sc_mutex_unlock(&vr->mutex);
         return sc_frame_source_sinks_push(&vr->frame_source, frame);
     }
@@ -210,10 +267,19 @@ sc_video_regulator_frame_sink_push(struct sc_frame_sink *sink,
         return SC_SINK_KO;
     }
 
+    if (vr->automatic) {
+        dpacket->pacing_generation = vr->pacing_generation;
+        dpacket->pacing_deadline = sc_video_pacer_bounded_deadline(&vr->pacer,
+                                                                 pts, recv_date);
+    }
+
 #ifdef SC_BUFFERING_DEBUG
     dpacket->push_date = sc_tick_now();
 #endif
 
+    SC_TRACE(SC_TRACE_REGULATOR_ENQUEUE, frame->opaque_ref, frame->pts,
+             sc_vecdeque_size(&vr->queue),
+             sc_clock_to_system_time(&vr->clock, pts) + vr->delay, 0);
     sc_cond_signal(&vr->queue_cond);
 
     sc_mutex_unlock(&vr->mutex);
@@ -242,6 +308,12 @@ sc_video_regulator_frame_sink_push_session(struct sc_frame_sink *sink,
     }
 
     sc_delayed_packet_init_session(dpacket, session);
+    if (vr->automatic) {
+        // Keep the barrier in the queue, and freeze the old epoch deadlines.
+        ++vr->pacing_generation;
+        sc_video_pacer_init(&vr->pacer, vr->automatic_frames);
+        vr->pacer_last_trace = 0;
+    }
 
 #ifdef SC_BUFFERING_DEBUG
     dpacket->push_date = sc_tick_now();
@@ -276,7 +348,8 @@ sc_video_regulator_frame_sink_apply_backpressure(struct sc_frame_sink *sink) {
 bool
 sc_video_regulator_init(struct sc_video_regulator *vr, sc_tick delay,
                         bool first_frame_asap,
-                        uint32_t backpressure_threshold) {
+                        uint32_t backpressure_threshold, bool automatic,
+                        unsigned automatic_frames) {
     assert(delay > 0);
 
     bool ok = sc_mutex_init(&vr->mutex);
@@ -300,6 +373,15 @@ sc_video_regulator_init(struct sc_video_regulator *vr, sc_tick delay,
     }
 
     vr->delay = delay;
+    vr->automatic = automatic;
+    vr->automatic_frames = automatic_frames == 1 ? 1 : 2;
+    sc_video_pacer_init(&vr->pacer, vr->automatic_frames);
+    vr->pacer_last_trace = 0;
+    vr->pacing_generation = 0;
+    if (vr->automatic) {
+        LOGI("Adaptive video buffering enabled (experimental, max %u frame%s / 32ms)",
+             vr->automatic_frames, vr->automatic_frames == 1 ? "" : "s");
+    }
     vr->first_frame_asap = first_frame_asap;
     vr->backpressure_threshold = backpressure_threshold;
     vr->stopped = false;

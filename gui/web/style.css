@@ -587,6 +587,12 @@ body {
 }
 .appwin-hint { font-size: 11px; color: var(--muted); margin-top: 10px; text-align: center; }
 .appwin-loading { grid-column: 1 / -1; text-align: center; font-size: 12px; color: var(--muted); padding: 18px 0; }
+.appwin-read-status { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 0 1 auto; min-width: 0; font-size: 11px; line-height: 20px; color: var(--muted); opacity: 1; transition: opacity 180ms ease-out; }
+.appwin-read-status.read-fading { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .appwin-read-status { transition: none; } }
+.appwin-read-status #appwin-read-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.appwin-read-status .btn { flex: none; padding: 1px 6px; font-size: 11px; line-height: 18px; }
+.appwin-read-status.read-error { color: #a45b20; }
 /* 浮窗版（二期 Step 2 rework：模态、站最前；比默认 modal 稍宽以排得好） */
 .appwin-card { max-width: 430px; }
 /* v2.1.25：应用窗口浮窗淡入 150ms——把"列表数据未到"的空窗期盖住
@@ -721,6 +727,19 @@ body {
 #settings-modal .modal-card { max-height: 85vh; overflow-y: auto; }
 #settings-modal button.switch { border: 0; padding: 0; }
 #settings-modal .switch:focus-visible { outline: 2px solid var(--green-dark); outline-offset: 3px; }
+#settings-modal .settings-card { display: flex; flex-direction: column; overflow: hidden; }
+.settings-card > .modal-head { flex: none; }
+.settings-body { min-height: 0; overflow-y: auto; padding-right: 4px; }
+.settings-section + .settings-section { margin-top: 18px; }
+.settings-section-title { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; color: var(--green-dark); }
+.smoothing-options { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+.smoothing-options > .set-note { margin-top: 0; }
+.smoothing-frames { display: inline-flex; gap: 6px; }
+.smoothing-frames button { min-width: 68px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.smoothing-frames button[aria-pressed="true"] { color: var(--green-dark); border-color: var(--green); background: var(--green-light, #e8f5ed); }
+.smoothing-frames button:disabled { opacity: .45; cursor: default; }
+.smoothing-frames button:focus-visible { outline: 2px solid var(--green-dark); outline-offset: 2px; }
+.smoothing-help { margin-top: 8px; }
 .notification-device-select { max-width: 130px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
 
 /* Device notification controls share the existing app grid and bulk toolbar. */
@@ -738,8 +757,9 @@ body {
 .notification-other-icon { color: #d5ebde; }
 .notification-other-icon .notification-symbol { width: 30px; height: 30px; stroke-width: 1.8; }
 .appwin-app:disabled { opacity: .65; cursor: wait; }
-.appwin-bottom { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
-.appwin-bottom .appwin-hint { text-align: left; margin: 0; }
+.appwin-bottom { display: flex; gap: 8px; align-items: center; justify-content: space-between; min-height: 22px; margin-top: 10px; }
+.appwin-bottom .appwin-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; margin: 0; }
+.appwin-bottom-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; min-width: 0; max-width: 50%; margin-left: auto; }
 .notification-symbol, .notification-chevron { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .notification-options-trigger { display: inline-flex; align-items: center; gap: 4px; flex: none; border: 1px solid transparent; border-radius: 8px; padding: 5px 6px; background: transparent; color: var(--green-dark); font: inherit; font-size: 11px; cursor: pointer; }
 .notification-options-trigger:hover, .notification-options-trigger[aria-expanded="true"] { background: #edf7f1; border-color: #d3e9de; }

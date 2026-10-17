@@ -461,7 +461,9 @@ static const struct sc_option options[] = {
     {
         .longopt_id = OPT_KEEP_ACTIVE,
         .longopt = "keep-active",
-        .text = "Keep the screen on by simulating user activity.",
+        .text = "Keep the main display on with a session-owned wake lock. "
+                "Release it on disconnect or after 30 seconds without a client heartbeat. "
+                "Does not simulate user activity or apply to app/secondary displays.",
     },
     {
         .longopt_id = OPT_KEYBOARD,
@@ -1022,10 +1024,13 @@ static const struct sc_option options[] = {
     {
         .longopt_id = OPT_VIDEO_BUFFER,
         .longopt = "video-buffer",
-        .argdesc = "ms",
+        .argdesc = "ms|auto[:1|:2]",
         .text = "Add a buffering delay (in milliseconds) before displaying "
                 "video frames.\n"
                 "This increases latency to compensate for jitter.\n"
+                "Use auto for experimental adaptive buffering, bounded by "
+                "32ms from reception (also at most two source intervals). "
+                "Use auto:1 or auto:2 to select a one- or two-frame budget.\n"
                 "Default is 0 (no buffering).",
     },
     {
@@ -2828,7 +2833,14 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 opts->power_off_on_close = true;
                 break;
             case OPT_VIDEO_BUFFER:
-                if (!parse_buffering_time(optarg, &opts->video_buffer)) {
+                opts->video_buffer_auto = !strcmp(optarg, "auto")
+                    || !strcmp(optarg, "auto:1") || !strcmp(optarg, "auto:2");
+                opts->video_buffer_auto_frames = !strcmp(optarg, "auto:1") ? 1 : 2;
+                if (opts->video_buffer_auto) {
+                    // Positive sentinel to insert the regulator. Actual
+                    // automatic deadlines are independent of this value.
+                    opts->video_buffer = SC_TICK_FROM_MS(16);
+                } else if (!parse_buffering_time(optarg, &opts->video_buffer)) {
                     return false;
                 }
                 break;
@@ -3101,6 +3113,11 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
 #ifdef HAVE_V4L2
     v4l2 = !!opts->v4l2_device;
 #endif
+
+    if (v4l2 && opts->video_buffer_auto) {
+        LOGE("Automatic video buffering is not supported with V4L2");
+        return false;
+    }
 
     if (!opts->window) {
         // Without window, there cannot be any video playback

@@ -7,6 +7,7 @@
 #include <libavutil/frame.h>
 
 #include "clock.h"
+#include "video_pacer.h"
 #include "trait/frame_source.h"
 #include "trait/frame_sink.h"
 #include "util/thread.h"
@@ -25,6 +26,8 @@ enum sc_delayed_packet_type {
 
 struct sc_delayed_packet {
     enum sc_delayed_packet_type type;
+    unsigned pacing_generation;
+    sc_tick pacing_deadline;
     union {
         AVFrame *frame;
         struct sc_stream_session session;
@@ -41,6 +44,11 @@ struct sc_video_regulator {
     struct sc_frame_sink frame_sink; // frame sink trait
 
     sc_tick delay;
+    bool automatic;
+    unsigned automatic_frames;
+    struct sc_video_pacer pacer;
+    sc_tick pacer_last_trace;
+    unsigned pacing_generation;
     bool first_frame_asap;
     uint32_t backpressure_threshold;
 
@@ -68,10 +76,14 @@ struct sc_video_regulator_callbacks {
  *                         a video stream).
  * \param backpressure_threshold the max number of queued items to make
  *                               apply_backpressure() return (0 to disable).
+ * \param automatic enable experimental bounded adaptive deadlines instead
+ *                  of the fixed delay.
+ * \param automatic_frames one or two source intervals, bounded by 32ms.
  */
 bool
 sc_video_regulator_init(struct sc_video_regulator *vr, sc_tick delay,
-                        bool first_frame_asap, uint32_t backpressure_threshold);
+                        bool first_frame_asap, uint32_t backpressure_threshold,
+                        bool automatic, unsigned automatic_frames);
 
 /**
  * Stop the video regulator.

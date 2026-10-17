@@ -61,6 +61,10 @@ int main(int argc, char **argv) {
         return 1;
     }
     const char *serial = argc > 2 ? argv[2] : "?";
+    for (int i = 1; i < argc; ++i) {
+        record("SCEZ_TEST_ARGS_LOG", argv[i]);
+        record("SCEZ_TEST_ARGS_LOG", "\n");
+    }
     char line[512];
     snprintf(line, sizeof(line), "START %s %lu\n", serial, GetCurrentProcessId());
     record("SCEZ_TEST_CAST_LOG", line);

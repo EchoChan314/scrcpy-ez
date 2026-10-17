@@ -663,8 +663,8 @@ This option is similar to \fB\-\-video\-buffer\fR, but specific to V4L2 sink.
 Default is 0 (no buffering).
 
 .TP
-.BI "\-\-video\-buffer " ms
-Add a buffering delay (in milliseconds) before displaying video frames.
+.BI "\-\-video\-buffer " ms|auto
+Add a buffering delay (in milliseconds) before displaying video frames. Use \fBauto\fR for experimental adaptive buffering (at most 32ms of waiting from reception, also bounded by two recent source intervals). This does not bound total display latency. Automatic mode is not supported with a V4L2 sink.
 
 This increases latency to compensate for jitter.
 

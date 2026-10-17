@@ -1,4 +1,5 @@
 #include "receiver.h"
+#include "frame_trace.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -307,6 +308,8 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
 
             break;
         case DEVICE_MSG_TYPE_ABR_STATE: {
+            SC_TRACE(SC_TRACE_ABR, NULL, AV_NOPTS_VALUE, 0,
+                     msg->abr_state.bitrate, msg->abr_state.fps);
             // Create a copy of the message to send to the main thread
             // (shallow copy: abr_state has no heap pointers, so the copy
             // owns nothing and is freed by the main-thread task)

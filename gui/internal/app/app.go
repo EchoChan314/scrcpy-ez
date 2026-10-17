@@ -319,6 +319,7 @@ type App struct {
 	appLaunchNoticeSeq uint64 // protected by mu; distinguishes failed launch attempts
 	physMu             sync.Mutex
 	physCache          map[string]devPhys
+	physBusy           map[string]bool
 
 	// 应用列表（二期 Step 1）：按设备 identity 缓存（USB/无线切换不重枚举）；
 	// busy=在跑防重；lastReady=就绪边沿检测（commitDisplay 末尾触发）。
@@ -330,6 +331,12 @@ type App struct {
 	appListSilent        map[string]bool      // 点击入口的静默检测/等待；首次空图标遮罩不受此标志影响
 	appListSilentChanged map[string]bool      // 最近一次点击检测是否发现列表变化（前端仅变化时替换）
 	appListLastReady     map[string]bool
+	appReadJobs          map[string]*appReadJob
+	appReadStates        map[string]appReadState
+	appReadHistory       map[string]appReadPerformance
+	appReadSequence      uint64
+	appReadClosing       bool
+	appReadOps           appReadOperations
 
 	// 只读展示架构（主人决策）：GUI 不写 stdin、不自动干预。
 	// profiles=设备档案（identity 唯一化，全局共享只读）；
@@ -684,6 +691,14 @@ func (a *App) SetOtherAppWinSystemDecorations(enabled bool) error {
 
 func (a *App) SetKeepDeviceAwake(enabled bool) error {
 	return a.settings.SetKeepDeviceAwake(enabled)
+}
+
+func (a *App) SetVideoSmoothing(enabled bool) error {
+	return a.settings.SetVideoSmoothing(enabled)
+}
+
+func (a *App) SetVideoSmoothingFrames(frames int) error {
+	return a.settings.SetVideoSmoothingFrames(frames)
 }
 
 // --- panic 防护与崩溃日志 ---
@@ -1605,6 +1620,13 @@ func (a *App) DeleteDevices(keys []string) error {
 		}
 		a.mu.Lock()
 		delete(a.appIconsChanged, key)
+		if job := a.appReadJobs[key]; job != nil {
+			job.cancel()
+			delete(a.appReadJobs, key)
+		}
+		delete(a.appReadStates, key)
+		delete(a.appReadHistory, appReadHistoryKey(key, "usb"))
+		delete(a.appReadHistory, appReadHistoryKey(key, "wifi:5555"))
 		delete(a.appIconInitial, key)
 		delete(a.appListCache, key)
 		delete(a.appListBusy, key)
@@ -4131,15 +4153,6 @@ func (a *App) buildPending(devs []adb.Device) {
 			online[devs[i].Wireless] = true
 		}
 	}
-	pairPorts := map[string]string{} // 实例名（guid）-> 配对端口
-	for _, s := range svcs {
-		if s.Mode == discovery.MdnsModePairing && s.Addr != "" {
-			if _, ok := pairPorts[s.Name]; !ok {
-				port := addrPort(s.Addr)
-				pairPorts[s.Name] = port
-			}
-		}
-	}
 	var out []PendingDevice
 	seen := map[string]bool{}
 	for _, s := range svcs {
@@ -4187,7 +4200,7 @@ func (a *App) buildPending(devs []adb.Device) {
 			Name:     name,
 			IP:       ip,
 			Addr:     s.Addr,
-			PairPort: pairPorts[s.Name],
+			PairPort: pairingServicePort(s.Name, ip, svcs),
 			Guid:     s.Name,
 			Serial:   serial,
 		})
@@ -5549,6 +5562,12 @@ func (a *App) StartCast(serial string) error {
 		profileKey = serial
 	}
 	p := a.profiles.Get(profileKey)
+	// StartCast holds a.mu here; use only the separate physical-cache lock.
+	a.physMu.Lock()
+	native := a.physCache[profileKey].native
+	a.physMu.Unlock()
+	applyNativeBaseline(&p, native)
+	applyNativeCastParams(&params, p, native)
 	// v2.1.79：锁定态也需注入（锁定=固定当前生效值，值随注入传给 bat）。
 	if !params.Usb.Set && (p.Usb.Custom || p.Usb.LockFps || p.Usb.LockBitrate) {
 		params.Usb = bridge.ModeParams{Res: p.Usb.Res, FPS: p.Usb.FPS, Bitrate: p.Usb.Bitrate, Set: true,
@@ -5576,6 +5595,9 @@ func (a *App) StartCast(serial string) error {
 	params.OverlayVisibleSet = true
 	params.KeepDeviceAwake = settings.KeepDeviceAwake
 	params.KeepDeviceAwakeSet = true
+	params.VideoSmoothing = settings.VideoSmoothing
+	params.VideoSmoothingFrames = settings.VideoSmoothingFrames
+	params.VideoSmoothingSet = true
 	// 主投屏与应用投屏使用相同的稳定身份与当前档案地址。
 	locked := a.deviceLockParams(lookupKey, a.devices)
 	params.Serial, params.Addr, params.Addr2 = locked.Serial, locked.Addr, locked.Addr2
@@ -6631,18 +6653,7 @@ func (a *App) resolvePairPort(guid, ip string, fresh bool) string {
 	} else {
 		svcs = a.mdnsSnapshot()
 	}
-	for _, s := range svcs {
-		if s.Mode != discovery.MdnsModePairing || s.Addr == "" {
-			continue
-		}
-		if guid != "" && s.Name == guid {
-			return addrPort(s.Addr)
-		}
-		if ip != "" && strings.HasPrefix(s.Addr, ip+":") {
-			return addrPort(s.Addr)
-		}
-	}
-	return ""
+	return pairingServicePort(guid, ip, svcs)
 }
 
 // setPairFailed 落配对失败态（分类码 + 文案 + 步骤保留）。
@@ -7173,6 +7184,7 @@ func (a *App) RestartCast(serial string) error {
 // GetProfile 返回指定设备的参数记忆（有线/无线两套独立；未配置=默认档）。
 // 含动态 baseline：已投屏过用 [高清]/[流畅] 实际值；未投屏过用 adb 检测值推导。
 func (a *App) GetProfile(serial string) DeviceProfile {
+	a.GetNativeDisplay(serial)
 	p := a.effectiveProfile(serial)
 	// v2.1.78：声音档位归一为最终值（空 → pc）——前端直接显示当前档，不再自行解释默认。
 	p.Usb.Audio = mainAudioMode(p.Usb.Audio)
@@ -7226,6 +7238,7 @@ func (a *App) effectiveProfile(serial string) DeviceProfile {
 	if p.Wifi.Baseline.Res == 0 {
 		p.Wifi.Baseline = Baseline{Res: 1920, FPS: 60, Bitrate: 15}
 	}
+	applyNativeBaseline(&p, a.devicePhysCached(key).native)
 	if !p.Usb.Custom {
 		p.Usb.Res, p.Usb.FPS, p.Usb.Bitrate = p.Usb.Baseline.Res, p.Usb.Baseline.FPS, p.Usb.Baseline.Bitrate
 	}
@@ -7478,6 +7491,12 @@ func (a *App) BringAppWinToFront(serial, pkg string) error {
 // （WATCH_TAG/serial/父链）完全不变，总耗时≈最慢的那个会话。
 // 幂等：重复调用返回同一通道，不会重复停止（也不会重复 kill）。
 func (a *App) BeginClose() <-chan struct{} {
+	a.mu.Lock()
+	a.appReadClosing = true
+	for _, job := range a.appReadJobs {
+		job.cancel()
+	}
+	a.mu.Unlock()
 	a.closeOnce.Do(func() {
 		a.updates().Close()
 		a.mu.Lock()

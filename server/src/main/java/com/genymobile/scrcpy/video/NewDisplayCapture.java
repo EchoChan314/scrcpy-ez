@@ -50,6 +50,7 @@ public class NewDisplayCapture extends SurfaceCapture {
     private AffineMatrix displayTransform;
     private AffineMatrix eventTransform;
     private OpenGLRunner glRunner;
+    private int currentTargetFps;
 
     private Size mainDisplaySize;
     private int mainDisplayDpi;
@@ -113,7 +114,14 @@ public class NewDisplayCapture extends SurfaceCapture {
                 displaySize = new Size(1280, 960);
             }
             if (dpi == 0) {
-                dpi = 160;
+                // Cold GUI cache: derive automatic density from the actual main
+                // display rather than accidentally using 160 DPI as the basis.
+                DisplayInfo info = flexDisplayAutoDpi ? ServiceManager.getDisplayManager().getDisplayInfo(0) : null;
+                if (info != null && info.getSize().getMax() > 0 && info.getDpi() > 0) {
+                    dpi = Math.max(1, (int) Math.round((double) info.getDpi() * displaySize.getMax() / info.getSize().getMax()));
+                } else {
+                    dpi = 160;
+                }
             }
             if (flexDisplayAutoDpi) {
                 density = new FlexDisplayDensity(displaySize, dpi);
@@ -274,12 +282,13 @@ public class NewDisplayCapture extends SurfaceCapture {
 
     @Override
     public void start(Surface surface) throws IOException {
-        if (displayTransform != null) {
-            assert glRunner == null;
-            OpenGLFilter glFilter = new AffineOpenGLFilter(displayTransform);
-            glRunner = new OpenGLRunner(glFilter);
-            surface = glRunner.start(physicalSize, videoSize, surface);
-        }
+        // Always keep a GL input path, including an unrotated virtual display:
+        // ABR must thin real input frames, rather than only report a lower cap.
+        assert glRunner == null;
+        OpenGLFilter glFilter = new AffineOpenGLFilter(displayTransform != null ? displayTransform : AffineMatrix.IDENTITY);
+        glRunner = new OpenGLRunner(glFilter);
+        surface = glRunner.start(displayTransform != null ? physicalSize : videoSize, videoSize, surface);
+        glRunner.setTargetFps(currentTargetFps);
 
         if (virtualDisplay == null) {
             startNew(surface);
@@ -290,6 +299,14 @@ public class NewDisplayCapture extends SurfaceCapture {
         if (vdListener != null) {
             PositionMapper positionMapper = PositionMapper.create(videoSize, eventTransform, displaySize);
             vdListener.onNewVirtualDisplay(virtualDisplay.getDisplay().getDisplayId(), positionMapper);
+        }
+    }
+
+    @Override
+    public void setTargetFps(int fps) {
+        currentTargetFps = fps;
+        if (glRunner != null) {
+            glRunner.setTargetFps(fps);
         }
     }
 

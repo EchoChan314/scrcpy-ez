@@ -41,7 +41,7 @@ public final class OpenGLRunner {
     // Dynamic fps cap (ABR fps level): written from the encoder thread via
     // setTargetFps(), read on the GL thread at each frame callback.
     private volatile int targetFps;
-    private long lastRenderedNs;
+    private final FrameRateLimiter frameRateLimiter = new FrameRateLimiter();
 
     public OpenGLRunner(OpenGLFilter filter, float[] overrideTransformMatrix) {
         this.filter = filter;
@@ -179,23 +179,10 @@ public final class OpenGLRunner {
                 return;
             }
 
-            // Dynamic fps limit (ABR): skip rendering when the frame arrives
-            // sooner than 1000/targetFps ms after the last rendered one.
-            // The encoder is never touched: this is a zero-interruption
-            // frame thinning on the GL layer.
-            int fps = targetFps;
-            if (fps > 0) {
-                long nowNs = SystemClock.elapsedRealtimeNanos();
-                long intervalNs = 1_000_000_000L / fps;
-                if (lastRenderedNs != 0 && nowNs - lastRenderedNs < intervalNs) {
-                    // Drop: acquire the new buffer and immediately release
-                    // it so the SurfaceTexture queue stays healthy (no
-                    // leak, no stall for the producer).
-                    surfaceTexture.updateTexImage();
-                    surfaceTexture.releaseTexImage();
-                    return;
-                }
-                lastRenderedNs = nowNs;
+            surfaceTexture.updateTexImage();
+            if (!frameRateLimiter.shouldRender(surfaceTexture.getTimestamp(), targetFps)) {
+                surfaceTexture.releaseTexImage();
+                return;
             }
 
             render(outputSize);
@@ -215,7 +202,6 @@ public final class OpenGLRunner {
         GLES20.glViewport(0, 0, outputSize.getWidth(), outputSize.getHeight());
         GLUtils.checkGlError();
 
-        surfaceTexture.updateTexImage();
 
         float[] matrix;
         if (overrideTransformMatrix != null) {

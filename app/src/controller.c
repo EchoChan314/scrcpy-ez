@@ -9,6 +9,9 @@
 // Drop droppable events above this limit
 #define SC_CONTROL_MSG_QUEUE_LIMIT 60
 
+// Only renew the connection lease; never inject activity into Android.
+#define SC_KEEP_AWAKE_HEARTBEAT_INTERVAL SC_TICK_FROM_SEC(5)
+
 static void
 sc_controller_receiver_on_ended(struct sc_receiver *receiver, bool error,
                                 void *userdata) {
@@ -21,6 +24,7 @@ sc_controller_receiver_on_ended(struct sc_receiver *receiver, bool error,
 
 bool
 sc_controller_init(struct sc_controller *controller, sc_socket control_socket,
+                   bool keep_awake,
                    const struct sc_controller_callbacks *cbs,
                    void *cbs_userdata) {
     sc_vecdeque_init(&controller->queue);
@@ -60,6 +64,8 @@ sc_controller_init(struct sc_controller *controller, sc_socket control_socket,
 
     controller->control_socket = control_socket;
     controller->stopped = false;
+    controller->keep_awake = keep_awake;
+    controller->abr_monitor = NULL;
 
     controller->resize_display.width = 0;
     controller->resize_display.height = 0;
@@ -186,13 +192,26 @@ run_controller(void *data) {
     struct sc_controller *controller = data;
 
     bool error = false;
+    sc_tick next_heartbeat = sc_tick_now();
+    sc_tick next_feedback = sc_tick_now();
 
     for (;;) {
         sc_mutex_lock(&controller->mutex);
         while (!controller->stopped
                 && !controller->resize_display.width
                 && sc_vecdeque_is_empty(&controller->queue)) {
-            sc_cond_wait(&controller->msg_cond, &controller->mutex);
+            if (controller->abr_monitor && sc_tick_now() >= next_feedback) break;
+            if (controller->abr_monitor || controller->keep_awake) {
+                if (controller->keep_awake && sc_tick_now() >= next_heartbeat) {
+                    break;
+                }
+                sc_cond_timedwait(&controller->msg_cond, &controller->mutex,
+                                 controller->abr_monitor
+                                     ? (controller->keep_awake && next_heartbeat < next_feedback ? next_heartbeat : next_feedback)
+                                     : next_heartbeat);
+            } else {
+                sc_cond_wait(&controller->msg_cond, &controller->mutex);
+            }
         }
         if (controller->stopped) {
             // stop immediately, do not process further msgs
@@ -202,11 +221,25 @@ run_controller(void *data) {
         }
 
         bool has_resize_display = controller->resize_display.width;
-        assert(has_resize_display || !sc_vecdeque_is_empty(&controller->queue));
+        bool heartbeat_due = controller->keep_awake
+                          && sc_tick_now() >= next_heartbeat;
+        bool feedback_due = controller->abr_monitor && sc_tick_now() >= next_feedback;
+        assert(feedback_due || heartbeat_due || has_resize_display
+               || !sc_vecdeque_is_empty(&controller->queue));
 
         struct sc_control_msg msg;
 
-        if (has_resize_display) {
+        if (heartbeat_due) {
+            // Do not enqueue behind large clipboard/input bursts.
+            msg = (struct sc_control_msg) {
+                .type = SC_CONTROL_MSG_TYPE_KEEP_AWAKE_HEARTBEAT,
+            };
+            next_heartbeat = sc_tick_now() + SC_KEEP_AWAKE_HEARTBEAT_INTERVAL;
+        } else if (feedback_due) {
+            msg = (struct sc_control_msg) {.type = SC_CONTROL_MSG_TYPE_ABR_FEEDBACK};
+            msg.abr_feedback = sc_abr_monitor_sample(controller->abr_monitor, sc_tick_now());
+            next_feedback = sc_tick_now() + SC_TICK_FROM_MS(200);
+        } else if (has_resize_display) {
             msg.type = SC_CONTROL_MSG_TYPE_RESIZE_DISPLAY;
             msg.resize_display.width = controller->resize_display.width;
             msg.resize_display.height = controller->resize_display.height;

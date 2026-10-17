@@ -1,4 +1,5 @@
 #include "screen.h"
+#include "frame_trace.h"
 
 #include <assert.h>
 #include <string.h>
@@ -264,6 +265,24 @@ sc_screen_update_content_rect(struct sc_screen *screen) {
                          &screen->rect);
 }
 
+static void
+sc_screen_trace_display(struct sc_screen *screen) {
+    if (!sc_frame_trace_enabled) {
+        return;
+    }
+    SDL_DisplayID id = SDL_GetDisplayForWindow(screen->window);
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(id);
+    int vsync = -2; // unknown, distinct from adaptive (-1)
+    SDL_GetRenderVSync(screen->renderer, &vsync);
+    SC_TRACE(SC_TRACE_DISPLAY_STATE, NULL, AV_NOPTS_VALUE, 0,
+             mode ? (int64_t) (mode->refresh_rate * 1000) : 0,
+             (uint32_t) vsync);
+    LOGI("Trace output: renderer=%s display=%" PRIu32 " refresh=%.3fHz vsync=%d "
+         "(API setting; scanout/VRR unmeasured)",
+         SDL_GetRendererName(screen->renderer), id,
+         mode ? mode->refresh_rate : 0, vsync);
+}
+
 // render the texture to the renderer
 //
 // Set the update_content_rect flag if the window or content size may have
@@ -356,7 +375,15 @@ end:
     if (sc_fps_overlay_is_visible(&screen->fps_overlay)) {
         sc_fps_overlay_draw(&screen->fps_overlay, renderer);
     }
+    uint64_t present_id = ++screen->trace_present_id;
+    const AVFrame *frame = screen->frame;
+    SC_TRACE(SC_TRACE_PRESENT_BEGIN, frame ? frame->opaque_ref : NULL,
+             frame ? frame->pts : AV_NOPTS_VALUE, 0, present_id,
+             screen->trace_new_frame ? 1 : 0);
     sc_sdl_render_present(renderer);
+    SC_TRACE(SC_TRACE_PRESENT_END, frame ? frame->opaque_ref : NULL,
+             frame ? frame->pts : AV_NOPTS_VALUE, 0, present_id,
+             screen->trace_new_frame ? 1 : 0);
 }
 
 // Interval of the one-shot SDL timer that keeps repainting while a lamp
@@ -367,6 +394,16 @@ end:
 // the base of the scrcpy event range (SC_EVENT_NEW_FRAME), so a value far
 // above the registered events avoids intercepting real events.
 #define SC_LAMP_ANIM_TICK_EVENT (SDL_EVENT_USER + 0x100)
+#define SC_FPS_SAMPLE_EVENT (SDL_EVENT_USER + 0x101)
+
+static Uint32 SDLCALL
+sc_screen_fps_sample_timer_cb(void *userdata, SDL_TimerID timer_id,
+                              Uint32 interval) {
+    (void) userdata;
+    (void) timer_id;
+    sc_push_event(SC_FPS_SAMPLE_EVENT);
+    return interval;
+}
 
 static Uint32 SDLCALL
 sc_screen_lamp_anim_timer_cb(void *userdata, SDL_TimerID timer_id,
@@ -581,6 +618,9 @@ sc_screen_init(struct sc_screen *screen,
     screen->window_shown = false;
     screen->always_on_top = params->always_on_top;
     screen->lamp_anim_timer = 0;
+    screen->fps_sample_timer = 0;
+    screen->trace_present_id = 0;
+    screen->trace_new_frame = false;
     screen->paused = false;
     screen->resume_frame = NULL;
     screen->orientation = SC_ORIENTATION_0;
@@ -826,6 +866,13 @@ sc_screen_init(struct sc_screen *screen,
         }
     }
 
+    if (screen->video) {
+        screen->fps_sample_timer =
+            SDL_AddTimer(500, sc_screen_fps_sample_timer_cb, NULL);
+        if (!screen->fps_sample_timer) {
+            LOGW("Could not start overlay sampling timer: %s", SDL_GetError());
+        }
+    }
     return true;
 
 error_destroy_texture:
@@ -948,9 +995,18 @@ sc_screen_destroy(struct sc_screen *screen) {
         SDL_RemoveTimer(screen->lamp_anim_timer);
         screen->lamp_anim_timer = 0;
     }
+    if (screen->fps_sample_timer) {
+        SDL_RemoveTimer(screen->fps_sample_timer);
+        screen->fps_sample_timer = 0;
+    }
     sc_texture_destroy(&screen->tex);
     sc_fps_overlay_destroy(&screen->fps_overlay);
     av_frame_free(&screen->frame);
+    av_frame_free(&screen->resume_frame);
+    // A frame queued while the event loop was stopping may still own the
+    // hardware device. Release all decoded frames before the SDL renderer
+    // unloads its D3D11 module (and before the GL context is destroyed).
+    sc_frame_buffer_destroy(&screen->fb);
 #ifdef SC_DISPLAY_FORCE_OPENGL_CORE_PROFILE
     SDL_GL_DestroyContext(screen->gl_context);
 #endif
@@ -973,7 +1029,6 @@ sc_screen_destroy(struct sc_screen *screen) {
 #endif
     SDL_DestroyWindow(screen->window);
     sc_fps_counter_destroy(&screen->fps_counter);
-    sc_frame_buffer_destroy(&screen->fb);
     sc_mutex_destroy(&screen->mutex);
 
     SDL_Event event;
@@ -1076,7 +1131,6 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
     assert(screen->window_shown);
 
     sc_fps_counter_add_rendered_frame(&screen->fps_counter);
-    sc_fps_overlay_on_frame(&screen->fps_overlay);
 
     AVFrame *frame = screen->frame;
     struct sc_size new_frame_size = {frame->width, frame->height};
@@ -1104,63 +1158,21 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
         sc_screen_update_content_rect(screen);
     }
 
+    SC_TRACE(SC_TRACE_TEXTURE_BEGIN, frame->opaque_ref, frame->pts, 0, 0, 0);
     bool ok = sc_texture_update(&screen->tex, frame);
+    SC_TRACE(SC_TRACE_TEXTURE_END, frame->opaque_ref, frame->pts, 0, 0, ok);
     if (!ok) {
         return false;
     }
 
+    sc_fps_overlay_on_frame(&screen->fps_overlay);
+    screen->trace_new_frame = true;
     sc_screen_render(screen, false);
+    screen->trace_new_frame = false;
     return true;
 }
 
-#ifdef _WIN32
-// Absolute-latency measurement: log (wall clock ms, frame pts us) for
-// every rendered frame to %%TEMP%%\\scrcpy_frame_log.txt (overwritten on
-// each scrcpy start, unbuffered so data survives hard kills). The
-// analysis script pairs screen pulse detections with the nearest frame
-// and converts pts to device epoch ms via adb clock calibration.
-static FILE *g_frame_log;
-static void
-frame_log_open(void) {
-    if (g_frame_log) {
-        return;
-    }
-    const char *tmp = getenv("TEMP");
-    char path[MAX_PATH];
-    if (tmp) {
-        snprintf(path, sizeof(path), "%s\\scrcpy_frame_log.txt", tmp);
-    } else {
-        snprintf(path, sizeof(path), "scrcpy_frame_log.txt");
-    }
-    g_frame_log = fopen(path, "w");
-    if (g_frame_log) {
-        setvbuf(g_frame_log, NULL, _IONBF, 0);
-    }
-}
 
-static int64_t
-unix_ms_now(void) {
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    ULARGE_INTEGER ul;
-    ul.LowPart = ft.dwLowDateTime;
-    ul.HighPart = ft.dwHighDateTime;
-    return (int64_t) ((ul.QuadPart - 116444736000000000ULL) / 10000);
-}
-
-static void
-frame_log_write(int64_t pts_us) {
-    if (pts_us < 0) {
-        return; // no pts (AV_NOPTS_VALUE)
-    }
-    frame_log_open();
-    if (g_frame_log) {
-        // 2 columns: wall_ms(render), pts_us(device)
-        fprintf(g_frame_log, "%lld,%lld\n", (long long) unix_ms_now(),
-                (long long) pts_us);
-    }
-}
-#endif
 
 static bool
 sc_screen_update_frame(struct sc_screen *screen) {
@@ -1188,9 +1200,6 @@ sc_screen_update_frame(struct sc_screen *screen) {
     // read with lock held
     bool can_resize = !screen->prevent_auto_resize;
     sc_mutex_unlock(&screen->mutex);
-#ifdef _WIN32
-    frame_log_write(screen->frame->pts);
-#endif
     return sc_screen_apply_frame(screen, can_resize);
 }
 
@@ -1202,6 +1211,9 @@ sc_screen_set_paused(struct sc_screen *screen, bool paused) {
         // nothing to do
         return;
     }
+
+    sc_fps_overlay_reset(&screen->fps_overlay);
+    SC_TRACE(SC_TRACE_PAUSE, NULL, AV_NOPTS_VALUE, 0, paused, 0);
 
     if (screen->paused && screen->resume_frame) {
         // If display screen was paused, refresh the frame immediately, even if
@@ -1224,6 +1236,12 @@ sc_screen_set_paused(struct sc_screen *screen, bool paused) {
     }
 
     screen->paused = paused;
+    if (paused) {
+        sc_fps_overlay_reset(&screen->fps_overlay);
+    }
+    if (screen->window_shown) {
+        sc_screen_render(screen, false);
+    }
 }
 
 void
@@ -2071,6 +2089,14 @@ sc_screen_apply_keyboard_layout(struct sc_screen *screen, bool english) {
 
 void
 sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
+    if (event->type == SC_FPS_SAMPLE_EVENT) {
+        if (sc_fps_overlay_refresh(&screen->fps_overlay)
+                && screen->window_shown
+                && sc_fps_overlay_is_visible(&screen->fps_overlay)) {
+            sc_screen_render(screen, false);
+        }
+        return;
+    }
     if (event->type == SC_LAMP_ANIM_TICK_EVENT) {
         // Lamp animation tick: the one-shot timer fired. Repaint while a
         // fade is still running and re-arm it, otherwise it stops.
@@ -2094,6 +2120,7 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
             screen->content_size = get_oriented_size(screen->frame_size,
                                                      screen->orientation);
             sc_screen_show_initial_window(screen);
+            sc_screen_trace_display(screen);
 
             if (sc_screen_is_relative_mode(screen)) {
                 // Capture mouse on start
@@ -2110,6 +2137,9 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
             }
             return;
         }
+        case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+            sc_screen_trace_display(screen);
+            return;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
 #ifdef _WIN32
             // With HID keyboards (UHID/AOA), the computer IME must not

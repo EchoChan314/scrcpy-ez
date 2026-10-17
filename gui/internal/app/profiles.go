@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"scrcpy-ez/gui/internal/adb"
+	"scrcpy-ez/gui/internal/adbparse"
 	"scrcpy-ez/gui/internal/bridge"
 	"scrcpy-ez/gui/internal/discovery"
 )
@@ -2366,14 +2367,11 @@ func (s *ProfileStore) MdnsWirelessAddr(key string, services []MdnsMatch) string
 // 先剥离服务类型后缀段再走原逻辑；无后缀行为不变（回归不变）。
 // 无前缀/无后缀（旧 adb 输出或随机 16 位 identity）时退回剥前缀后的整体。
 func TlsServiceIdentity(name string) string {
-	name = stripMdnsServiceSuffix(name)
-	name = strings.TrimPrefix(name, "adb-")
-	if i := strings.LastIndexByte(name, '-'); i > 0 && len(name)-i-1 == 6 {
-		if suffix := name[i+1:]; isAlnum6(suffix) {
-			return name[:i]
-		}
+	instance := stripMdnsServiceSuffix(name)
+	if strings.HasPrefix(instance, "adb-") {
+		return adbparse.ServiceSerial(name)
 	}
-	return name
+	return instance
 }
 
 // SerialFromServiceName 从 mDNS 服务实例名解析"设备自报的短号"（gui55）：
@@ -2386,7 +2384,7 @@ func SerialFromServiceName(name string) string {
 	if !strings.HasPrefix(n, "adb-") {
 		return ""
 	}
-	return TlsServiceIdentity(n)
+	return adbparse.ServiceSerial(name)
 }
 
 // stripMdnsServiceSuffix 循环剥离 mDNS 服务名的服务类型后缀段（._xxx）：
@@ -2394,36 +2392,7 @@ func SerialFromServiceName(name string) string {
 // 实例名._adb._tcp / 实例名._tcp——按已知后缀从长到短逐段去掉，
 // 得到裸实例名（如 "adb-TEST0001-KWqpio"）。无后缀输入原样返回。
 func stripMdnsServiceSuffix(name string) string {
-	for {
-		next := name
-		switch {
-		case strings.HasSuffix(next, "._adb-tls-connect._tcp"):
-			next = strings.TrimSuffix(next, "._adb-tls-connect._tcp")
-		case strings.HasSuffix(next, "._adb._tcp"):
-			next = strings.TrimSuffix(next, "._adb._tcp")
-		case strings.HasSuffix(next, "._adb-tls-connect"):
-			next = strings.TrimSuffix(next, "._adb-tls-connect")
-		case strings.HasSuffix(next, "._adb"):
-			next = strings.TrimSuffix(next, "._adb")
-		case strings.HasSuffix(next, "._tcp"):
-			next = strings.TrimSuffix(next, "._tcp")
-		}
-		if next == name {
-			return name
-		}
-		name = next
-	}
-}
-
-func isAlnum6(s string) bool {
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' {
-			continue
-		}
-		return false
-	}
-	return true
+	return adbparse.ServiceInstance(name)
 }
 
 // PairArchive 配对成功入档（gui12 无线调试接入向导）：

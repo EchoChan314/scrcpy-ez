@@ -105,14 +105,13 @@ public final class Server {
         List<AsyncProcessor> asyncProcessors = new ArrayList<>();
 
         BgNotification bgNotification = null;
+        Controller controller = null;
 
         DesktopConnection connection = DesktopConnection.open(scid, tunnelForward, video, audio, control, sendDummyByte);
         try {
             if (options.getSendDeviceMeta()) {
                 connection.sendDeviceMeta(Device.getDeviceName());
             }
-
-            Controller controller = null;
 
             if (control) {
                 ControlChannel controlChannel = connection.getControlChannel();
@@ -171,7 +170,8 @@ public final class Server {
                     surfaceCapture = new CameraCapture(options);
                 }
                 SurfaceEncoder surfaceEncoder = new SurfaceEncoder(surfaceCapture, videoStreamer, options,
-                        controller != null ? controller.getDeviceMessageSender() : null);
+                        controller != null ? controller.getDeviceMessageSender() : null,
+                        controller != null ? controller.getClientBacklog() : null);
                 asyncProcessors.add(surfaceEncoder);
 
                 if (controller != null) {
@@ -188,6 +188,10 @@ public final class Server {
 
             Looper.loop(); // interrupted by the Completion implementation
         } finally {
+            // Release before notification/processor cleanup, which can fail or block.
+            if (controller != null) {
+                controller.releaseKeepAwake();
+            }
             if (bgNotification != null) {
                 bgNotification.stop();
             }

@@ -59,6 +59,9 @@ struct sc_screen {
     // state cross-fade) is animating, independent of video frames; 0 when
     // not armed.
     SDL_TimerID lamp_anim_timer;
+    SDL_TimerID fps_sample_timer;
+    uint64_t trace_present_id;
+    bool trace_new_frame;
 
     // Alt+left-drag repositions the fps overlay (grab offset = mouse - origin)
     bool overlay_dragging;

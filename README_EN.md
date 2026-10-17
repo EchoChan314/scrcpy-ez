@@ -7,6 +7,8 @@
 > ✨ **Entirely developed by AI** (code and docs written by AI)
 > ⚠️ **Tested on**: Windows 11 only (other versions unverified)
 
+> **Current release: 2.4.1**. Improved app/icon loading, native device presets, main-session wake locks and backlog-based adaptation. Grouped settings now offer one/two-frame adaptive smoothing budgets. See [release notes](docs/release-2.4.1.md).
+
 ---
 
 ## 🚀 Quick Start

@@ -26,6 +26,7 @@
 #include "mouse_sdk.h"
 #include "recorder.h"
 #include "screen.h"
+#include "frame_trace.h"
 #include "sdl_hints.h"
 #include "server.h"
 #include "uhid/gamepad_uhid.h"
@@ -125,6 +126,7 @@ struct scrcpy {
     struct sc_demuxer video_demuxer;
     struct sc_demuxer audio_demuxer;
     struct sc_decoder video_decoder;
+    struct sc_abr_monitor abr_monitor;
     struct sc_decoder audio_decoder;
     struct sc_hwdec hwdec;
     struct sc_recorder recorder;
@@ -541,6 +543,7 @@ scrcpy(struct scrcpy_options *options) {
     bool video_demuxer_started = false;
     bool audio_demuxer_started = false;
     bool hwdec_initialized = false;
+    bool abr_monitor_initialized = false;
     bool video_decoder_initialized = false;
     bool video_decoder_started = false;
     bool audio_decoder_initialized = false;
@@ -642,6 +645,12 @@ scrcpy(struct scrcpy_options *options) {
     // Set hints before starting the server thread to avoid race conditions in
     // SDL
     sc_sdl_set_hints(options->render_driver, options->disable_screensaver);
+    if (options->video_playback && options->control) {
+        sc_tick allowance = options->video_buffer_auto ? SC_TICK_FROM_MS(32) : options->video_buffer;
+        if (!sc_abr_monitor_init(&s->abr_monitor, allowance)) goto end;
+        abr_monitor_initialized = true;
+    }
+    sc_frame_trace_init(options);
 
     if (!sc_server_start(&s->server)) {
         goto end;
@@ -751,6 +760,7 @@ scrcpy(struct scrcpy_options *options) {
         bool set_recv_date = has_video_buffer;
         sc_demuxer_init(&s->video_demuxer, "video", s->server.video_socket,
                         set_recv_date, &video_demuxer_cbs, NULL);
+        s->video_demuxer.abr_monitor = abr_monitor_initialized ? &s->abr_monitor : NULL;
     }
 
     if (options->audio) {
@@ -803,10 +813,13 @@ scrcpy(struct scrcpy_options *options) {
         };
 
         if (!sc_controller_init(&s->controller, s->server.control_socket,
+            options->keep_active && !options->new_display && !options->display_id
+                && options->video_source == SC_VIDEO_SOURCE_DISPLAY,
             &controller_cbs, NULL)) {
             goto end;
         }
         controller_initialized = true;
+        s->controller.abr_monitor = abr_monitor_initialized ? &s->abr_monitor : NULL;
 
         controller = &s->controller;
 
@@ -1027,12 +1040,13 @@ aoa_complete:
 
         // If a video buffer is present, then the recv date must be forwarded
         // from the AVPacket to the AVFrame
-        bool copy_opaque = has_video_buffer;
+        bool copy_opaque = has_video_buffer || sc_frame_trace_enabled;
         if (!sc_decoder_init(&s->video_decoder, "video", &s->hwdec, copy_opaque,
                              &decoder_cbs, NULL)) {
             goto end;
         }
         video_decoder_initialized = true;
+        s->video_decoder.abr_monitor = abr_monitor_initialized ? &s->abr_monitor : NULL;
 
         sc_packet_source_add_sink(&s->video_demuxer.packet_source,
                                   &s->video_decoder.packet_sink);
@@ -1075,7 +1089,9 @@ aoa_complete:
 #endif
             if (!sc_video_regulator_init(&s->video_regulator,
                                          options->video_buffer, true,
-                                         backpressure_threshold)) {
+                                         backpressure_threshold,
+                                         options->video_buffer_auto,
+                                         options->video_buffer_auto_frames)) {
                 goto end;
             }
             video_regulator_initialized = true;
@@ -1110,7 +1126,7 @@ aoa_complete:
             }
             if (!sc_video_regulator_init(&s->v4l2_regulator,
                                          options->v4l2_buffer,
-                                         true, backpressure_threshold)) {
+                                          true, backpressure_threshold, false, 2)) {
                 goto end;
             }
             v4l2_regulator_initialized = true;
@@ -1379,6 +1395,8 @@ end:
     }
 
     sc_server_destroy(&s->server);
+    sc_frame_trace_destroy();
+    if (abr_monitor_initialized) sc_abr_monitor_destroy(&s->abr_monitor);
 
 #ifdef _WIN32
     sc_clipboard_sync_destroy();

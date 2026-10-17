@@ -2,6 +2,7 @@
 #define SC_DEMUXER_H
 
 #include "common.h"
+#include "abr_monitor.h"
 
 #include <stdbool.h>
 
@@ -10,10 +11,14 @@
 #include "util/thread.h"
 
 struct sc_demuxer {
+    struct sc_abr_monitor *abr_monitor; // owned by the connection; outlives threads
     struct sc_packet_source packet_source; // packet source trait
 
     const char *name; // must be statically allocated (e.g. a string literal)
     bool set_recv_date;
+    uint64_t trace_packet_id;
+    uint32_t trace_epoch;
+    int64_t trace_last_pts;
 
     sc_socket socket;
     sc_thread thread;

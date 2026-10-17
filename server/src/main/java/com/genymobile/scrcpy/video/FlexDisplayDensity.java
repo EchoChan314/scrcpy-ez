@@ -16,7 +16,7 @@ public final class FlexDisplayDensity {
     }
 
     public int forSize(Size size) {
-        long scaled = (long) dpi * size.getMax() / longEdge;
+        long scaled = ((long) dpi * size.getMax() + longEdge / 2) / longEdge;
         return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, scaled));
     }
 }

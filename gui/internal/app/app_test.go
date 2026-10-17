@@ -844,6 +844,7 @@ func TestSaveProfileAndRestartInjectsParams(t *testing.T) {
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 		KeepDeviceAwake: true, KeepDeviceAwakeSet: true,
+		VideoSmoothingSet: true, VideoSmoothingFrames: 2,
 	}
 	// 两次 Start 的 goroutine 调度顺序不定：重启那一次必须带该模式覆盖参数
 	// （usb 套；wifi 未保存自定义 → 不注入）
@@ -892,6 +893,7 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 		KeepDeviceAwake: true, KeepDeviceAwakeSet: true,
+		VideoSmoothingSet: true, VideoSmoothingFrames: 2,
 	}
 	if got != want {
 		t.Fatalf("记忆档未按模式注入: %+v, want %+v", got, want)
@@ -915,6 +917,7 @@ func TestStartCastAppliesSavedProfile(t *testing.T) {
 		// 设置面板开关 A：GUI 会话总是显式注入参数控件启动可见性（默认=显示）
 		OverlayVisible: true, OverlayVisibleSet: true,
 		KeepDeviceAwake: true, KeepDeviceAwakeSet: true,
+		VideoSmoothingSet: true, VideoSmoothingFrames: 2,
 	}
 	if got2 != want2 {
 		t.Fatalf("仅无线自定义应只注入 wifi 套: %+v, want %+v", got2, want2)

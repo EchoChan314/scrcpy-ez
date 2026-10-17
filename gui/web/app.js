@@ -1554,6 +1554,12 @@
 
   function closeAppWinModal(afterClose) {
     leaveNotificationView(function () {
+      var w = appWins[appWinModalSerial];
+      if (w) {
+        w.gridGeneration = (w.gridGeneration || 0) + 1;
+        w.listCheckToken = (w.listCheckToken || 0) + 1; w.listCheckPolling = false;
+        if (w.iconObserver) { w.iconObserver.disconnect(); w.iconObserver = null; }
+      }
       appWinModalSerial = null;
       appWinNotificationView = false;
       el('appwin-modal').style.display = 'none';
@@ -1680,8 +1686,8 @@
   // v2.1.74（主人拍板）：分辨率档与主投屏 res 栏同口径——**只显示长边数字**，
   // 短边按设备宽高比由后端换算（mdns10ProfileRes；虚拟屏注入仍是完整 WxH）。
   var APPSET_FIELDS = {
-    size: { label: '分辨率档', unit: '', fixed: [2560, 1920, 1080, 720] },
-    fps: { label: '刷新率上限', unit: ' fps', fixed: [120, 90, 60, 30] },
+    size: { label: '分辨率档', unit: '', fixed: [2560, 1920, 1080] },
+    fps: { label: '刷新率上限', unit: ' fps', fixed: [120, 90, 60] },
     bit: { label: '码率上限', unit: ' Mbps', fixed: [32, 16, 8, 4] },
     dpi: { label: '界面密度', unit: '', isDpi: true, fixed: [160, 240, 320, 480] }
   };
@@ -1711,13 +1717,14 @@
       // v2.1.74：size=长边数字（后端已归一化；parseInt 顺带兼容旧 WxH 文本）。
       var def = {
         size: parseInt(defRaw.size, 10) || 1280,
-        fps: defRaw.fps || 60,
+        fps: mode === 'wifi' ? 60 : (defRaw.fps || 60),
         bit: defRaw.bitrate || 8,
         dpi: 0
       };
+      var nativeFPS = (v && v.usbDef && v.usbDef.fps) || def.fps;
       var tiers = {
-        size: SCEZAppSetState.buildTiers(def.size, APPSET_FIELDS.size.fixed),
-        fps: SCEZAppSetState.buildTiers(def.fps, APPSET_FIELDS.fps.fixed),
+        size: nativeTiers(APPSET_FIELDS.size.fixed, def.size),
+        fps: frameRateTiers(APPSET_FIELDS.fps.fixed, nativeFPS, mode),
         bit: SCEZAppSetState.buildTiers(def.bit, APPSET_FIELDS.bit.fixed),
         // dpi：「自动」（0）恒排最左，其后固定档降序（与「默认档在最左」的既有习惯一致）。
         dpi: [0].concat(SCEZAppSetState.buildTiers(null, APPSET_FIELDS.dpi.fixed))
@@ -1729,7 +1736,7 @@
         return SCEZAppSetState.infer({ val: val, base: def[f], custom: isSet, edit: false, input: '' }, tiers[f]);
       }
       appSetState = {
-        serial: serial, pkg: pkg, name: name, mode: mode,
+        serial: serial, pkg: pkg, name: name, mode: mode, nativeFPS: nativeFPS,
         ratioW: cur.ratioW ? String(cur.ratioW) : '',
         ratioH: cur.ratioH ? String(cur.ratioH) : '',
         flex: cur.flex === undefined ? true : !!cur.flex,
@@ -1757,6 +1764,7 @@
       m.classList.remove('fade-in');
       void m.offsetWidth;
       m.classList.add('fade-in');
+      watchNativeDefaults(v.identity || serial, appSetState, true);
     }).catch(function (e) {
       toast('读取窗口设置失败：' + (e && e.message ? e.message : e));
     });
@@ -2169,9 +2177,13 @@
   // loadAppWinApps：拉应用列表（RPC：内存缓存→档案回退）；非空即停轮询。
   function loadAppWinApps(serial) {
     var w = appWins[serial];
-    if (!w) return;
-    if (typeof window.GetAppList !== 'function') { w.loaded = true; renderAppWinGrid(serial); return; }
+    if (!w || w.listLoadPending) return;
+    w.listLoadPending = true;
+    var revision = w.listRevision;
+    if (typeof window.GetAppList !== 'function') { w.listLoadPending = false; w.loaded = true; renderAppWinGrid(serial); return; }
     window.GetAppList(serial).then(function (items) {
+      w.listLoadPending = false;
+      if (appWins[serial] !== w || w.listRevision !== revision) return;
       items = items || [];
       var changed = !sameAppList(w.apps, items);
       if (changed) invalidateAppIconsForChanges(serial, w.apps, items);
@@ -2187,7 +2199,7 @@
         return;
       }
       renderAppWinGrid(serial);
-    }).catch(function () { renderAppWinGrid(serial); });
+    }).catch(function () { w.listLoadPending = false; if (appWins[serial] === w) renderAppWinGrid(serial); });
   }
 
   function sameAppList(a, b) {
@@ -2209,47 +2221,114 @@
   }
 
   // 点击入口的静默检测与图标同步均在后台运行；只有实际列表变化才替换数据/重绘。
-  function checkAppListSilently(serial) {
+  function renderAppReadStatus(serial) {
+    if (appWinModalSerial !== serial) return;
+    var w = appWins[serial], status = w && w.readStatus;
+    var bar = el('appwin-read-status'), message = el('appwin-read-message'), retry = el('appwin-read-retry');
+    if (!bar || !message || !retry) return;
+    var text = '', failed = status && (status.phase === 'error' || status.phase === 'partial');
+    var notificationView = typeof appWinNotificationView !== 'undefined' && appWinNotificationView;
+    if (failed) text = status.error || '读取尚未完成，可重试';
+    else if (!notificationView && status && status.busy && status.hasCatalog) text = '应用 ' + (status.appCount || 0) + (status.iconTotal ? ' · 图标 ' + (status.iconDone || 0) + '/' + status.iconTotal : '');
+    else if (!notificationView && status && status.busy) text = status.total ? '正在读取 ' + (status.current || 0) + '/' + status.total : '正在读取应用…';
+    if (!text) {
+      var hide = function () {
+        bar.scezReadFadeTimer = null;
+        bar.style.display = 'none';
+        bar.classList.remove('read-fading');
+        message.textContent = ''; message.title = '';
+      };
+      var reduceMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (notificationView || reduceMotion || bar.style.display === 'none' || !message.textContent) {
+        if (bar.scezReadFadeTimer != null) clearTimeout(bar.scezReadFadeTimer);
+        bar.scezReadFadeToken = (bar.scezReadFadeToken || 0) + 1;
+        hide();
+      } else if (bar.scezReadFadeTimer == null) {
+        bar.classList.add('read-fading');
+        var token = bar.scezReadFadeToken = (bar.scezReadFadeToken || 0) + 1;
+        bar.scezReadFadeTimer = setTimeout(function () { if (bar.scezReadFadeToken === token) hide(); }, 200);
+      }
+      return;
+    }
+    if (bar.scezReadFadeTimer != null) clearTimeout(bar.scezReadFadeTimer);
+    bar.scezReadFadeTimer = null;
+    bar.scezReadFadeToken = (bar.scezReadFadeToken || 0) + 1;
+    bar.classList.remove('read-fading');
+    bar.style.display = 'flex';
+    bar.classList.toggle('read-error', !!failed);
+    if (message.textContent !== text) { message.textContent = text; message.title = text; }
+    retry.style.display = failed ? '' : 'none';
+    retry.disabled = !!(status && status.busy);
+  }
+
+  function checkAppListSilently(serial, joinOnly) {
     var w = appWins[serial];
     if (!w || w.listCheckPolling || typeof window.CheckAppList !== 'function' ||
         typeof window.IsAppListCheckBusy !== 'function') return;
     w.listCheckPolling = true;
-    window.CheckAppList(serial).then(function (watching) {
-      if (!watching) { w.listCheckPolling = false; return; }
-      var token = (w.listCheckToken || 0) + 1;
-      w.listCheckToken = token;
-      function finish() {
-        if (w.listCheckToken === token) w.listCheckPolling = false;
-      }
+    w.iconSeen = Object.create(null);
+    var token = (w.listCheckToken || 0) + 1;
+    w.listCheckToken = token;
+    function current() { return appWins[serial] === w && w.listCheckToken === token; }
+    function finish() { if (w.listCheckToken === token) w.listCheckPolling = false; }
+    Promise.resolve(joinOnly ? true : window.CheckAppList(serial)).then(function (watching) {
+      if (!current() || !watching) { finish(); return; }
+      function next(status) { if (current() && status && status.busy) setTimeout(poll, 900); else finish(); }
       function poll() {
-        if (appWins[serial] !== w || w.listCheckToken !== token) { finish(); return; }
+        if (!current()) { finish(); return; }
         window.IsAppListCheckBusy(serial).then(function (status) {
-          if (appWins[serial] !== w || w.listCheckToken !== token) { finish(); return; }
-          if (!!w.initialIconBusy !== !!(status && status.initialIconBusy)) {
-            w.initialIconBusy = !!(status && status.initialIconBusy);
+          if (!current()) { finish(); return; }
+          status = status || {};
+          w.readStatus = status;
+          if (typeof renderAppReadStatus === 'function') renderAppReadStatus(serial);
+          if (!!w.initialIconBusy !== !!status.initialIconBusy) {
+            w.initialIconBusy = !!status.initialIconBusy;
             renderAppWinGrid(serial);
           }
-          if (status && status.busy) { setTimeout(poll, 900); return; }
-          if (status && status.icons && status.icons.length) {
-            deviceIcons.refresh(w.identity || iconIdentity(serial), status.icons);
-          }
-          if (!status || !status.changed) { finish(); return; }
-          return window.GetAppList(serial).then(function (items) {
-            items = items || [];
-            if (!sameAppList(w.apps, items)) {
-              invalidateAppIconsForChanges(serial, w.apps, items);
-              w.apps = items;
-              w.loaded = true;
-              w.pollLeft = 0;
-              renderAppWinGrid(serial);
-            }
-            finish();
+          if (status.job && status.job !== w.iconJob) { w.iconJob = status.job; w.iconSeen = Object.create(null); }
+          var freshIcons = (status.icons || []).filter(function (pkg) {
+            if (w.iconSeen[pkg]) return false;
+            w.iconSeen[pkg] = true;
+            return true;
           });
-        }).catch(finish);
+          if (freshIcons.length) deviceIcons.refresh(w.identity || iconIdentity(serial), freshIcons);
+          var ready = status.hasCatalog && (!w.loaded || w.listRevision !== status.revision);
+          if (!ready && !(status.changed && !status.busy)) {
+            if (!status.busy && !w.loaded) renderAppWinGrid(serial);
+            next(status); return;
+          }
+          return window.GetAppList(serial).then(function (items) {
+            if (!current()) { finish(); return; }
+            items = items || [];
+            var changed = !sameAppList(w.apps, items), wasLoaded = w.loaded;
+            if (changed) invalidateAppIconsForChanges(serial, w.apps, items);
+            w.apps = items; w.loaded = true; w.pollLeft = 0; w.listRevision = status.revision;
+            if (changed || !wasLoaded) renderAppWinGrid(serial);
+            next(status);
+          });
+        }).catch(function () {
+          if (!current()) return;
+          w.readStatus = {phase:'error',error:'读取暂时中断，请重试'};
+          if (typeof renderAppReadStatus === 'function') renderAppReadStatus(serial);
+          if (!w.loaded) renderAppWinGrid(serial);
+          finish();
+        });
       }
       poll();
-    }).catch(function () { w.listCheckPolling = false; });
+    }).catch(function () {
+      if (!current()) return;
+      w.readStatus = {phase:'error',error:'读取暂时中断，请重试'};
+      if (typeof renderAppReadStatus === 'function') renderAppReadStatus(serial);
+      if (!w.loaded) renderAppWinGrid(serial);
+      finish();
+    });
   }
+
+  el('appwin-read-retry').addEventListener('click', function () {
+    var serial = appWinModalSerial, w = appWins[serial];
+    if (!w || w.listCheckPolling || typeof window.RefreshAppList !== 'function') return;
+    window.RefreshAppList(serial).then(function () { checkAppListSilently(serial, true); }).catch(function (e) { toast(String(e)); });
+  });
 
   // tickAppWins：全局轮询（refreshNow 每 0.7s）驱动——未加载成功且额度未尽的继续拉。
   function tickAppWins() {
@@ -2267,15 +2346,18 @@
     var w = appWins[serial];
     if (!w || appWinModalSerial !== serial) return;
     var box = el('appwin-modal-grid');
+    var generation = (w.gridGeneration || 0) + 1; w.gridGeneration = generation;
+    if (w.iconObserver) { w.iconObserver.disconnect(); w.iconObserver = null; }
+    renderAppReadStatus(serial);
     renderAppNotificationControls(serial);
     var notificationPolicy = notificationPolicyFor(w.identity || deviceIdentityOf(serial));
-    el('appwin-modal-search').disabled = !!w.initialIconBusy;
-    if (w.initialIconBusy) {
-      box.innerHTML = '<div class="appwin-loading">正在读取应用图标…</div>';
+    el('appwin-modal-search').disabled = !!w.initialIconBusy && !w.loaded;
+    if (w.initialIconBusy && !w.loaded) {
+      box.innerHTML = '<div class="appwin-loading">' + (appWinNotificationView ? '通知来源准备中…' : '正在读取应用图标…') + '</div>';
       return;
     }
     if (!w.loaded && (w.apps || []).length === 0) {
-      box.innerHTML = '<div class="appwin-loading">正在读取应用列表…</div>';
+      box.innerHTML = '<div class="appwin-loading">' + (w.readStatus && w.readStatus.phase === 'error' ? '未能读取应用列表，请点击重试' : appWinNotificationView ? '通知来源准备中…' : '正在读取应用列表…') + '</div>';
       return;
     }
     // v2.1.18 搜索升级：名称/包名子串（原有）+ 拼音模糊（app_search.js：
@@ -2283,11 +2365,23 @@
     // 模块缺失时降级=原名称/包名子串（同 build 内嵌，理论不可达，防御）。
     var filtered = appWinVisibleApps(w);
     if (filtered.length === 0) {
-      box.innerHTML = '<div class="appwin-loading">没有匹配的应用</div>';
+      box.innerHTML = '<div class="appwin-loading">' + ((w.apps || []).length ? '没有匹配的应用' : '此设备暂无可启动应用') + '</div>';
       return;
     }
     box.innerHTML = '';
-    filtered.forEach(function (a) {
+    if (typeof deviceIcons.prune === 'function') deviceIcons.prune();
+    var observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(function (entries) {
+      if (appWins[serial] !== w || w.gridGeneration !== generation || appWinModalSerial !== serial) return;
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) { observer.unobserve(entry.target); requestIcon(serial, entry.target.scezPkg, entry.target); }
+      });
+    }, {root:box, rootMargin:'180px'}) : null;
+    w.iconObserver = observer;
+    var cursor = 0;
+    function appendBatch() {
+      if (appWins[serial] !== w || w.gridGeneration !== generation || appWinModalSerial !== serial) return;
+      var end = Math.min(cursor + 48, filtered.length);
+      filtered.slice(cursor, end).forEach(function (a) {
       var card = document.createElement('button');
       card.type = 'button';
       card.className = 'appwin-app';
@@ -2314,7 +2408,7 @@
         icon.classList.add('notification-other-icon');
         icon.style.backgroundColor = '#26382f';
         icon.innerHTML = SCEZNotificationIcons.svg('moon-star');
-      } else if (a.pkg) requestIcon(serial, a.pkg, icon); // 有 PNG 则替换彩块（懒加载+缓存）
+      } else if (a.pkg) { icon.scezPkg = a.pkg; if (observer) observer.observe(icon); else requestIcon(serial, a.pkg, icon); } // 有 PNG 则替换彩块（懒加载+缓存）
       var label = document.createElement('span');
       label.textContent = a.name || a.pkg;
       iconWrap.appendChild(icon);
@@ -2337,7 +2431,14 @@
         }
       });
       box.appendChild(card);
-    });
+      });
+      cursor = end;
+      if (cursor < filtered.length) {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(appendBatch);
+        else setTimeout(appendBatch, 0);
+      }
+    }
+    appendBatch();
   }
 
   // v2.1.52：会话页组件模板/绑定/引用抽常量与函数（新建会话页 与「蓝灯页→会话页
@@ -3188,6 +3289,7 @@
       pairApplyPending(list[0]);
     } else {
       pairCtx.idx = idx;
+      pairApplyPending(list[idx]);
     }
   }
 
@@ -3442,7 +3544,7 @@
     if (phase === 'pairing' || phase === 'connecting' || phase === 'verifying') {
       sub += (ps.mode === 'qr') ? '已扫码，正在配对…' : '正在配对…';
     } else {
-      sub += '配对端口已自动获取';
+      sub += pairCtx.pairPort ? '配对端口已自动获取' : '请打开设备的配对码页面';
     }
     addrEl.textContent = sub;
     el('pair-swap').style.display = n > 1 ? '' : 'none';
@@ -3970,8 +4072,8 @@
   var paramState = null;
 
   var PARAM_FIELDS = {
-    res: { label: '分辨率档', unit: '', tiers: [2560, 1920, 1080, 720] },
-    fps: { label: '刷新率上限', unit: ' fps', tiers: [120, 90, 60, 30] },
+    res: { label: '分辨率档', unit: '', tiers: [2560, 1920, 1080] },
+    fps: { label: '刷新率上限', unit: ' fps', tiers: [120, 90, 60] },
     bit: { label: '码率上限', unit: ' Mbps', tiers: [120, 80, 60, 40, 15] }
   };
   var PARAM_NOTES = {
@@ -3999,6 +4101,92 @@
   function fmtKeyboardMode(v) { return String(v || '').toUpperCase(); }
 
   // 档位列表 = 阶梯构造：最左=baseline 值（选中），右侧=标准档中小于 baseline 的
+  function nativeTiers(std, maximum) {
+    if (!(maximum > 0)) return std.slice();
+    return [maximum].concat(std.filter(function (value) { return value < maximum; }));
+  }
+
+  function frameRateTiers(std, maximum, mode) {
+    var tiers = nativeTiers(std, maximum);
+    // 60 is a capture ceiling, including when a low-refresh screen reports less.
+    if (mode === 'wifi' && tiers.indexOf(60) < 0) tiers.push(60);
+    return tiers;
+  }
+
+  // Metadata arriving late may update a default, never an in-progress edit or
+  // an explicitly chosen value. An above-native custom value remains editable.
+  function rebaseNativeField(field, value, tiers) {
+    if (!(value > 0)) return;
+    var followsDefault = !field.edit && field.val === field.base;
+    field.base = value;
+    if (followsDefault) field.val = value;
+    if (!field.edit && tiers.indexOf(field.val) < 0) {
+      field.edit = true;
+      field.input = String(field.val);
+    }
+  }
+
+  function applyNativeDefaults(state, native, isApp) {
+    if (!native || !(native.longEdge > 0 || native.fps > 0 || native.dpi > 0)) return false;
+    var stamp = [native.longEdge, native.fps, native.dpi, native.densityLongEdge].join(':');
+    if (state.nativeStamp === stamp) return false;
+    state.nativeStamp = stamp;
+    if (native.fps > 0) state.nativeFPS = native.fps;
+    if (isApp) {
+      [['size', native.longEdge], ['fps', native.fps]].forEach(function (entry) {
+        var f = entry[0], value = entry[1];
+        if (!(value > 0)) return;
+        state.tiers[f] = f === 'fps' ? frameRateTiers(APPSET_FIELDS[f].fixed, value, state.mode) : nativeTiers(APPSET_FIELDS[f].fixed, value);
+        rebaseNativeField(state.fields[f], f === 'fps' && state.mode === 'wifi' ? 60 : value, state.tiers[f]);
+      });
+      if (native.dpi > 0 && native.densityLongEdge > 0) {
+        state.physDpi = native.dpi;
+        state.physLong = native.densityLongEdge;
+      }
+    } else {
+      ['usb', 'wifi'].forEach(function (mode) {
+        var profile = state.profile[mode];
+        var base = profile.baseline || Object.assign({}, PARAM_FALLBACK[mode]);
+        [['res', native.longEdge], ['fps', native.fps]].forEach(function (entry) {
+          var f = entry[0], value = entry[1];
+          if (!(value > 0)) return;
+          base[f] = f === 'fps' && mode === 'wifi' ? 60 : value;
+          var tiers = f === 'fps' ? frameRateTiers(PARAM_FIELDS[f].tiers, value, mode) : nativeTiers(PARAM_FIELDS[f].tiers, value);
+          rebaseNativeField(state.fields[mode][f], base[f], tiers);
+          profile[f] = state.fields[mode][f].val;
+        });
+        profile.baseline = base;
+      });
+    }
+    return true;
+  }
+
+  function watchNativeDefaults(serial, state, isApp) {
+    if (typeof window.GetNativeDisplay !== 'function') return;
+    var attempts = 0;
+    function current() {
+      return (isApp ? appSetState : paramState) === state &&
+        el(isApp ? 'appset-modal' : 'param-modal').style.display !== 'none';
+    }
+    function poll() {
+      if (!current()) return;
+      window.GetNativeDisplay(serial).then(function (native) {
+        if (!current()) return;
+        // Keep custom text/ratio input focused while background metadata arrives.
+        if (document.activeElement && document.activeElement.tagName === 'INPUT' &&
+            el(isApp ? 'appset-modal' : 'param-modal').contains(document.activeElement)) {
+          setTimeout(poll, 900);
+          return;
+        }
+        if (applyNativeDefaults(state, native, isApp)) {
+          if (isApp) renderAppSetModal(); else renderParamModal();
+        }
+        if (!(native && native.longEdge > 0 && native.fps > 0) && ++attempts < 24) setTimeout(poll, 900);
+      }).catch(function () { if (current() && ++attempts < 24) setTimeout(poll, 900); });
+    }
+    poll();
+  }
+
   function ladderTiers(std, x) {
     if (!x || x <= 0) return std.slice();
     if (x >= std[0]) {
@@ -4030,12 +4218,12 @@
   }
 
   // 打开时的字段状态推断（纯函数 SCEZParamState.infer）
-  function initField(p, f, tiers, fb) {
+  function initField(p, f, tiers, fb, mode, maximum) {
     var val = f === 'res' ? p.res : (f === 'fps' ? p.fps : p.bitrate);
     var base = baseValOf(fb, f);
     return SCEZParamState.infer(
       { val: val, base: base, custom: p.custom, edit: false, input: '' },
-      ladderTiers(tiers, base));
+      (f === 'bit' ? ladderTiers(tiers, base) : (f === 'fps' ? frameRateTiers(tiers, maximum || base, mode) : nativeTiers(tiers, base))));
   }
 
   // 构造一套参数状态（浮窗/管理页共用）：两套模式字段全部初始化（每栏独立状态机）
@@ -4050,6 +4238,7 @@
       mode: mode,
       activeField: 'res',
       profile: { usb: usb, wifi: wifi },
+      nativeFPS: usbFB.fps,
       // v2.1.78：声音档位（两套独立记忆；后端 GetProfile 已归一为最终值，空兜底 pc）
       audio: { usb: (usb.audio || 'pc'), wifi: (wifi.audio || 'pc') },
       // v2.1.91：编码格式（两套独立记忆；空兜底默认）
@@ -4059,12 +4248,12 @@
       fields: {
         usb: {
           res: initField(usb, 'res', PARAM_FIELDS.res.tiers, usbFB),
-          fps: initField(usb, 'fps', PARAM_FIELDS.fps.tiers, usbFB),
+          fps: initField(usb, 'fps', PARAM_FIELDS.fps.tiers, usbFB, 'usb', usbFB.fps),
           bit: initField(usb, 'bit', PARAM_FIELDS.bit.tiers, usbFB)
         },
         wifi: {
           res: initField(wifi, 'res', PARAM_FIELDS.res.tiers, wifiFB),
-          fps: initField(wifi, 'fps', PARAM_FIELDS.fps.tiers, wifiFB),
+          fps: initField(wifi, 'fps', PARAM_FIELDS.fps.tiers, wifiFB, 'wifi', usbFB.fps),
           bit: initField(wifi, 'bit', PARAM_FIELDS.bit.tiers, wifiFB)
         }
       }
@@ -4124,7 +4313,7 @@
       var st = curField(state, f);
       var val = st.val;
       var explicit = st.edit; // 本栏是否处于自定义输入态
-      var tiers = ladderTiers(fd.tiers, baseVal); // 最左=bat 基准默认值
+      var tiers = f === 'bit' ? ladderTiers(fd.tiers, baseVal) : (f === 'fps' ? frameRateTiers(fd.tiers, state.nativeFPS || baseVal, state.mode) : nativeTiers(fd.tiers, baseVal));
 
       // v2.1.79：刷新率/码率栏加「锁定」按钮——锁定后该维度不被 ABR 自适应调整
       var lockable = (f === 'fps' || f === 'bit');
@@ -4247,6 +4436,7 @@
       });
       renderParamModal();
       el('param-modal').style.display = '';
+      watchNativeDefaults(serial, paramState, false);
     }).catch(function (e) {
       toast('读取参数失败：' + (e && e.message ? e.message : e));
     });
@@ -4356,7 +4546,7 @@
   // ---------- 设置面板（右上角齿轮；两个开关即时保存，重启后保持） ----------
   // Go 侧 settings.json 是权威值：每次快照回家；面板打开时按它渲染开关状态。
   // 点击开关先本地翻转（即时反馈）再调 SetSettings 落盘，失败提示（快照下一轮会纠正）。
-  var settingsState = { showParamOverlay: true, closeToTray: false, keepDeviceAwake: true, otherAppWinSystemDecorations: true, notificationDefault: true, notificationPreview: true, notificationDevices: {}, notificationCopyMinutes: 1440 };
+  var settingsState = { showParamOverlay: true, closeToTray: false, keepDeviceAwake: true, videoSmoothing: false, videoSmoothingFrames: 2, otherAppWinSystemDecorations: true, notificationDefault: true, notificationPreview: true, notificationDevices: {}, notificationCopyMinutes: 1440 };
   var notificationDraft = null;
   // ---------- Device notification policies (rc.9 settings migrate in the backend) ----------
   function notificationPolicyFor(identity) {
@@ -4407,6 +4597,7 @@
       if (notificationSaving) hint = '正在保存通知设置…';
     }
     el('appwin-modal-hint').textContent = hint;
+    el('appwin-modal-hint').title = hint;
     var preview = policy.preview === undefined ? settingsState.notificationPreview : policy.preview;
     Array.prototype.forEach.call(el('notification-preview').querySelectorAll('input'), function (input) { input.checked = input.value === (preview ? 'full' : 'hidden'); });
     el('notification-preview').disabled = notificationSaving || !identity;
@@ -4663,6 +4854,13 @@
     setSwitch(el('set-overlay'), settingsState.showParamOverlay);
     setSwitch(el('set-tray'), settingsState.closeToTray);
     setSwitch(el('set-keep-awake'), settingsState.keepDeviceAwake);
+    setSwitch(el('set-smoothing'), settingsState.videoSmoothing);
+    [1, 2].forEach(function (frames) {
+      var button = el(frames === 1 ? 'set-smoothing-one' : 'set-smoothing-two');
+      button.setAttribute('aria-pressed', settingsState.videoSmoothingFrames === frames ? 'true' : 'false');
+      button.disabled = !settingsState.videoSmoothing || smoothingSaving;
+    });
+    el('set-smoothing').setAttribute('aria-disabled', smoothingSaving ? 'true' : 'false');
     setSwitch(el('set-appwin-decor'), settingsState.otherAppWinSystemDecorations);
   }
 
@@ -4671,6 +4869,10 @@
     settingsState.showParamOverlay = !!st.settings.showParamOverlay;
     settingsState.closeToTray = !!st.settings.closeToTray;
     settingsState.keepDeviceAwake = st.settings.keepDeviceAwake !== false;
+    if (!smoothingSaving) {
+      settingsState.videoSmoothing = st.settings.videoSmoothing === true;
+      settingsState.videoSmoothingFrames = st.settings.videoSmoothingFrames === 1 ? 1 : 2;
+    }
     settingsState.otherAppWinSystemDecorations = st.settings.otherAppWinSystemDecorations !== false;
     settingsState.notificationDefault = !!st.settings.notificationDefault;
     settingsState.notificationPreview = st.settings.notificationPreview !== false;
@@ -4726,6 +4928,50 @@
       toast('设置保存失败：' + (e && e.message ? e.message : e));
     });
   });
+
+  var smoothingSaving = false;
+  function toggleVideoSmoothing() {
+    if (smoothingSaving) return;
+    var previous = settingsState.videoSmoothing === true;
+    settingsState.videoSmoothing = !previous;
+    smoothingSaving = true;
+    renderSettings();
+    SetVideoSmoothing(settingsState.videoSmoothing).then(function () {
+      smoothingSaving = false;
+      renderSettings();
+    }).catch(function (e) {
+      smoothingSaving = false;
+      settingsState.videoSmoothing = previous;
+      renderSettings();
+      toast('设置保存失败：' + (e && e.message ? e.message : e));
+    });
+  }
+  el('set-smoothing').addEventListener('click', toggleVideoSmoothing);
+  el('set-smoothing').addEventListener('keydown', function (ev) {
+    if (ev.key === ' ' || ev.key === 'Enter') {
+      ev.preventDefault();
+      toggleVideoSmoothing();
+    }
+  });
+
+  function selectVideoSmoothingFrames(frames) {
+    if (smoothingSaving || !settingsState.videoSmoothing || settingsState.videoSmoothingFrames === frames) return;
+    var previous = settingsState.videoSmoothingFrames;
+    settingsState.videoSmoothingFrames = frames;
+    smoothingSaving = true;
+    renderSettings();
+    SetVideoSmoothingFrames(frames).then(function () {
+      smoothingSaving = false;
+      renderSettings();
+    }).catch(function (e) {
+      smoothingSaving = false;
+      settingsState.videoSmoothingFrames = previous;
+      renderSettings();
+      toast('设置保存失败：' + (e && e.message ? e.message : e));
+    });
+  }
+  el('set-smoothing-one').addEventListener('click', function () { selectVideoSmoothingFrames(1); });
+  el('set-smoothing-two').addEventListener('click', function () { selectVideoSmoothingFrames(2); });
 
   var lastProfileSaveError = '';
   // ---------- 轮询主循环 ----------

@@ -176,6 +176,37 @@ static void test_hwdec_with_ez_options(void) {
     assert(!scrcpy_parse_args(&args, ARRAY_LEN(invalid), invalid));
 }
 
+static void test_auto_video_buffer(void) {
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    assert(!args.opts.video_buffer_auto && !args.opts.video_buffer);
+    char *automatic[] = {"scrcpy", "--video-buffer=auto"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(automatic), automatic));
+    assert(args.opts.video_buffer_auto && args.opts.video_buffer > 0);
+    assert(args.opts.video_buffer_auto_frames == 2);
+    char *one_frame[] = {"scrcpy", "--video-buffer=auto:1"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(one_frame), one_frame));
+    assert(args.opts.video_buffer_auto && args.opts.video_buffer_auto_frames == 1);
+    char *two_frames[] = {"scrcpy", "--video-buffer=auto:2"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(two_frames), two_frames));
+    assert(args.opts.video_buffer_auto && args.opts.video_buffer_auto_frames == 2);
+
+    args.opts = scrcpy_options_default;
+    char *fixed_last[] = {"scrcpy", "--video-buffer=auto", "--video-buffer=0"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(fixed_last), fixed_last));
+    assert(!args.opts.video_buffer_auto && !args.opts.video_buffer);
+
+    args.opts = scrcpy_options_default;
+    char *auto_last[] = {"scrcpy", "--video-buffer=32", "--video-buffer=auto"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(auto_last), auto_last));
+    assert(args.opts.video_buffer_auto);
+
+    args.opts = scrcpy_options_default;
+    char *invalid[] = {"scrcpy", "--video-buffer=automatic"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(invalid), invalid));
+    char *invalid_frames[] = {"scrcpy", "--video-buffer=auto:3"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(invalid_frames), invalid_frames));
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -186,5 +217,6 @@ int main(int argc, char *argv[]) {
     test_options2();
     test_parse_shortcut_mods();
     test_hwdec_with_ez_options();
+    test_auto_video_buffer();
     return 0;
 }

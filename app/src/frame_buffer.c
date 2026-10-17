@@ -1,4 +1,5 @@
 #include "frame_buffer.h"
+#include "frame_trace.h"
 
 #include <assert.h>
 
@@ -55,10 +56,15 @@ sc_frame_buffer_push(struct sc_frame_buffer *fb, const AVFrame *frame) {
 
     // Now that av_frame_ref() succeeded, we can replace the previous
     // pending_frame
+    if (!fb->pending_frame_consumed) {
+        SC_TRACE(SC_TRACE_FRAME_REPLACE, fb->pending_frame->opaque_ref,
+                 fb->pending_frame->pts, 1, frame->pts, 0);
+    }
     swap_frames(&fb->pending_frame, &fb->tmp_frame);
     av_frame_unref(fb->tmp_frame);
 
     fb->pending_frame_consumed = false;
+    SC_TRACE(SC_TRACE_FRAME_PUSH, frame->opaque_ref, frame->pts, 1, 0, 0);
     return true;
 }
 
@@ -68,6 +74,7 @@ sc_frame_buffer_consume(struct sc_frame_buffer *fb, AVFrame *dst) {
     fb->pending_frame_consumed = true;
 
     av_frame_move_ref(dst, fb->pending_frame);
+    SC_TRACE(SC_TRACE_FRAME_CONSUME, dst->opaque_ref, dst->pts, 0, 0, 0);
     // av_frame_move_ref() resets its source frame, so no need to call
     // av_frame_unref()
 }

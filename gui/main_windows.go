@@ -162,7 +162,7 @@ var githubMarkPNG []byte
 var giteeMarkSVG []byte
 
 const (
-	version = "v2.4.0"
+	version = "v2.4.1"
 )
 
 // appDir gui53 产品级修复：返回 exe 所在目录（发行包内 bat 与 GUI 同级解压）。

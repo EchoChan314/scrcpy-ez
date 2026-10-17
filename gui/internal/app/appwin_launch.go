@@ -88,6 +88,7 @@ type appWinState struct {
 
 // devPhys 是设备物理参数（虚拟屏 dpi 等比公式的输入）。
 type devPhys struct {
+	native   NativeDisplay
 	width    int       // 主屏自然方向宽度（wm size；设备卡片的 Res 已丢失方向）
 	height   int       // 主屏自然方向高度
 	longSide int       // 主屏长边（px，wm size）
@@ -238,6 +239,9 @@ func (a *App) startAppWinWithRestart(serial, pkg, name string, notification, res
 	// App windows work independently of the phone's lock screen.
 	params.KeepDeviceAwake = false
 	params.KeepDeviceAwakeSet = true
+	params.VideoSmoothing = settings.VideoSmoothing
+	params.VideoSmoothingFrames = settings.VideoSmoothingFrames
+	params.VideoSmoothingSet = true
 
 	// 会话级 runner（bat 实例）：回调按 serial#pkg 绑定，App 侧按 runner 身份防串
 	// （陈旧 runner 的迟到回调不污染替换后的新会话）。
@@ -647,17 +651,31 @@ var (
 func (a *App) devicePhys(serial string) devPhys {
 	identity := a.appListKeyFor(serial)
 	a.physMu.Lock()
-	if p, ok := a.physCache[identity]; ok && time.Since(p.at) < appWinPhysTTL {
+	previous := a.physCache[identity]
+	ttl := appWinPhysTTL
+	if previous.native.FPS == 0 {
+		ttl = 30 * time.Second
+	}
+	if p, ok := a.physCache[identity]; ok && time.Since(p.at) < ttl {
 		a.physMu.Unlock()
 		return p
 	}
+	if a.physBusy[identity] {
+		a.physMu.Unlock()
+		return previous
+	}
+	if a.physBusy == nil {
+		a.physBusy = map[string]bool{}
+	}
+	a.physBusy[identity] = true
 	a.physMu.Unlock()
+	defer func() { a.physMu.Lock(); delete(a.physBusy, identity); a.physMu.Unlock() }()
 
 	// v2.1.84：等 adb 服务就绪（缓存路径已排除——真正的 adb 查询不落在抢庄窗口里）
 	a.waitSrvReady(context.Background())
 	transport := a.bestEnumSerial(identity, serial)
 
-	p := devPhys{at: time.Now()}
+	p := devPhys{native: previous.native, at: time.Now()}
 	// wm size 偶发失败（无线 adb 慢/设备忙——实测"长边=0"→ dpi 未注入跑 160）：
 	// 失败重试一次（短间隔）；仍失败则不缓存 longSide（下次启动重查）。
 	for attempt := 0; attempt < 2 && p.longSide == 0; attempt++ {
@@ -688,8 +706,25 @@ func (a *App) devicePhys(serial string) devPhys {
 			}
 		}
 	}
-	if p.longSide > 0 && p.dpi > 0 && identity == a.appListKeyFor(transport) {
+	if native, err := a.readNativeDisplay(identity, transport); err == nil {
+		p.native = native
+	} else {
+		bridge.DebugLog("[display] native modes pending serial=%s: %v", serial, err)
+		if p.native.LongEdge == 0 && p.longSide > 0 {
+			p.native = NativeDisplay{Width: p.width, Height: p.height, LongEdge: p.longSide, Source: "wm-size"}
+		}
+	}
+	if p.longSide == 0 {
+		p.width, p.height, p.longSide, p.dpi = previous.width, previous.height, previous.longSide, previous.dpi
+	}
+	if p.dpi == 0 && p.longSide == previous.longSide {
+		p.dpi = previous.dpi
+	}
+	if (p.longSide > 0 || p.native.LongEdge > 0) && identity == a.appListKeyFor(transport) {
 		a.physMu.Lock()
+		if a.physCache == nil {
+			a.physCache = map[string]devPhys{}
+		}
 		a.physCache[identity] = p
 		a.physMu.Unlock()
 	}
@@ -717,7 +752,7 @@ func (a *App) devicePhysCached(serial string) devPhys {
 	identity := a.appListKeyFor(serial)
 	a.physMu.Lock()
 	defer a.physMu.Unlock()
-	if p, ok := a.physCache[identity]; ok && time.Since(p.at) < appWinPhysTTL {
+	if p, ok := a.physCache[identity]; ok {
 		return p
 	}
 	return devPhys{}
@@ -826,6 +861,9 @@ func (a *App) appWinDefaults(serial string) AppWinParams {
 // 空（空则 mdns10ProfileRes 按 16:9 兜底）。与 mdns10DecorateSpecs 同链。
 func (a *App) nativeRes(serial string) string {
 	key := a.appListKeyFor(serial)
+	if p := a.devicePhysCached(key); p.native.Width > 0 && p.native.Height > 0 {
+		return fmt.Sprintf("%dx%d", max(p.native.Width, p.native.Height), min(p.native.Width, p.native.Height))
+	}
 	if e, ok := a.profiles.Entry(key); ok && e.Res != "" {
 		return e.Res
 	}
@@ -996,8 +1034,9 @@ func appWinInitialSize(native string, longEdge, ratioW, ratioH int) string {
 
 // AppWinParamsView 是 GetAppWinParams 返回（前端面板初始化：两套 + 当前形态）。
 type AppWinParamsView struct {
-	Usb  AppWinModeParams `json:"usb"`
-	Wifi AppWinModeParams `json:"wifi"`
+	Identity string           `json:"identity"`
+	Usb      AppWinModeParams `json:"usb"`
+	Wifi     AppWinModeParams `json:"wifi"`
 	// UsbDef/WifiDef = 设备默认档（v2.1.48 共享主投屏 baseline 换算）——前端
 	// 「重置/恢复默认」目标值 + 档位序列构建（buildTiers）用。
 	UsbDef  AppWinModeParams `json:"usbDef"`
@@ -1026,6 +1065,7 @@ func (a *App) GetAppWinParams(serial, pkg string) (AppWinParamsView, error) {
 		return AppWinParamsView{}, errors.New("参数不完整（serial/pkg 为空）")
 	}
 	identity := a.appWinProfileKey(serial, pkg)
+	a.GetNativeDisplay(identity)
 	var raw AppWinParams
 	if e, ok := a.profiles.Entry(identity); ok {
 		if pr, ok2 := e.AppParams[pkg]; ok2 {
@@ -1055,7 +1095,8 @@ func (a *App) GetAppWinParams(serial, pkg string) (AppWinParamsView, error) {
 		return NormalizeACodec(devV)
 	}
 	v := AppWinParamsView{
-		Usb: ap.Usb, Wifi: ap.Wifi,
+		Identity: identity,
+		Usb:      ap.Usb, Wifi: ap.Wifi,
 		UsbDef: def.Usb, WifiDef: def.Wifi,
 		UsbSet: !raw.Usb.Empty(), WifiSet: !raw.Wifi.Empty(),
 		Mode:       "usb",

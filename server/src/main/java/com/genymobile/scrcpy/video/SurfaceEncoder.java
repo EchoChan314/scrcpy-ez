@@ -261,6 +261,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     private final int videoBitRate;
     private final int maxSize;
     private final float maxFps;
+    private final EncoderFrameRate encoderFrameRate;
     private final boolean downsizeOnError;
     private final int minSizeAlignment;
     private final boolean ignoreVideoEncoderConstraints;
@@ -278,6 +279,12 @@ public class SurfaceEncoder implements AsyncProcessor {
     private final boolean abrLockFps;
     private final boolean abrLockBitrate;
     private final boolean abrDisabled;
+    private final boolean abrLegacy;
+    private final BacklogAbr backlogAbr;
+    private final EncodedRate encodedRate = new EncodedRate();
+    private final ClientBacklog clientBacklog;
+    private long lastStreamWriteMs;
+    private float effectiveMaxFpsForLog;
     // fps 维度使用的档位表：常态=标准表；fps 锁定时=锁定值重复的单值表。
     private final int[] fpsLevels;
 
@@ -292,7 +299,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     private VideoConstraints videoConstraints;
 
     public SurfaceEncoder(SurfaceCapture capture, Streamer streamer, Options options,
-            DeviceMessageSender deviceMessageSender) {
+            DeviceMessageSender deviceMessageSender, ClientBacklog clientBacklog) {
         this.capture = capture;
         this.streamer = streamer;
         this.deviceMessageSender = deviceMessageSender;
@@ -309,6 +316,14 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.abrLockFps = lockFpsReq;
         this.abrLockBitrate = options.isAbrLockBitrate();
         this.abrDisabled = this.abrLockFps && this.abrLockBitrate;
+        this.abrLegacy = options.isAbrLegacy();
+        this.clientBacklog = clientBacklog;
+        // Only display capture has a live GL cadence actuator. A camera must
+        // not advertise an FPS reduction that its capture path cannot apply.
+        boolean dynamicFpsAvailable = capture instanceof ScreenCapture || capture instanceof NewDisplayCapture;
+        this.backlogAbr = new BacklogAbr(videoBitRate, maxFps, abrLockBitrate, abrLockFps || !dynamicFpsAvailable);
+        this.effectiveMaxFpsForLog = maxFps > 0 ? maxFps : 120;
+        Ln.i("Video ABR strategy: " + (abrLegacy ? "legacy comparison" : "confirmed backlog"));
         if (this.abrLockFps) {
             this.fpsLevels = new int[] { lockFpsValue, lockFpsValue, lockFpsValue, lockFpsValue };
         } else {
@@ -319,6 +334,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         // first session too (idempotent).
         this.abrFps = fpsRestoreCeiling();
         this.codecOptions = options.getVideoCodecOptions();
+        this.encoderFrameRate = new EncoderFrameRate(maxFps, codecOptions);
         this.encoderName = options.getVideoEncoder();
         this.downsizeOnError = options.getDownsizeOnError();
         this.minSizeAlignment = options.getMinSizeAlignment();
@@ -392,22 +408,28 @@ public class SurfaceEncoder implements AsyncProcessor {
 
                 // Rebuild the format per session so a changed ABR fps level
                 // (KEY_MAX_FPS_TO_ENCODER) is picked up by configure().
-                format = createFormat(codec.getMimeType(), videoBitRate, effectiveMaxFps(), codecOptions);
+                // Keep enough encoder working capacity for later ABR recovery;
+                // temporary input thinning must not lower this throughput hint.
+                format = createFormat(codec.getMimeType(), videoBitRate, abrLegacy ? effectiveMaxFps() : maxFps, encoderFrameRate.get(), codecOptions);
                 format.setInteger(MediaFormat.KEY_WIDTH, size.getWidth());
                 format.setInteger(MediaFormat.KEY_HEIGHT, size.getHeight());
 
                 Surface surface = null;
                 boolean mediaCodecStarted = false;
                 boolean captureStarted = false;
+                boolean initializingEncoder = true;
                 try {
                     mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
                     surface = mediaCodec.createInputSurface();
 
+                    initializingEncoder = false;
                     capture.start(surface);
                     captureStarted = true;
 
+                    initializingEncoder = true;
                     mediaCodec.start();
                     mediaCodecStarted = true;
+                    initializingEncoder = false;
 
                     // Set the MediaCodec instance to "interrupt" (by signaling an EOS) on reset
                     captureControl.setRunningMediaCodec(mediaCodec);
@@ -434,7 +456,10 @@ public class SurfaceEncoder implements AsyncProcessor {
                         throw e;
                     }
                     Ln.e("Capture/encoding error: " + e.getClass().getName() + ": " + e.getMessage());
-                    if (!prepareRetry(caps, size)) {
+                    boolean retryHint = initializingEncoder && !(e instanceof IOException) && encoderFrameRate.retryWithLegacyRate();
+                    if (retryHint) {
+                        Ln.w("Encoder rejected automatic frame-rate hint; retrying with 60 at the same size and input limit");
+                    } else if (!prepareRetry(caps, size)) {
                         throw e;
                     }
                     // Keep the current resetReasons flags for the retry
@@ -541,7 +566,9 @@ public class SurfaceEncoder implements AsyncProcessor {
             Bundle p = new Bundle();
             p.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, currentBitRate);
             codec.setParameters(p);
-            if (abrFps < fpsRestoreCeiling()) {
+            if (!abrLegacy) {
+                capture.setTargetFps(backlogAbr.fps() >= (maxFps > 0 ? maxFps : 120) ? 0 : Math.round(backlogAbr.fps()));
+            } else if (abrFps < fpsRestoreCeiling()) {
                 // Re-apply the kept fps level to the rebuilt encoder format
                 // as a backstop; the primary limiter is the GL layer drop
                 // (capture.setTargetFps), which survives encoder rebuilds.
@@ -551,6 +578,8 @@ public class SurfaceEncoder implements AsyncProcessor {
             Ln.i("ABR: encoder rebuilt, keeping bitrate=" + currentBitRate
                     + " ceiling=" + abrCeiling + " fps=" + abrFps);
         }
+        backlogAbr.resetSource();
+        encodedRate.reset();
         // Window/calibration state always resets for the new session.
         abrCeilingStableSinceNs = 0;
         abrWindowStartNs = 0;
@@ -599,14 +628,14 @@ public class SurfaceEncoder implements AsyncProcessor {
                         long ptsUs = bufferInfo.presentationTimeUs;
                         long nowNs = SystemClock.elapsedRealtimeNanos();
                         boolean isKeyFrame = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
-                        maybeAdaptBitrate(codec, ptsUs, nowNs, isKeyFrame);
+                        maybeAdaptBitrate(codec, ptsUs, nowNs, isKeyFrame, bufferInfo.size);
                         // Frame-complexity lookahead: complex frame (bigger
                         // than the per-frame bitrate budget x1.5) -> degrade
                         // immediately, before the backlog-based detection ever
                         // fires. Budget uses the current frame rate estimated
                         // from the frame gap (normal 8-17ms; a gap >500ms is a
                         // dropped frame, not a normal frame interval).
-                        if (!legacyDevice && !abrDisabled) {
+                        if (abrLegacy && !legacyDevice && !abrDisabled) {
                             long gapUs = ptsUs - pulseLastPtsUs;
                             if (gapUs > 0 && gapUs < 500_000) {
                                 long fps = 1_000_000 / gapUs;
@@ -679,7 +708,9 @@ public class SurfaceEncoder implements AsyncProcessor {
                     }
 
                     ByteBuffer codecBuffer = codec.getOutputBuffer(outputBufferId);
+                    long writeStartNs = SystemClock.elapsedRealtimeNanos();
                     streamer.writePacket(codecBuffer, bufferInfo);
+                    lastStreamWriteMs = (SystemClock.elapsedRealtimeNanos() - writeStartNs) / 1000000;
                 }
             } finally {
                 if (outputBufferId >= 0) {
@@ -698,10 +729,40 @@ public class SurfaceEncoder implements AsyncProcessor {
      * MediaCodec.setParameters, no resolution change). After a stable period
      * the bitrate is raised back step by step.
      */
-    private void maybeAdaptBitrate(MediaCodec codec, long ptsUs, long nowNs, boolean isKeyFrame) {
+    private void maybeAdaptBitrate(MediaCodec codec, long ptsUs, long nowNs, boolean isKeyFrame, int frameBytes) {
         if (legacyDevice || abrDisabled) {
             // Legacy compatibility / ABR fully locked (fps+bitrate): no dynamic
             // bitrate/fps adjustment.
+            return;
+        }
+        if (!abrLegacy) {
+            long nowMs = nowNs / 1000000;
+            encodedRate.add(ptsUs, frameBytes);
+            BacklogAbr.Decision decision = backlogAbr.observe(nowMs,
+                    (nowNs - ptsUs * 1000) / 1000000, ptsUs, lastStreamWriteMs, encodedRate.get(),
+                    clientBacklog != null ? clientBacklog.get() : null);
+            abrBaselineDelayMs = backlogAbr.baselineMs();
+            if (abrCalibCount == 0) {
+                Ln.i("ABR: clock anchor pts_us=" + ptsUs + " epoch=" + System.currentTimeMillis());
+                abrCalibCount = ABR_CALIB_FRAMES;
+            }
+            if (decision != null) {
+                int oldRate = currentBitRate;
+                float oldFps = effectiveMaxFpsForLog;
+                if (decision.bitrate != currentBitRate && !applyBitrate(codec, decision.bitrate)) {
+                    backlogAbr.rejectBitrate(oldRate, oldFps);
+                    return;
+                }
+                currentBitRate = decision.bitrate;
+                if (decision.fps != effectiveMaxFpsForLog) {
+                    capture.setTargetFps(decision.fps >= (maxFps > 0 ? maxFps : 120) ? 0 : Math.round(decision.fps));
+                }
+                effectiveMaxFpsForLog = decision.fps;
+                abrFps = Math.round(decision.fps);
+                Ln.i("ABR2: reason=" + decision.reason + " source=" + decision.sourceMs
+                        + "ms delivery=" + decision.deliveryMs + "ms decodeQueue=" + decision.queueMs
+                        + "ms bitrate=" + oldRate + "->" + currentBitRate + " fps=" + oldFps + "->" + decision.fps);
+            }
             return;
         }
         // Delay calibration: the first frames measure the baseline encoder
@@ -1474,6 +1535,9 @@ public class SurfaceEncoder implements AsyncProcessor {
      * at configure() time) is refreshed on the next encoder rebuild.
      */
     private float effectiveMaxFps() {
+        if (!abrLegacy && !legacyDevice && !abrDisabled) {
+            return backlogAbr.fps() >= (maxFps > 0 ? maxFps : 120) ? maxFps : backlogAbr.fps();
+        }
         // At the ABR ceiling (healthy state) the client's exact max-fps
         // must govern. The previous Math.min(maxFps, abrFps) snapped
         // non-standard caps down to the highest standard level below
@@ -1599,13 +1663,15 @@ public class SurfaceEncoder implements AsyncProcessor {
         // restore; the next 120->90 drop completes the cycle count.
     }
 
-    private void applyBitrate(MediaCodec codec, int bitrate) {
+    private boolean applyBitrate(MediaCodec codec, int bitrate) {
         try {
             Bundle params = new Bundle();
             params.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrate);
             codec.setParameters(params);
+            return true;
         } catch (Exception e) {
             Ln.w("ABR: setParameters failed: " + e.getMessage());
+            return false;
         }
     }
 
@@ -1639,12 +1705,14 @@ public class SurfaceEncoder implements AsyncProcessor {
         }
     }
 
-    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps, List<CodecOption> codecOptions) {
+    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps, int frameRate, List<CodecOption> codecOptions) {
         MediaFormat format = new MediaFormat();
         format.setString(MediaFormat.KEY_MIME, videoMimeType);
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
-        // must be present to configure the encoder, but does not impact the actual frame rate, which is variable
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 60);
+        // With real-time priority this may also determine encoder working
+        // capacity. Actual output remains variable and bounded separately.
+        format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate);
+        Ln.d("Encoder working frame-rate hint: " + frameRate + ", input max-fps: " + maxFps);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         if (Build.VERSION.SDK_INT >= AndroidVersions.API_24_ANDROID_7_0) {
             format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED);

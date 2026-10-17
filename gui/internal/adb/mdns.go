@@ -3,6 +3,8 @@ package adb
 import (
 	"regexp"
 	"strings"
+
+	"scrcpy-ez/gui/internal/adbparse"
 )
 
 // mDNS 服务形态（与档案 wireless/mode 字段同一语义）：
@@ -28,10 +30,10 @@ type MdnsService struct {
 }
 
 var (
-	reHeader    = regexp.MustCompile(`(?i)list of`)
-	reIPPort    = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}:\d+$`)
-	reAdbType   = regexp.MustCompile(`_adb`)
-	rePairCount = regexp.MustCompile(`^\(\d+\)$`) // adb 37+ 输出实例名后的服务计数 "(n)"
+	reHeader             = regexp.MustCompile(`(?i)^list of`)
+	reIPPort             = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}:\d+$`)
+	reMdnsTypeColumn     = regexp.MustCompile(`(?i)(?:^|[ \t]+)(_adb[-_a-z0-9]*\._tcp(?:\.local)?\.?)(?:[ \t]+|$)`)
+	reMdnsCollisionLabel = regexp.MustCompile(`^\([1-9][0-9]*\)$`)
 )
 
 // MdnsModeOf 按服务类型判定形态：tls 连接/配对服务归 tls/pairing，其余 _adb 服务归 tcpip。
@@ -47,7 +49,8 @@ func MdnsModeOf(svcType string) string {
 }
 
 // ParseMdnsServices 解析 `adb mdns services` 输出。
-// 跳过表头/空行；行内按空白（tab/空格）切列；只收 _adb 相关服务类型。
+// Prefer tab-delimited columns, then locate the service-type boundary in older
+// space-aligned output. Preserve instance names including spaces and DNS escapes.
 // 地址列仅接受 IP:port（"local"/主机名等未解析值忽略）。
 func ParseMdnsServices(output string) []MdnsService {
 	var out []MdnsService
@@ -57,43 +60,57 @@ func ParseMdnsServices(output string) []MdnsService {
 		if line == "" || reHeader.MatchString(line) {
 			continue
 		}
-		fields := strings.Fields(line)
-		// adb 37+ 的 mdns services 输出实例名后带服务计数 "(n)"
-		// （如 "adb-TEST0001-KWqpio (2)"）——计数字段不参与列序判定，
-		// 先剥离；旧 adb 输出无计数，剥离后原样。
-		stripped := fields[:0]
-		for _, f := range fields {
-			if rePairCount.MatchString(f) {
-				continue
-			}
-			stripped = append(stripped, f)
-		}
-		fields = stripped
-		if len(fields) < 2 {
-			continue
-		}
-		// 列序判定（两代 adb 输出格式不兼容，按第一列内容区分）：
-		// 老 adb：<type> <name> <addr>——第一列以 _adb 开头（服务类型）。
-		// adb 37.0.0：<name> <type> <addr>——第一列是实例名。
-		var svcType, name string
-		if strings.HasPrefix(fields[0], "_adb") {
-			svcType, name = fields[0], strings.TrimSuffix(fields[1], ".")
-		} else {
-			svcType, name = strings.TrimSuffix(fields[1], "."), fields[0]
-		}
-		if !reAdbType.MatchString(svcType) {
+		svcType, name, addr, ok := mdnsColumns(line)
+		if !ok {
 			continue
 		}
 		s := MdnsService{Type: svcType, Name: name, Mode: MdnsModeOf(svcType)}
-		if len(fields) >= 3 {
-			addr := strings.TrimSuffix(fields[2], ".")
-			if reIPPort.MatchString(addr) {
-				s.Addr = addr
-			}
+		addr = strings.TrimSuffix(addr, ".")
+		if reIPPort.MatchString(addr) && adbparse.IsIPEndpoint(addr) {
+			s.Addr = addr
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+func mdnsColumns(line string) (svcType, name, addr string, ok bool) {
+	columns := strings.Split(line, "\t")
+	if len(columns) >= 2 {
+		for i := 0; i < 2; i++ {
+			if st, valid := mdnsTypeColumn(columns[i]); valid {
+				name = strings.TrimSpace(columns[1-i])
+				if len(columns) >= 3 {
+					addr = strings.TrimSpace(columns[2])
+				}
+				return st, strings.TrimSuffix(name, "."), addr, name != ""
+			}
+		}
+	}
+	match := reMdnsTypeColumn.FindStringSubmatchIndex(line)
+	if match == nil {
+		return "", "", "", false
+	}
+	svcType, _ = mdnsTypeColumn(line[match[2]:match[3]])
+	if match[2] != 0 {
+		name = strings.TrimSpace(line[:match[2]])
+		addr = strings.TrimSpace(line[match[3]:])
+	} else {
+		name = strings.TrimSpace(line[match[3]:])
+		if last := strings.LastIndexAny(name, " \t"); last >= 0 {
+			tail := strings.TrimSpace(name[last+1:])
+			if !reMdnsCollisionLabel.MatchString(adbparse.ServiceInstance(tail)) {
+				addr, name = tail, strings.TrimSpace(name[:last])
+			}
+		}
+	}
+	return svcType, strings.TrimSuffix(name, "."), addr, name != ""
+}
+
+func mdnsTypeColumn(column string) (string, bool) {
+	s := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(column), "."))
+	s = strings.TrimSuffix(s, ".local")
+	return s, strings.HasPrefix(s, "_adb") && strings.HasSuffix(s, "._tcp") && !strings.ContainsAny(s, " \t")
 }
 
 // MdnsTrackEvents 是一份 mdns 全量快照（First=true 仅首个快照一次）。

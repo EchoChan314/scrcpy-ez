@@ -14,6 +14,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 public class ControlMessageReaderTest {
+    @Test
+    public void testBacklogFeedbackAndFollowingHeartbeat() throws IOException {
+        byte[] wire = {28,0,0,0,1,0,0,0,2,0,0,0,100,0,0,0,(byte)200,0,0,0,3,0,0,0,7,0,0,0x61,(byte)0xa8,0,7,(byte)0xa1,0x20,27};
+        ControlMessageReader reader = new ControlMessageReader(new ByteArrayInputStream(wire));
+        ControlMessage msg = reader.read();
+        Assert.assertEquals(ControlMessage.TYPE_ABR_FEEDBACK, msg.getType());
+        Assert.assertArrayEquals(new int[] {1,2,100,200,3,7,25000,500000}, msg.getAbrFeedback());
+        Assert.assertEquals(27, reader.read().getType());
+    }
+
+    @Test(expected = EOFException.class)
+    public void testTruncatedBacklogFeedbackFailsClosed() throws IOException {
+        new ControlMessageReader(new ByteArrayInputStream(new byte[] {28,0,0,0,1})).read();
+    }
 
     @Test
     public void testParseKeycodeEvent() throws IOException {
@@ -511,6 +525,16 @@ public class ControlMessageReaderTest {
         Assert.assertEquals("/sdcard/Download", event.getText());
 
         Assert.assertEquals(-1, bis.read()); // EOS
+    }
+
+    @Test
+    public void heartbeatDoesNotConsumeTheFollowingMessage() throws IOException {
+        byte[] packet = {(byte) ControlMessage.TYPE_KEEP_AWAKE_HEARTBEAT, (byte) ControlMessage.TYPE_RESET_VIDEO};
+        ByteArrayInputStream input = new ByteArrayInputStream(packet);
+        ControlMessageReader reader = new ControlMessageReader(input);
+        Assert.assertEquals(ControlMessage.TYPE_KEEP_AWAKE_HEARTBEAT, reader.read().getType());
+        Assert.assertEquals(ControlMessage.TYPE_RESET_VIDEO, reader.read().getType());
+        Assert.assertEquals(-1, input.read());
     }
 
     @Test

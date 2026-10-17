@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"scrcpy-ez/gui/internal/adbparse"
 	"scrcpy-ez/gui/internal/deviceevents"
 )
 
@@ -642,7 +643,6 @@ func ScaleForWireless(res string) string {
 // --- 纯解析函数（单测覆盖） ---
 
 var (
-	reDevLine  = regexp.MustCompile(`^(\S+)\s+(\S+)\s*$`)
 	reBattery  = regexp.MustCompile(`(?m)^\s*level:\s*(\d+)`)
 	rePhysSize = regexp.MustCompile(`(?m)(?:Physical|Override) size:\s*(\d+)x(\d+)`)
 	reIPSerial = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}:\d+$`)
@@ -656,37 +656,18 @@ type RawDevice struct {
 }
 
 // connTypeOf 判定 serial 的 transport 类型。
-// USB = serial 无冒号且不含 _adb-tls（与 bat 的判定规则一致）；
-// 无线 = IP:port 条目；mDNS/emulator 归 other。
+// Service tokens stay other here for the existing ghost-folding path; the raw
+// event stream distinguishes their network transport without emitting USB.
 func connTypeOf(serial string) string {
-	switch {
-	case reIPSerial.MatchString(serial):
-		return "wifi"
-	case strings.HasPrefix(serial, "emulator") || strings.Contains(serial, "_adb-tls"):
-		return "other"
-	case !strings.Contains(serial, ":"):
-		return "usb"
-	default:
+	if adbparse.IsServiceTransport(serial) || strings.Contains(serial, ":") && !reIPSerial.MatchString(serial) {
 		return "other"
 	}
+	return adbparse.TransportKind(serial, nil)
 }
 
 // ParseDevices 解析 `adb devices` 输出（无 -l 字段的旧格式）。
 func ParseDevices(output string) []RawDevice {
-	var out []RawDevice
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.HasPrefix(line, "List of devices") || line == "" {
-			continue
-		}
-		m := reDevLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		serial, state := m[1], m[2]
-		out = append(out, RawDevice{Serial: serial, State: state, ConnType: connTypeOf(serial)})
-	}
-	return out
+	return ParseDevicesL(output)
 }
 
 // ParseDevicesL 解析 `adb devices -l` 输出。
@@ -694,19 +675,22 @@ func ParseDevices(output string) []RawDevice {
 func ParseDevicesL(output string) []RawDevice {
 	var out []RawDevice
 	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimRight(line, "\r")
-		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] == "List" {
+		parsed, ok := adbparse.ParseDeviceLine(line)
+		if !ok {
 			continue
 		}
-		serial, state := fields[0], fields[1]
+		serial, state := parsed.Serial, parsed.State
 		model := ""
-		for _, f := range fields[2:] {
+		connType := connTypeOf(serial)
+		for _, f := range parsed.Attributes {
 			if v, ok := strings.CutPrefix(f, "model:"); ok {
 				model = v
 			}
+			if strings.HasPrefix(f, "usb:") {
+				connType = "usb"
+			}
 		}
-		out = append(out, RawDevice{Serial: serial, State: state, ConnType: connTypeOf(serial), Model: model})
+		out = append(out, RawDevice{Serial: serial, State: state, ConnType: connType, Model: model})
 	}
 	return out
 }

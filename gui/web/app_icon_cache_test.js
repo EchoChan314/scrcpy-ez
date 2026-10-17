@@ -63,6 +63,15 @@ async function main() {
   const transient=Cache.create(null,async()=>{ if(++bridgeTries===1) throw Error('bridge temporarily busy');return {pkg:'recovered'}; });
   const recovered=node();await transient.request('device:A','A','pkg',recovered);
   assert.equal(bridgeTries,2);assert.equal(recovered.style.backgroundImage,'url("recovered")');
+  let boundedCalls=0;
+  const bounded=Cache.create(async()=>{boundedCalls++;return '12345678';},null,{maxEntries:2,maxBytes:32});
+  for(const pkg of ['a','b','a','c','a']) await bounded.request('A','A',pkg,node());
+  assert.equal(boundedCalls,3,'recent entries should be reused');
+  await bounded.request('A','A','b',node());assert.equal(boundedCalls,4,'least recent entry must be evicted');
+  const disconnected=node();disconnected.isConnected=false;let detachedCalls=0;
+  const detached=Cache.create(null,async()=>{detachedCalls++;return {};});
+  await detached.request('A','A','pkg',disconnected);assert.equal(detachedCalls,0,'discard detached queued requests');
+  detached.prune();
   console.log('app_icon_cache: device isolation, transport reuse, invalidation, stale responses, retries passed');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -2,6 +2,7 @@
 #define SC_DECODER_H
 
 #include "common.h"
+#include "abr_monitor.h"
 
 #include <libavcodec/avcodec.h>
 
@@ -19,6 +20,8 @@ enum sc_decoder_packet_type {
 
 struct sc_decoder_packet {
     enum sc_decoder_packet_type type;
+    sc_tick queued_at;
+    uint32_t epoch;
     union {
         struct sc_stream_session session;
         AVPacket *packet;
@@ -28,6 +31,7 @@ struct sc_decoder_packet {
 struct sc_decoder_queue SC_VECDEQUE(struct sc_decoder_packet);
 
 struct sc_decoder {
+    struct sc_abr_monitor *abr_monitor; // owned by the connection; outlives threads
     struct sc_packet_sink packet_sink; // packet sink trait
     struct sc_frame_source frame_source; // frame source trait
 

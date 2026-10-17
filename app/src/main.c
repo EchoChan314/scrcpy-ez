@@ -34,7 +34,7 @@ main_scrcpy(int argc, char *argv[]) {
 #endif
 
     printf("scrcpy " SCRCPY_VERSION
-           " <https://github.com/Genymobile/scrcpy> | launcher v2.4.0\n");
+           " <https://github.com/Genymobile/scrcpy> | launcher v2.4.1\n");
 
     struct scrcpy_cli_args args = {
         .opts = scrcpy_options_default,

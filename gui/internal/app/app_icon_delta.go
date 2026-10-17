@@ -21,6 +21,7 @@ import (
 )
 
 const catalogMarker = "SCEZ_APP_CATALOG:"
+const appHelperMissingMarker = "SCEZ_APP_HELPER_MISSING"
 const maxIconBytes = 512 << 10
 const maxIconBatchBytes = 1 << 20
 const iconBatchSize = 24
@@ -37,23 +38,32 @@ type appCatalog struct {
 		Updated int64  `json:"updated"`
 		Icon    int    `json:"icon"`
 	} `json:"items"`
+	Failed []string `json:"failed"`
 }
 
 func parseAppCatalog(out string) (string, []AppListItem, error) {
+	serial, items, _, err := parseAppCatalogDetails(out)
+	return serial, items, err
+}
+
+func parseAppCatalogDetails(out string) (string, []AppListItem, []string, error) {
 	start := strings.Index(out, catalogMarker)
 	if start < 0 {
-		return "", nil, errors.New("app catalog missing")
+		return "", nil, nil, errors.New("app catalog missing")
 	}
 	var catalog appCatalog
 	line := strings.SplitN(out[start+len(catalogMarker):], "\n", 2)[0]
-	if len(line) > 2<<20 {
-		return "", nil, errors.New("app catalog too large")
+	if len(line) > appCatalogBytesLimit {
+		return "", nil, nil, errors.New("app catalog too large")
 	}
 	if err := json.Unmarshal([]byte(line), &catalog); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	if catalog.Config == "" || catalog.Items == nil || len(catalog.Items) > appListMaxApps {
-		return "", nil, errors.New("incomplete app catalog")
+	if len(catalog.Items) > appListMaxApps {
+		return "", nil, nil, errors.New("too many apps")
+	}
+	if catalog.Config == "" || catalog.Items == nil {
+		return "", nil, nil, errors.New("incomplete app catalog")
 	}
 	resources := make([]string, 0, len(catalog.Resources))
 	for _, resource := range catalog.Resources {
@@ -64,8 +74,8 @@ func parseAppCatalog(out string) (string, []AppListItem, error) {
 	items := make([]AppListItem, 0, len(catalog.Items))
 	seen := map[string]bool{}
 	for _, item := range catalog.Items {
-		if !rePkgName.MatchString(item.Pkg) || seen[item.Pkg] || len(item.Name) > 4096 || item.Version < 0 || item.Updated < 0 {
-			return "", nil, errors.New("invalid app catalog item")
+		if len(item.Pkg) > 255 || !rePkgName.MatchString(item.Pkg) || seen[item.Pkg] || len(item.Name) > 4096 || item.Version < 0 || item.Updated < 0 {
+			return "", nil, nil, errors.New("invalid app catalog item")
 		}
 		seen[item.Pkg] = true
 		// Include label: some launchable names/icons depend on configuration or package data.
@@ -81,7 +91,15 @@ func parseAppCatalog(out string) (string, []AppListItem, error) {
 		}
 		return items[i].Pkg < items[j].Pkg
 	})
-	return adb.StableSerial(catalog.Serial), items, nil
+	if len(catalog.Failed) > appListMaxApps {
+		return "", nil, nil, errors.New("too many apps")
+	}
+	for _, pkg := range catalog.Failed {
+		if len(pkg) > 255 || !rePkgName.MatchString(pkg) {
+			return "", nil, nil, errors.New("invalid app catalog item")
+		}
+	}
+	return adb.StableSerial(catalog.Serial), items, catalog.Failed, nil
 }
 
 type appServerHelper struct {
@@ -115,7 +133,11 @@ func probeAppServerVersion(client string) (string, error) {
 }
 
 func (h appServerHelper) command(options string) string {
-	return "CLASSPATH=" + h.remote + " app_process / com.genymobile.scrcpy.Server " + h.version + " cleanup=false " + options
+	// Android may abort app_process before printing a Java exception when the
+	// classpath is absent. Check the content-addressed file in the shell, so
+	// first use after an update never depends on vendor-specific error text.
+	return "if [ ! -s " + h.remote + " ]; then echo " + appHelperMissingMarker + "; exit 66; fi; " +
+		"CLASSPATH=" + h.remote + " app_process / com.genymobile.scrcpy.Server " + h.version + " cleanup=false " + options
 }
 
 // Resolve the protocol from the adjacent client once per background catalog job.
@@ -136,38 +158,107 @@ func (a *App) appCatalogServer() (appServerHelper, error) {
 }
 
 func (a *App) listAppCatalogOnce(identity, serial string) ([]AppListItem, appServerHelper, error) {
-	helper, err := a.appCatalogServer()
+	job := a.startAppReadJob(identity, serial)
+	if job == nil {
+		return nil, appServerHelper{}, errors.New("app read already running")
+	}
+	items, helper, err := a.listAppCatalogForJob(identity, serial, job)
+	a.finishAppReadJob(identity, job, err)
+	return items, helper, err
+}
+
+func (a *App) listAppCatalogForJob(identity, serial string, job *appReadJob) ([]AppListItem, appServerHelper, error) {
+	getHelper := a.appCatalogServer
+	if a.appReadOps.helper != nil {
+		getHelper = a.appReadOps.helper
+	}
+	helper, err := getHelper()
 	if err != nil {
 		return nil, appServerHelper{}, err
 	}
-	query := func() (string, []AppListItem, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), appListTimeout)
-		defer cancel()
-		out, err := a.adb.ShellOut(ctx, serial, helper.command("app_catalog=true"))
-		if err != nil {
-			return "", nil, err
-		}
-		return parseAppCatalog(out)
+	known := 0
+	var prior []AppListItem
+	if entry, ok := a.profiles.Entry(identity); ok {
+		known = len(entry.Apps)
+		prior = entry.Apps
 	}
-	physical, items, err := query()
-	if err != nil && a.appListKeyFor(serial) == identity {
-		ctx, cancel := context.WithTimeout(context.Background(), iconPushTimeout)
-		err = a.adb.PushFile(ctx, serial, helper.local, helper.remote)
+	if known > 0 {
+		a.updateAppReadState(identity, job, func(s *appReadState) { s.HasCatalog = true; s.AppCount = known })
+	}
+	var failed []string
+	wireless := appReadWireless(serial)
+	query := func() (string, []AppListItem, string, error) {
+		release, slotErr := takeAppReadSlot(job.ctx)
+		if slotErr != nil {
+			return "", nil, "", slotErr
+		}
+		defer release()
+		d := newAppReadDeadline(job.ctx, appCatalogBudget(known, wireless, job.performance.CatalogPerApp), 5*time.Minute, wireless, job.performance.CatalogPerApp)
+		defer d.close()
+		start := time.Now()
+		out, err := a.appReadShell(d.ctx, serial, helper.command("app_catalog=true"), func(line string) {
+			if p, ok := parseAppReadProgress(line); ok && p.Phase == "catalog" {
+				d.progress(p)
+				a.updateAppReadState(identity, job, func(s *appReadState) { s.Phase = "catalog"; s.Current = p.Current; s.Total = p.Total })
+			}
+		})
+		if d.ctx.Err() != nil {
+			return "", nil, out, d.ctx.Err()
+		}
+		if err != nil {
+			return "", nil, out, err
+		}
+		physical, items, failedItems, err := parseAppCatalogDetails(out)
+		failed = failedItems
+		if err == nil && len(items) > 0 {
+			job.performance.CatalogPerApp = observeAppReadDuration(job.performance.CatalogPerApp, time.Since(start)/time.Duration(len(items)))
+		}
+		return physical, items, out, err
+	}
+	physical, items, output, err := query()
+	missing := strings.Contains(output, appHelperMissingMarker) || strings.Contains(output, "ClassNotFoundException") || strings.Contains(output, "Could not find") || strings.Contains(output, "No such file") || strings.Contains(output, "Unable to open")
+	if err != nil && missing && a.appReadValid(identity, serial, job) {
+		size := int64(512 << 10)
+		if info, e := os.Stat(helper.local); e == nil {
+			size = info.Size()
+		}
+		ctx, cancel := context.WithTimeout(job.ctx, appTransferBudget(size, wireless, job.performance.PullBytesPerSecond))
+		err = a.appReadPush(ctx, serial, helper.local, helper.remote)
 		cancel()
 		if err == nil {
-			physical, items, err = query()
+			physical, items, _, err = query()
 		}
 	}
 	if err != nil {
 		return nil, appServerHelper{}, err
 	}
-	if a.appListKeyFor(serial) != identity {
+	if !a.appReadValid(identity, serial, job) {
 		return nil, appServerHelper{}, errors.New("device owner changed")
 	}
 	if physical != "" {
 		if entry, ok := a.profiles.Entry(identity); !ok || !contains(entry.Serials, physical) {
 			return nil, appServerHelper{}, errors.New("app catalog physical identity mismatch")
 		}
+	}
+	if len(failed) > 0 {
+		failedSet := map[string]bool{}
+		for _, pkg := range failed {
+			failedSet[pkg] = true
+		}
+		current := map[string]bool{}
+		for _, item := range items {
+			current[item.Pkg] = true
+		}
+		for _, item := range prior {
+			if failedSet[item.Pkg] && !current[item.Pkg] {
+				items = append(items, item)
+				current[item.Pkg] = true
+			}
+		}
+		a.updateAppReadState(identity, job, func(s *appReadState) {
+			s.Partial = true
+			s.Error = fmt.Sprintf("%d 个应用读取异常，已保留已有记录", len(failed))
+		})
 	}
 	return items, helper, nil
 }
@@ -181,7 +272,7 @@ type iconIndex map[string]iconRecord
 func readIconIndex(dir string) iconIndex {
 	index := iconIndex{}
 	b, err := os.ReadFile(filepath.Join(dir, "index.json"))
-	if err == nil && len(b) <= 1<<20 {
+	if err == nil && len(b) <= 8<<20 {
 		if json.Unmarshal(b, &index) != nil {
 			index = iconIndex{}
 		}
@@ -386,7 +477,7 @@ func iconExportChunks(pkgs []string) [][]string {
 	var chunk []string
 	size := 0
 	for _, pkg := range pkgs {
-		if len(chunk) > 0 && size+len(pkg)+1 > 12000 {
+		if len(chunk) > 0 && (size+len(pkg)+1 > 12000 || len(chunk) >= 64) {
 			chunks = append(chunks, chunk)
 			chunk = nil
 			size = 0
@@ -407,5 +498,5 @@ func (a *App) cleanRemoteIconStage(serial, remote string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, _ = a.adb.ShellOut(ctx, serial, "rm -rf "+remote)
+	_, _ = a.appReadShell(ctx, serial, "rm -rf "+remote, nil)
 }

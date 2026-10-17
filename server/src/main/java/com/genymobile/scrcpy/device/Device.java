@@ -96,11 +96,6 @@ public final class Device {
         return ServiceManager.getPowerManager().isScreenOn(displayId);
     }
 
-    public static void keepActive(int displayId) {
-        assert displayId != DISPLAY_ID_NONE;
-        ServiceManager.getPowerManager().userActivity(displayId);
-    }
-
     public static void expandNotificationPanel() {
         ServiceManager.getStatusBarManager().expandNotificationsPanel();
     }
@@ -316,7 +311,10 @@ public final class Device {
             return 0;
         }
         int ok = 0;
-        for (String raw : onlyPkgs.split(",")) {
+        String[] requested = onlyPkgs.split(",");
+        AppCatalog.progress("icons", 0, requested.length);
+        int attempted = 0;
+        for (String raw : requested) {
             String pkg = raw.trim();
             if (!pkg.matches("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*")) {
                 continue;
@@ -325,6 +323,8 @@ public final class Device {
             if (saveAppIconPng(pkg, out)) {
                 ok++;
             }
+            attempted++;
+            AppCatalog.progress("icons", attempted, requested.length);
         }
         logIconTiming(ok);
         return ok;
@@ -343,7 +343,7 @@ public final class Device {
     private static Drawable getAppIcon(String packageName) {
         PackageManager pm = FakeContext.get().getPackageManager();
         try {
-            ApplicationInfo appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
+            ApplicationInfo appInfo = pm.getApplicationInfo(packageName, 0);
             return pm.getApplicationIcon(appInfo);
         } catch (PackageManager.NameNotFoundException e) {
             Ln.e("Package not found: " + packageName);
@@ -353,19 +353,18 @@ public final class Device {
 
     private static boolean saveAppIconPng(String packageName, File outFile) {
         long t0 = System.nanoTime();
-        Drawable icon = getAppIcon(packageName);
-        long tGet = System.nanoTime();
-        if (icon == null) {
-            return false;
-        }
+        List<Bitmap> owned = new ArrayList<>();
         try {
+            Drawable icon = getAppIcon(packageName);
+            long tGet = System.nanoTime();
+            if (icon == null) { return false; }
             Bitmap bitmap;
             if (icon instanceof BitmapDrawable) {
                 bitmap = ((BitmapDrawable) icon).getBitmap();
             } else {
-                int width = Math.max(1, icon.getIntrinsicWidth());
-                int height = Math.max(1, icon.getIntrinsicHeight());
-                bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                int[] target = IconDimensions.fit(icon.getIntrinsicWidth(), icon.getIntrinsicHeight(), ICON_MAX_SIZE);
+                bitmap = Bitmap.createBitmap(target[0], target[1], Bitmap.Config.ARGB_8888);
+                owned.add(bitmap);
                 Canvas canvas = new Canvas(bitmap);
                 icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
                 icon.draw(canvas);
@@ -380,12 +379,14 @@ public final class Device {
                 Bitmap scaled = Bitmap.createScaledBitmap(bitmap, nw, nh, true);
                 if (scaled != bitmap) {
                     bitmap = scaled;
+                    owned.add(bitmap);
                 }
             }
             // v2.1.17：裁掉最外 2px——去掉系统渲染的灰色描边（1px 灰 + 抗锯齿余量），
             // 显示端回到 100%（内容等效放大 ~3%，换边缘干净、接近原始观感）。
             if (bitmap.getWidth() > 8 && bitmap.getHeight() > 8) {
                 bitmap = Bitmap.createBitmap(bitmap, 2, 2, bitmap.getWidth() - 4, bitmap.getHeight() - 4);
+                owned.add(bitmap);
             }
             long tScale = System.nanoTime();
             FileOutputStream fos = null;
@@ -410,9 +411,14 @@ public final class Device {
             tmEncodeNs += tEnd - tScale;
             tmTotalNs += tEnd - t0;
             return ok;
-        } catch (Exception e) {
+        } catch (Exception | OutOfMemoryError e) {
             Ln.e("Error saving icon for " + packageName + ": " + e.getMessage());
             return false;
+        } finally {
+            // Framework-owned BitmapDrawable data is never recycled here.
+            for (Bitmap bitmap : owned) {
+                if (!bitmap.isRecycled()) { bitmap.recycle(); }
+            }
         }
     }
 

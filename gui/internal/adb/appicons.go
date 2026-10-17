@@ -6,9 +6,68 @@
 package adb
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os/exec"
+	"sync"
 )
+
+// ShellOutStream reports complete lines while collecting a bounded response.
+// It is intentionally separate from ShellOut: ordinary ADB operations keep
+// their existing behavior. The callback must be fast and must not do I/O.
+func (m *Manager) ShellOutStream(ctx context.Context, serial, command string, maxBytes int, onLine func(string)) (string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	w := &appOutputWriter{limit: maxBytes, onLine: onLine, cancel: cancel}
+	c := exec.CommandContext(ctx, m.adbPath, "-s", serial, "shell", command)
+	HideConsole(c)
+	c.Stdout, c.Stderr = w, w
+	err := c.Run()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.pending.Len() > 0 && onLine != nil {
+		onLine(w.pending.String())
+	}
+	if w.overflow {
+		return w.all.String(), errors.New("应用读取输出超过资源上限")
+	}
+	return w.all.String(), err
+}
+
+type appOutputWriter struct {
+	mu           sync.Mutex
+	all, pending bytes.Buffer
+	limit        int
+	overflow     bool
+	onLine       func(string)
+	cancel       context.CancelFunc
+}
+
+func (w *appOutputWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.all.Len()+len(p) > w.limit {
+		w.overflow = true
+		w.cancel()
+		return 0, errors.New("app output limit")
+	}
+	w.all.Write(p)
+	w.pending.Write(p)
+	for {
+		data := w.pending.Bytes()
+		end := bytes.IndexByte(data, '\n')
+		if end < 0 {
+			break
+		}
+		line := string(bytes.TrimSuffix(data[:end], []byte{'\r'}))
+		w.pending.Next(end + 1)
+		if w.onLine != nil {
+			w.onLine(line)
+		}
+	}
+	return len(p), nil
+}
 
 // PushFile 执行 `adb -s <serial> push <local> <remote>`。
 func (m *Manager) PushFile(ctx context.Context, serial, local, remote string) error {

@@ -54,6 +54,32 @@ func TestCastEnvKeepDeviceAwake(t *testing.T) {
 	}
 }
 
+func TestCastEnvVideoSmoothing(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		got := envMap(castEnv(CastParams{VideoSmoothingSet: true, VideoSmoothing: enabled}, "smooth"))
+		want := "0"
+		if enabled {
+			want = "auto"
+		}
+		if got["SCEZ_VIDEO_BUFFER"] != want {
+			t.Fatal(got)
+		}
+	}
+	if _, ok := envMap(castEnv(CastParams{}, "old"))["SCEZ_VIDEO_BUFFER"]; ok {
+		t.Fatal("unset legacy caller changed buffering")
+	}
+	for _, frames := range []int{1, 2} {
+		got := envMap(castEnv(CastParams{VideoSmoothingSet: true, VideoSmoothing: true, VideoSmoothingFrames: frames}, "frames"))
+		want := "auto:1"
+		if frames == 2 {
+			want = "auto:2"
+		}
+		if got["SCEZ_VIDEO_BUFFER"] != want {
+			t.Fatal(got)
+		}
+	}
+}
+
 // 设置面板开关 A：参数控件启动可见性注入（SCEZ_PARAM_OVERLAY）。
 // GUI→bat→scrcpy.exe 的注入链在 GUI 侧的最后一环就是这里——客户端侧读取逻辑
 // 由 02_client/tests/overlay_env_test.c 覆盖。
